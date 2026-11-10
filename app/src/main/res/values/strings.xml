@@ -1,3 +1,227 @@
 <resources>
     <string name="app_name">Morning Issue</string>
+
+    <!-- Shared -->
+    <string name="action_back">Back</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_done">Done</string>
+    <string name="action_more">More options</string>
+    <string name="action_remove">Remove</string>
+    <string name="read_tick">Read</string>
+    <string name="edition_number">No. %1$d</string>
+    <string name="minutes_read">%1$d min read</string>
+    <string name="byline_source_minutes">%1$s · %2$d min read</string>
+    <string name="paged_previous">Previous</string>
+    <string name="paged_next">Next</string>
+
+    <!-- Newsstand -->
+    <string name="nav_search">Search</string>
+    <string name="nav_saved">Saved</string>
+    <string name="nav_sources">Sources</string>
+    <string name="nav_settings">Settings</string>
+    <string name="newsstand_today">Today’s edition</string>
+    <string name="newsstand_latest">Latest edition</string>
+    <string name="newsstand_recent">Recent editions</string>
+    <string name="newsstand_older_issues">Older issues</string>
+    <string name="newsstand_refresh">Check for new posts</string>
+    <string name="newsstand_empty_title">No edition yet</string>
+    <string name="newsstand_empty_no_sources">Add some sources and your first edition will be printed here.</string>
+    <string name="newsstand_empty_waiting">Your first edition will be printed once your sources have been fetched.</string>
+    <string name="newsstand_add_sources">Add sources</string>
+    <string name="refresh_no_new">No new posts since the last check</string>
+    <string name="refresh_no_sources">No sources were checked</string>
+    <string name="cover_description">Edition No. %1$d, %2$s</string>
+    <string name="cover_lead">Lead story: %1$s</string>
+    <string name="cover_open">Open edition</string>
+    <string name="fetching_progress">%1$d of %2$d</string>
+    <plurals name="new_posts_saved">
+        <item quantity="one">%d new post saved for tomorrow</item>
+        <item quantity="other">%d new posts saved for tomorrow</item>
+    </plurals>
+    <plurals name="sources_unreachable">
+        <item quantity="one">%d source couldn’t be reached</item>
+        <item quantity="other">%d sources couldn’t be reached</item>
+    </plurals>
+    <plurals name="fetching_feeds">
+        <item quantity="one">Fetching %d feed…</item>
+        <item quantity="other">Fetching %d feeds…</item>
+    </plurals>
+    <plurals name="story_count">
+        <item quantity="one">%d story</item>
+        <item quantity="other">%d stories</item>
+    </plurals>
+
+    <!-- Paper -->
+    <string name="page_front">Front page</string>
+    <string name="page_top_stories">Top stories</string>
+    <string name="page_in_brief">In brief</string>
+    <string name="page_archive">From the archive</string>
+    <string name="page_archive_intro">An unread post from a source you love, held over for you.</string>
+    <string name="page_away">While you were away</string>
+    <string name="page_away_intro">The best of the editions you missed.</string>
+    <string name="page_back">Back page</string>
+    <string name="page_empty">Nothing on this page.</string>
+    <string name="page_x_of_y">Page %1$d of %2$d</string>
+    <string name="paper_contents">Contents</string>
+    <string name="paper_open_contents">Open contents</string>
+    <string name="paper_back_to_stand">Back to the newsstand</string>
+    <string name="paper_missing_title">This edition isn’t on the stand</string>
+    <string name="paper_missing_detail">It may have been trimmed to save space.</string>
+    <string name="archive_first_published">First published %1$s</string>
+    <string name="back_thats_today">That’s today’s edition.</string>
+    <string name="back_thats_edition">That’s the edition of %1$s.</string>
+    <string name="back_next_edition">Next edition at %1$s</string>
+    <string name="back_back_issues">Back issues</string>
+    <string name="back_search">Search</string>
+    <string name="back_also_in_feeds">Also in your feeds</string>
+    <plurals name="back_index_intro">
+        <item quantity="one">%d more headline that didn’t make the paper.</item>
+        <item quantity="other">%d more headlines that didn’t make the paper.</item>
+    </plurals>
+
+    <!-- Reader -->
+    <string name="reader_by">By %1$s</string>
+    <string name="reader_text_size">Text size</string>
+    <string name="reader_text_smaller">Smaller text</string>
+    <string name="reader_text_larger">Larger text</string>
+    <string name="reader_open_browser">Open in browser</string>
+    <string name="reader_progress">Reading progress</string>
+    <string name="reader_like">Like</string>
+    <string name="reader_liked">Liked</string>
+    <string name="reader_save">Save</string>
+    <string name="reader_saved">Saved</string>
+    <string name="reader_fetching">Fetching the full article…</string>
+    <string name="reader_summary_only">This is the feed’s summary. The full article couldn’t be fetched.</string>
+    <string name="reader_no_text">The feed gave no text for this article.</string>
+    <string name="reader_missing_title">This article is gone</string>
+    <string name="reader_missing_detail">Its source may have been removed.</string>
+
+    <!-- Back issues -->
+    <string name="backissues_title">Back issues</string>
+    <string name="backissues_previous_month">Previous month</string>
+    <string name="backissues_next_month">Next month</string>
+    <string name="backissues_this_month">Editions this month</string>
+    <string name="backissues_none">No editions this month.</string>
+    <string name="backissues_no_lead">No lead story</string>
+    <string name="backissues_day_edition">%1$s, edition No. %2$d</string>
+    <string name="backissues_empty_title">No back issues yet</string>
+    <string name="backissues_empty_detail">Every edition is kept here as it was published.</string>
+
+    <!-- Sources -->
+    <string name="sources_title">Sources</string>
+    <string name="sources_add">Add a source</string>
+    <string name="sources_import">Import OPML</string>
+    <string name="sources_export">Export OPML</string>
+    <string name="sources_empty_title">No sources yet</string>
+    <string name="sources_empty_detail">Add a site or feed address, or import a list from another reader.</string>
+    <string name="source_open">Open</string>
+    <string name="source_open_site">Open website</string>
+    <string name="source_options">Options for %1$s</string>
+    <string name="source_empty_title">No posts yet</string>
+    <string name="source_empty_detail">Posts appear here once this source has been fetched.</string>
+    <string name="source_missing_title">This source is gone</string>
+    <string name="source_missing_detail">It has been removed from your sources.</string>
+    <string name="tier_firehose">Firehose</string>
+    <string name="tier_daily">Daily</string>
+    <string name="tier_weekly">Weekly</string>
+    <string name="tier_rare">Rare</string>
+    <string name="rate_rare">Less than monthly</string>
+    <plurals name="rate_per_week">
+        <item quantity="one">%d post a week</item>
+        <item quantity="other">%d posts a week</item>
+    </plurals>
+    <plurals name="rate_per_month">
+        <item quantity="one">%d post a month</item>
+        <item quantity="other">%d posts a month</item>
+    </plurals>
+    <plurals name="sources_count">
+        <item quantity="one">%d source</item>
+        <item quantity="other">%d sources</item>
+    </plurals>
+    <plurals name="source_post_count">
+        <item quantity="one">%d recent post</item>
+        <item quantity="other">%d recent posts</item>
+    </plurals>
+    <string name="add_feed_detail">Enter a site and its feed will be found, or paste a feed address.</string>
+    <string name="add_feed_hint">Site or feed address</string>
+    <string name="add_feed_find">Find feed</string>
+    <string name="add_feed_searching">Looking for a feed…</string>
+    <string name="add_feed_choose">Choose a feed</string>
+    <string name="add_feed_blank">Enter a site or feed address.</string>
+    <string name="add_feed_none">No feed was found at that address.</string>
+    <string name="add_feed_failed">That address couldn’t be read: %1$s</string>
+    <string name="add_feed_already">You already follow %1$s.</string>
+    <string name="add_feed_added">Added %1$s.</string>
+    <string name="remove_feed_title">Remove %1$s?</string>
+    <string name="remove_feed_detail">Its posts will also be removed from your editions, back issues and search.</string>
+    <string name="opml_import_result">Added %1$d, skipped %2$d</string>
+    <string name="opml_import_failed">That file couldn’t be read as OPML.</string>
+    <string name="opml_export_failed">The export couldn’t be written.</string>
+    <string name="opml_no_picker">No file picker is available on this device.</string>
+    <plurals name="opml_exported">
+        <item quantity="one">Exported %d source</item>
+        <item quantity="other">Exported %d sources</item>
+    </plurals>
+    <string name="desk_title">Subscriptions desk</string>
+    <string name="desk_placeholder_title">Not yet open</string>
+    <string name="desk_placeholder_detail">The feed health check, with its flags and one-tap fixes, arrives in a later version.</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_edition">Edition</string>
+    <string name="settings_reset_time">New edition at</string>
+    <string name="settings_reset_detail">Each day’s paper is released at this time. Nothing changes in between.</string>
+    <string name="settings_set_time">Set time</string>
+    <string name="settings_length">Edition length</string>
+    <string name="settings_length_detail">Standard is about 25 stories. Applies from the next edition.</string>
+    <string name="length_short">Short</string>
+    <string name="length_standard">Standard</string>
+    <string name="length_long">Long</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_detail">Paper by day, the Night edition in the dark.</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="settings_display">Display</string>
+    <string name="settings_display_detail">E-ink is black on white with no animation, and moves a page at a time. Auto uses it on known e-ink devices.</string>
+    <string name="display_auto">Auto</string>
+    <string name="display_standard">Standard</string>
+    <string name="display_eink">E-ink</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_tagline">Your feeds, printed once a day.</string>
+    <string name="onboarding_intro">Add the sites you read. Each morning they’re set as one paper with a front page, a few pages of stories and a back page. When you reach it, you’re done.</string>
+    <string name="onboarding_add_title">Add your sources</string>
+    <string name="onboarding_import_detail">Coming from another reader? Bring its subscription list.</string>
+    <string name="onboarding_print">Print my first edition</string>
+    <string name="onboarding_skip">Skip for now</string>
+    <string name="onboarding_setting">Setting the first edition…</string>
+    <string name="onboarding_wait">This is the only time the paper waits on the network.</string>
+    <plurals name="onboarding_sources_added">
+        <item quantity="one">%d source added</item>
+        <item quantity="other">%d sources added</item>
+    </plurals>
+    <plurals name="onboarding_more_sources">
+        <item quantity="one">and %d more</item>
+        <item quantity="other">and %d more</item>
+    </plurals>
+
+    <!-- Search and Saved -->
+    <string name="search_title">Search</string>
+    <string name="search_hint">Search every post</string>
+    <string name="search_prompt_title">Nothing is lost</string>
+    <string name="search_prompt_detail">Every post your sources have published is here, whether or not it made the paper.</string>
+    <string name="search_empty_title">Nothing found</string>
+    <string name="search_empty_detail">Try fewer or different words.</string>
+    <plurals name="search_result_count">
+        <item quantity="one">%d post</item>
+        <item quantity="other">%d posts</item>
+    </plurals>
+    <string name="saved_title">Saved</string>
+    <string name="saved_tab_saved">Saved</string>
+    <string name="saved_tab_liked">Liked</string>
+    <string name="saved_empty_title">Nothing saved yet</string>
+    <string name="liked_empty_title">Nothing liked yet</string>
+    <string name="saved_empty_detail">Like and Save sit at the end of every article.</string>
 </resources>

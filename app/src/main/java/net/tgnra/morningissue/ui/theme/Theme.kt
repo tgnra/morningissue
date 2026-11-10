@@ -66,16 +66,15 @@ fun MorningIssueTheme(
         LocalPaperTypography provides typography,
     ) {
         MaterialTheme(colorScheme = colorScheme, typography = materialTypography) {
-            if (eink) {
-                // Inside MaterialTheme, which would otherwise install its ripple.
-                CompositionLocalProvider(
-                    LocalIndication provides NoIndication,
-                    LocalRippleConfiguration provides null,
-                    content = content,
-                )
-            } else {
-                content()
-            }
+            // Inside MaterialTheme, which would otherwise install its ripple. The provider is
+            // always present (with the inherited values outside E-ink) so that switching display
+            // mode in Settings recomposes the app in place instead of rebuilding it from scratch,
+            // which would throw the reader back to the newsstand.
+            CompositionLocalProvider(
+                LocalIndication provides if (eink) NoIndication else LocalIndication.current,
+                LocalRippleConfiguration provides if (eink) null else LocalRippleConfiguration.current,
+                content = content,
+            )
         }
     }
 }
