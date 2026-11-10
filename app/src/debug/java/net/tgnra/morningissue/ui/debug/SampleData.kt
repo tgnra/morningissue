@@ -24,6 +24,7 @@ import net.tgnra.morningissue.model.InlineSpan
 import net.tgnra.morningissue.model.InlineStyle
 import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.model.RichText
+import net.tgnra.morningissue.model.SliderStep
 
 /**
  * Debug builds only: fills the database with invented feeds, articles and released editions so
@@ -37,6 +38,11 @@ class SampleDataSeeder(
     private val clock: Clock,
     private val resetTime: LocalTime,
     private val zone: ZoneId = ZoneId.systemDefault(),
+    /**
+     * Days by which the newest edition is behind the current one. 0 seeds the current edition;
+     * 1 leaves the stand as it is on a day the feeds had nothing new ("No new edition today").
+     */
+    private val newestDaysBehind: Int = 0,
 ) {
     private class SampleFeed(
         val title: String,
@@ -50,21 +56,28 @@ class SampleDataSeeder(
         val headlines: List<String> = emptyList(),
         /** Posts carry body text. Wire-style feeds give a summary only. */
         val hasBody: Boolean = true,
+        /** The slider; between them the feeds cover every step. */
+        val step: SliderStep = SliderStep.AUTO,
+        /** Learned affinity, as if the reader had a history with the feed. */
+        val affinity: Double = 0.5,
+        /** Days of mute still to run. */
+        val mutedForDays: Int? = null,
     )
 
     private val feeds = listOf(
-        SampleFeed("The Lathe", "the-lathe", CadenceTier.DAILY, 7.0, listOf("Tech"), "Ines Okafor", TECH_HEADLINES.take(8)),
-        SampleFeed("Wirefall", "wirefall", CadenceTier.FIREHOSE, 0.9, listOf("Tech"), null),
-        SampleFeed("Port 8080", "port-8080", CadenceTier.FIREHOSE, 0.4, emptyList(), null, hasBody = false),
-        SampleFeed("Plain Text Weekly", "plain-text-weekly", CadenceTier.WEEKLY, 150.0, listOf("Tech"), "Marek Dvořák", TECH_HEADLINES.drop(8)),
-        SampleFeed("Harbour Lights", "harbour-lights", CadenceTier.RARE, 700.0, listOf("Personal"), "Aoife Brennan", PERSONAL_HEADLINES.take(5)),
-        SampleFeed("Field Notes from the North", "field-notes", CadenceTier.RARE, 520.0, listOf("Personal"), "Sören Lindqvist", PERSONAL_HEADLINES.drop(5)),
-        SampleFeed("The Slow Almanac", "slow-almanac", CadenceTier.RARE, 900.0, listOf("Science"), "Dr. Hana Kimura", SCIENCE_HEADLINES.take(4)),
-        SampleFeed("Tidewater Review", "tidewater", CadenceTier.WEEKLY, 60.0, listOf("Culture"), "Camille Arnaud", CULTURE_HEADLINES.take(5)),
+        SampleFeed("The Lathe", "the-lathe", CadenceTier.DAILY, 7.0, listOf("Tech"), "Ines Okafor", TECH_HEADLINES.take(8), step = SliderStep.MORE, affinity = 0.74),
+        SampleFeed("Wirefall", "wirefall", CadenceTier.FIREHOSE, 0.9, listOf("Tech"), null, step = SliderStep.LESS, affinity = 0.31),
+        SampleFeed("Port 8080", "port-8080", CadenceTier.FIREHOSE, 0.4, emptyList(), null, hasBody = false, step = SliderStep.RARELY, affinity = 0.22),
+        SampleFeed("Plain Text Weekly", "plain-text-weekly", CadenceTier.WEEKLY, 150.0, listOf("Tech", "Writing"), "Marek Dvořák", TECH_HEADLINES.drop(8), affinity = 0.66),
+        SampleFeed("Harbour Lights", "harbour-lights", CadenceTier.RARE, 700.0, listOf("Personal"), "Aoife Brennan", PERSONAL_HEADLINES.take(5), step = SliderStep.FAVOURITE, affinity = 0.9),
+        SampleFeed("Field Notes from the North", "field-notes", CadenceTier.RARE, 520.0, listOf("Personal", "Writing"), "Sören Lindqvist", PERSONAL_HEADLINES.drop(5), affinity = 0.71),
+        SampleFeed("The Slow Almanac", "slow-almanac", CadenceTier.RARE, 900.0, listOf("Science"), "Dr. Hana Kimura", SCIENCE_HEADLINES.take(4), step = SliderStep.FAVOURITE, affinity = 0.83),
+        SampleFeed("Tidewater Review", "tidewater", CadenceTier.WEEKLY, 60.0, listOf("Culture"), "Camille Arnaud", CULTURE_HEADLINES.take(5), step = SliderStep.MORE),
         SampleFeed("Signal & Margin", "signal-margin", CadenceTier.WEEKLY, 34.0, listOf("Science"), "Tobias Reyes", SCIENCE_HEADLINES.drop(4)),
-        SampleFeed("The Daily Kettle", "daily-kettle", CadenceTier.DAILY, 5.0, listOf("Culture"), "Priya Raman", CULTURE_HEADLINES.drop(5)),
+        SampleFeed("The Daily Kettle", "daily-kettle", CadenceTier.DAILY, 5.0, listOf("Culture"), "Priya Raman", CULTURE_HEADLINES.drop(5), step = SliderStep.LESS, mutedForDays = 6),
         SampleFeed("Open Bench", "open-bench", CadenceTier.DAILY, 11.0, listOf("Tech"), null),
         SampleFeed("Corner Shop Radio", "corner-shop-radio", CadenceTier.WEEKLY, null, emptyList(), null, hasBody = false),
+        SampleFeed("The Allotment Diary", "allotment-diary", CadenceTier.WEEKLY, 90.0, emptyList(), "Wim de Groot"),
     )
 
     private class Stored(val id: Long, val feed: SampleFeed, val hasImage: Boolean)
@@ -86,6 +99,9 @@ class SampleDataSeeder(
                         medianIntervalHrs = feed.medianHours,
                         burstiness = feed.medianHours?.let { 2.5 },
                         tier = feed.tier,
+                        affinity = feed.affinity,
+                        sliderStep = feed.step,
+                        muteUntil = feed.mutedForDays?.let { now.plus(Duration.ofDays(it.toLong())) },
                         lastSyncAt = now,
                         addedAt = now.minus(Duration.ofDays(60)),
                     ),
@@ -96,7 +112,8 @@ class SampleDataSeeder(
 
             // Before the reset time today's paper is not out yet, so the newest edition is yesterday's.
             val today = now.atZone(zone).toLocalDate()
-            val newest = if (now.atZone(zone).toLocalTime().isBefore(resetTime)) today.minusDays(1) else today
+            val current = if (now.atZone(zone).toLocalTime().isBefore(resetTime)) today.minusDays(1) else today
+            val newest = current.minusDays(newestDaysBehind.toLong())
             val headlineCursor = HashMap<SampleFeed, Int>()
             var newsCursor = 0
             val news = NEWS_SUBJECTS.flatMap { subject -> NEWS_PREDICATES.map { "$subject $it" } }.shuffled(random)
@@ -163,7 +180,8 @@ class SampleDataSeeder(
                             slot = if (kind == ItemKind.FRONT) slot + 1 else slot,
                             kind = kind,
                             score = 1.0 - slot * 0.03 - page * 0.1,
-                            reason = REASONS[(slot + number) % REASONS.size],
+                            // Some stories carry no reason, so the fallback wording is seen too.
+                            reason = reasonFor(kind, section, slot + number),
                         )
                         stored
                     }
@@ -171,32 +189,48 @@ class SampleDataSeeder(
 
                 // Front page: the lead (from a slow, loved feed) and four more, one per feed.
                 var lead = place(ItemKind.LEAD, slow.drop(number % slow.size) + slow, 1).single()
-                // Alternate leads with and without a photo so both layouts can be seen.
-                val wantImage = number % 2 == 0
-                if (lead.hasImage != wantImage) {
-                    database.articleDao().getById(lead.id)?.let {
-                        database.articleDao().update(it.copy(imageUrl = if (wantImage) "https://picsum.photos/seed/morning-issue-lead-$number/1200/800" else null))
-                    }
-                    lead = Stored(lead.id, lead.feed, wantImage)
+                // Leads come with an ordinary photo, without one, and with pictures of awkward
+                // shapes (a tall comic strip, a wide panorama) so every framing can be seen.
+                val leadImage = when (daysAgo) {
+                    0 -> "1200/800"
+                    1 -> "600/1700"
+                    2 -> null
+                    3 -> "1600/420"
+                    5 -> "800/1100"
+                    else -> if (number % 2 == 0) "1200/800" else null
                 }
+                database.articleDao().getById(lead.id)?.let {
+                    database.articleDao().update(it.copy(imageUrl = leadImage?.let { size -> "https://picsum.photos/seed/morning-issue-lead-$number/$size" }))
+                }
+                lead = Stored(lead.id, lead.feed, leadImage != null)
                 place(ItemKind.FRONT, quick + slow, 4)
                 if (afterGap) place(ItemKind.AWAY, slow + quick.filter { it.tier == CadenceTier.DAILY }, 6, seen = { cutoffAt.minus(Duration.ofHours(random.nextLong(26, 70))) })
                 place(ItemKind.TOP, quick + slow, if (isNewest) 8 else 6)
                 if (isNewest) place(ItemKind.TOP, slow + quick, 7)
                 if (isNewest || number % 3 == 0) {
+                    // A page per tag, each a different size, then General for the untagged feeds.
                     place(ItemKind.SECTION, feeds.filter { "Tech" in it.tags }, 6, section = "Tech")
                     place(ItemKind.SECTION, feeds.filter { "Culture" in it.tags }, 4, section = "Culture")
+                    place(ItemKind.SECTION, feeds.filter { "Science" in it.tags }, 3, section = "Science")
+                    if (isNewest) {
+                        place(ItemKind.SECTION, feeds.filter { "Personal" in it.tags }, 2, section = "Personal")
+                        place(ItemKind.SECTION, feeds.filter { it.tags.isEmpty() }, 5, section = "General")
+                    }
                 }
                 place(ItemKind.BRIEF, wire + quick, if (isNewest) 15 else 9)
                 if (isNewest || number % 2 == 1) {
                     // Held over from a rare feed: first seen days ago, published earlier still.
-                    place(
+                    val archive = place(
                         kind = ItemKind.ARCHIVE,
                         feedsToUse = feeds.filter { it.tier == CadenceTier.RARE },
                         count = 1,
                         seen = { cutoffAt.minus(Duration.ofDays(random.nextLong(12, 40))) },
                         published = { it.minus(Duration.ofDays(random.nextLong(200, 900))) },
-                    )
+                    ).single()
+                    // The newest archive story has a picture; the others show the feature without one.
+                    database.articleDao().getById(archive.id)?.let {
+                        database.articleDao().update(it.copy(imageUrl = if (isNewest) "https://picsum.photos/seed/morning-issue-archive-$number/1200/800" else null))
+                    }
                 }
                 place(ItemKind.INDEX, wire + quick + wire, if (isNewest) 22 else 10)
 
@@ -231,6 +265,21 @@ class SampleDataSeeder(
                         }
                     }
                     database.engagementDao().countUnopenedRun(editionId)
+                } else {
+                    // Today's paper has been started: a few stories read, liked or saved on each
+                    // page, so the marks can be seen without touching anything.
+                    val at = releaseAt.plus(Duration.ofMinutes(20))
+                    items.forEachIndexed { index, item ->
+                        when (index % 9) {
+                            3 -> {
+                                database.engagementDao().markOpened(item.articleId, at)
+                                database.engagementDao().recordReadFraction(item.articleId, 1f)
+                                database.engagementDao().markRead(item.articleId, at)
+                                if (index % 2 == 1) database.engagementDao().setLiked(item.articleId, at.plusSeconds(index.toLong()))
+                            }
+                            6 -> database.engagementDao().setSaved(item.articleId, at.plusSeconds(index.toLong()))
+                        }
+                    }
                 }
             }
         }
@@ -238,6 +287,17 @@ class SampleDataSeeder(
     }
 
     suspend fun clear() = withContext(Dispatchers.IO) { database.clearAllTables() }
+
+    /** The builder's one-line reason, in the manner of v1's examples; null for a share of stories. */
+    private fun reasonFor(kind: ItemKind, section: String?, turn: Int): String? = when (kind) {
+        ItemKind.LEAD -> "Rare post: this source publishes about once a month"
+        ItemKind.FRONT, ItemKind.TOP -> REASONS[turn % REASONS.size]
+        ItemKind.SECTION -> if (turn % 3 == 0) null else "Top of your $section sources today"
+        ItemKind.BRIEF -> if (turn % 2 == 0) "Fresh from a fast-moving source you follow" else null
+        ItemKind.ARCHIVE -> "Held over from a source you love: still unread after three weeks"
+        ItemKind.AWAY -> "From an edition you missed, ranked from your last visit"
+        ItemKind.INDEX -> null
+    }
 
     /** An article body exercising every block type the reader renders. */
     private fun body(random: Random, index: Int, longRead: Boolean): List<ContentBlock> {
@@ -412,8 +472,9 @@ class SampleDataSeeder(
         val REASONS = listOf(
             "Rare post: this source publishes about once a month",
             "You read most posts from this source",
-            "Fresh from a source you follow",
-            "Held over from a source you love",
+            null,
+            "Fresh from a source you set to Favourite",
+            "You liked three of its last five posts",
         )
     }
 }

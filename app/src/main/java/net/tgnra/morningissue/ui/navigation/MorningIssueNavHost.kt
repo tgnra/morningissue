@@ -48,7 +48,9 @@ fun MorningIssueNavHost(
 ) {
     // E-ink screens ghost on crossfades, so destinations swap without animation there.
     val animate = !MorningIssueTheme.isEink
-    val back: () -> Unit = { navController.popBackStack() }
+    // Never pops the last destination: a second "back" arriving while the first is still in
+    // flight (a double tap, a key repeat) would otherwise leave an empty graph and a blank screen.
+    val back: () -> Unit = { if (navController.previousBackStackEntry != null) navController.popBackStack() }
     val openReader: (Long) -> Unit = { navController.navigate(ReaderRoute(it)) }
     val openPaper: (Long) -> Unit = { navController.navigate(PaperRoute(it)) }
     val openSource: (Long) -> Unit = { navController.navigate(SourcePageRoute(it)) }

@@ -75,7 +75,12 @@ import net.tgnra.morningissue.ui.components.PagedFooter
 import net.tgnra.morningissue.ui.components.PaperButton
 import net.tgnra.morningissue.ui.components.PaperIconButton
 import net.tgnra.morningissue.ui.components.PaperIcons
-import net.tgnra.morningissue.ui.components.PaperImage
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.text.style.TextAlign
+import net.tgnra.morningissue.ui.components.FramedImage
+import net.tgnra.morningissue.ui.components.PaperToggleButton
+import net.tgnra.morningissue.ui.components.retainedState
 import net.tgnra.morningissue.ui.components.PaperScreenFrame
 import net.tgnra.morningissue.ui.components.SectionLabel
 import net.tgnra.morningissue.ui.components.ThinProgressBar
@@ -104,8 +109,7 @@ fun ReaderScreen(
     onBack: () -> Unit,
 ) {
     val container = LocalAppContainer.current
-    val loaded by remember(container, articleId) { container.articles.observeReaderArticle(articleId).map { Loaded(it) } }
-        .collectAsStateWithLifecycle(initialValue = null)
+    val loaded by retainedState("article-$articleId") { container.articles.observeReaderArticle(articleId).map { Loaded(it) } }
 
     var fullText by remember(articleId) { mutableStateOf(FullText.Fetching) }
     LaunchedEffect(articleId) {
@@ -235,9 +239,10 @@ private fun Reader(article: ReaderArticle, fullText: FullText, onOpenSource: (Lo
                             Spacer(Modifier.height(36.dp))
                             ArticleFooter(
                                 article = article,
-                                onLike = { scope.launch { container.articles.setLiked(articleId, !article.isLiked) } },
-                                onSave = { scope.launch { container.articles.setSaved(articleId, !article.isSaved) } },
+                                onLike = { scope.launch { container.articles.setLiked(articleId, it) } },
+                                onSave = { scope.launch { container.articles.setSaved(articleId, it) } },
                                 onOpenInBrowser = openInBrowser,
+                                onOpenSource = { onOpenSource(article.feedId) },
                             )
                         }
                     }
@@ -287,7 +292,8 @@ private fun ArticleHeader(article: ReaderArticle, onOpenSource: (Long) -> Unit) 
     val opensWithImage = article.blocks.take(2).any { it is ContentBlock.Image }
     if (article.imageUrl != null && !opensWithImage) {
         Spacer(Modifier.height(20.dp))
-        PaperImage(article.imageUrl, contentDescription = null, modifier = Modifier.fillMaxWidth().aspectRatio(3f / 2f))
+        // In the article a picture is shown whole: a tall one may take most of a screen.
+        FramedImage(article.imageUrl, contentDescription = null, preferredRatio = 3f / 2f, tallestRatio = 0.6f)
     }
 }
 
@@ -307,29 +313,62 @@ private fun ArticleStatus(article: ReaderArticle, fullText: FullText) {
     }
 }
 
-/** Like and Save at the end of the article, where the reader has earned an opinion. */
+/**
+ * The end of the article, where the reader has earned an opinion: Like and Save as switches
+ * that stay pressed, a line saying what each has done, then the ways on (more from the source,
+ * the original page).
+ */
 @Composable
-private fun ArticleFooter(article: ReaderArticle, onLike: () -> Unit, onSave: () -> Unit, onOpenInBrowser: (() -> Unit)?) {
+private fun ArticleFooter(
+    article: ReaderArticle,
+    onLike: (Boolean) -> Unit,
+    onSave: (Boolean) -> Unit,
+    onOpenInBrowser: (() -> Unit)?,
+    onOpenSource: () -> Unit,
+) {
     val colors = MorningIssueTheme.colors
+    val type = MorningIssueTheme.typography
     Column(Modifier.fillMaxWidth().stepAnchor(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.width(56.dp).height(3.dp).background(colors.rule))
         Spacer(Modifier.height(24.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PaperButton(
+            PaperToggleButton(
                 text = stringResource(if (article.isLiked) R.string.reader_liked else R.string.reader_like),
-                onClick = onLike,
+                checked = article.isLiked,
+                onCheckedChange = onLike,
                 modifier = Modifier.weight(1f),
                 icon = if (article.isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                primary = article.isLiked,
             )
-            PaperButton(
+            PaperToggleButton(
                 text = stringResource(if (article.isSaved) R.string.reader_saved else R.string.reader_save),
-                onClick = onSave,
+                checked = article.isSaved,
+                onCheckedChange = onSave,
                 modifier = Modifier.weight(1f),
                 icon = if (article.isSaved) PaperIcons.Bookmark else PaperIcons.BookmarkBorder,
-                primary = article.isSaved,
             )
         }
+        Text(
+            text = stringResource(
+                when {
+                    article.isLiked && article.isSaved -> R.string.reader_end_both
+                    article.isLiked -> R.string.reader_end_liked
+                    article.isSaved -> R.string.reader_end_saved
+                    else -> R.string.reader_end_hint
+                },
+            ),
+            style = type.caption,
+            color = colors.inkSecondary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 10.dp, bottom = 18.dp).semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        HairlineRule()
+        Spacer(Modifier.height(18.dp))
+        PaperButton(
+            text = stringResource(R.string.story_more_from, article.feedTitle),
+            onClick = onOpenSource,
+            modifier = Modifier.fillMaxWidth(),
+            icon = PaperIcons.Newspaper,
+        )
         if (onOpenInBrowser != null) {
             Spacer(Modifier.height(12.dp))
             PaperButton(

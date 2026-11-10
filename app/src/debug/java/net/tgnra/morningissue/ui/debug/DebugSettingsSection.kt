@@ -58,6 +58,17 @@ fun DebugSettingsSection() {
                     enabled = !busy,
                 )
                 PaperButton(
+                    text = "Load sample data, no edition today",
+                    onClick = {
+                        run {
+                            val settings = container.settings.settings.first()
+                            SampleDataSeeder(container.core.database, container.clock, settings.resetTime, newestDaysBehind = 1).seed()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !busy,
+                )
+                PaperButton(
                     text = "Clear all data",
                     onClick = {
                         run {

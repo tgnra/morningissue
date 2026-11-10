@@ -54,11 +54,26 @@ object StepScroll {
      * Where a step forward from [current] should land: one [viewport] further less [overlap],
      * pulled back to the nearest anchor (a story row or line top) so nothing is cut in half,
      * as long as that still moves at least half a screen. Never beyond [max].
+     *
+     * [contentMax] is the furthest position at which the screen is still full of content; it is
+     * less than [max] when blank filler follows the content. When the end is within this step,
+     * the step lands on the first anchor at or after [contentMax]: everything left is shown and
+     * as little of the screen as possible is blank, at the price of repeating a few lines. If
+     * that anchor would still leave more than a third of the screen blank (the content ends in
+     * something tall, such as a lead picture), the step lands on [contentMax] itself: a full
+     * screen, even though its top edge may cut through what is there.
      */
-    fun forward(current: Int, viewport: Int, max: Int, anchors: IntArray, overlap: Int): Int {
+    fun forward(current: Int, viewport: Int, max: Int, anchors: IntArray, overlap: Int, contentMax: Int = max): Int {
         if (viewport <= 0 || current >= max) return current.coerceAtMost(max.coerceAtLeast(0))
         val raw = current + (viewport - overlap).coerceAtLeast(1)
         if (raw >= max) return max
+        if (contentMax < max && raw >= contentMax) {
+            if (contentMax <= current) return current
+            val furthest = minOf(raw, contentMax + viewport / 3)
+            var fullest = Int.MAX_VALUE
+            for (anchor in anchors) if (anchor in contentMax..furthest && anchor < fullest) fullest = anchor
+            return if (fullest != Int.MAX_VALUE) fullest else contentMax
+        }
         val least = current + viewport / 2
         var best = -1
         for (anchor in anchors) if (anchor in (least + 1)..raw && anchor > best) best = anchor
@@ -133,6 +148,7 @@ class PagedScroller(val scrollState: ScrollState, private val overlapPx: Int) {
         if (!canStepForward) return false
         val target = StepScroll.forward(
             scrollState.value, scrollState.viewportSize, scrollState.maxValue, anchorPositions(), overlapPx,
+            contentMax = maxScroll,
         )
         // With the filler the range runs a screen past the content; never land wholly in the blank.
         val lastUseful = if (fillerPx > 0) maxScroll + scrollState.viewportSize - overlapPx else scrollState.maxValue

@@ -48,8 +48,19 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.text.format.DateFormat
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontStyle
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.TextStyle
+import androidx.compose.ui.platform.LocalLocale
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import net.tgnra.morningissue.engine.EditionClock
+import net.tgnra.morningissue.ui.components.TextLink
+import net.tgnra.morningissue.ui.components.retainedState
 import net.tgnra.morningissue.R
 import net.tgnra.morningissue.model.EditionSummary
 import net.tgnra.morningissue.sync.SyncReport
@@ -95,16 +106,33 @@ fun NewsstandScreen(
     val scope = rememberCoroutineScope()
     val resources = LocalResources.current
 
-    val editions by remember(container) { container.editions.observeReleasedEditions() }
-        .collectAsStateWithLifecycle(initialValue = null)
-    val feeds by remember(container) { container.feeds.observeFeeds() }.collectAsStateWithLifecycle(initialValue = null)
+    val editions by retainedState("editions") { container.editions.observeReleasedEditions() }
+    val feeds by retainedState("feeds") { container.feeds.observeFeeds() }
     val syncStatus by container.feedSyncer.status.collectAsStateWithLifecycle()
+    val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = null)
+    val zone = ZoneId.systemDefault()
+
+    // The reset for which the release check below has finished. Until it has, a missing edition
+    // may simply not have been printed yet, so nothing is said about it.
+    var checkedReset by rememberSaveable { mutableStateOf<Long?>(null) }
 
     // Release is a clock check on coming to the foreground; it never syncs.
     LifecycleStartEffect(container) {
-        val job = scope.launch { container.editions.ensureCurrentEdition() }
+        val job = scope.launch {
+            container.editions.ensureCurrentEdition()
+            val resetTime = container.settings.settings.first().resetTime
+            checkedReset = EditionClock.latestReset(container.clock.instant(), resetTime, zone).toEpochMilli()
+        }
         onStopOrDispose { job.cancel() }
     }
+
+    val now = container.clock.instant()
+    val resetTime = settings?.resetTime
+    val newest = editions?.firstOrNull()
+    // Set when a reset has passed and the feeds had nothing new to print.
+    val noNewEdition = newest != null && resetTime != null &&
+        checkedReset == EditionClock.latestReset(now, resetTime, zone).toEpochMilli() &&
+        StandEditions.of(newest.date, now, resetTime, zone) == StandEdition.NoNewEdition
 
     var refreshing by remember { mutableStateOf(false) }
     var notice by rememberSaveable { mutableStateOf<String?>(null) }
@@ -152,6 +180,16 @@ fun NewsstandScreen(
                         notice = notice,
                         modifier = Modifier.padding(horizontal = spec.pageMargin),
                     )
+                    if (noNewEdition) {
+                        NoNewEditionNotice(
+                            newestDate = newest.date,
+                            expectedDate = StandEditions.expectedDate(now, resetTime, zone),
+                            nextEditionAt = EditionClock.nextReset(now, resetTime, zone).atZone(zone).toLocalTime(),
+                            refreshing = refreshing,
+                            onRefresh = refresh,
+                            modifier = Modifier.padding(horizontal = spec.pageMargin),
+                        )
+                    }
                     val list = editions
                     when {
                         list == null -> Unit
@@ -268,6 +306,51 @@ private fun StandStatus(status: SyncStatus?, notice: String?, modifier: Modifier
             ThinProgressBar(if (status.feedsTotal > 0) status.feedsDone.toFloat() / status.feedsTotal else 0f)
         }
         notice != null -> NoticeLine(notice, modifier.padding(top = 8.dp))
+    }
+}
+
+/**
+ * Said above the cover when a reset has passed without a new edition because the feeds had
+ * nothing new. Set like a notice in the paper itself, between rules, not like an error: there
+ * is nothing wrong, and the way to look again is right under it.
+ */
+@Composable
+private fun NoNewEditionNotice(
+    newestDate: LocalDate,
+    expectedDate: LocalDate,
+    nextEditionAt: LocalTime,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MorningIssueTheme.colors
+    val type = MorningIssueTheme.typography
+    val use24Hour = DateFormat.is24HourFormat(LocalContext.current)
+    val weekday = StandEditions.sinceWeekday(newestDate, expectedDate)
+    val since = if (weekday != null) {
+        stringResource(R.string.newsstand_no_edition_since_day, weekday.getDisplayName(TextStyle.FULL, LocalLocale.current.platformLocale))
+    } else {
+        stringResource(R.string.newsstand_no_edition_since_date, PaperFormat.shortDate(newestDate))
+    }
+    Box(modifier.fillMaxWidth().stepAnchor().padding(top = 12.dp), contentAlignment = Alignment.TopCenter) {
+        Column(Modifier.widthIn(max = 520.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.fillMaxWidth().height(2.dp).background(colors.rule))
+            Spacer(Modifier.height(12.dp))
+            SectionLabel(stringResource(R.string.newsstand_no_edition_title), color = colors.ink, heading = true)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = since + " " + stringResource(R.string.newsstand_next_edition, PaperFormat.time(nextEditionAt, use24Hour)),
+                style = type.standfirst.copy(fontStyle = FontStyle.Italic),
+                color = colors.ink,
+                textAlign = TextAlign.Center,
+            )
+            if (refreshing) {
+                Spacer(Modifier.height(12.dp))
+            } else {
+                TextLink(stringResource(R.string.newsstand_refresh), onRefresh)
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.rule))
+        }
     }
 }
 

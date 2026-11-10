@@ -33,6 +33,13 @@ import androidx.compose.ui.unit.em
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
+import net.tgnra.morningissue.ui.components.FramedImage
+import net.tgnra.morningissue.ui.components.SectionLabel
+import net.tgnra.morningissue.ui.components.StoryMarks
+import net.tgnra.morningissue.ui.layout.PaperWidthClass
 import net.tgnra.morningissue.R
 import net.tgnra.morningissue.model.Edition
 import net.tgnra.morningissue.model.EditionPage
@@ -80,7 +87,11 @@ fun EditionPageContent(edition: Edition, page: EditionPage, links: BackPageLinks
     when (page) {
         is EditionPage.Front -> FrontPage(edition, page, links.onBackToStand)
         is EditionPage.TopStories -> StoriesPage(pageTitle(page), page.stories)
-        is EditionPage.Section -> StoriesPage(pageTitle(page), page.stories)
+        is EditionPage.Section -> StoriesPage(
+            title = pageTitle(page),
+            stories = page.stories,
+            heading = { SectionBanner(page.name, page.stories.size) },
+        )
         is EditionPage.WhileYouWereAway -> StoriesPage(
             title = pageTitle(page),
             stories = page.stories,
@@ -194,6 +205,111 @@ fun PageHeading(title: String, modifier: Modifier = Modifier, intro: String? = n
     }
 }
 
+/**
+ * A section page's banner: the tag's name in spaced capitals under the masthead's double rule,
+ * with a line of furniture saying what the page is. Heavier than [PageHeading], so the turn
+ * from the mixed pages into the reader's own sections is felt.
+ */
+@Composable
+fun SectionBanner(name: String, storyCount: Int, modifier: Modifier = Modifier) {
+    val colors = MorningIssueTheme.colors
+    val type = MorningIssueTheme.typography
+    Column(modifier.fillMaxWidth().stepAnchor(), horizontalAlignment = Alignment.CenterHorizontally) {
+        DoubleRule()
+        Text(
+            text = name.uppercase(),
+            style = type.headline.copy(letterSpacing = 0.2.em),
+            color = colors.ink,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 12.dp, start = 8.dp, end = 8.dp).semantics { heading() },
+        )
+        Text(
+            text = (stringResource(R.string.contents_section) + "  ·  " + pluralStringResource(R.plurals.story_count, storyCount, storyCount)).uppercase(),
+            style = type.sectionLabel,
+            color = colors.inkSecondary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+        )
+        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.rule))
+    }
+}
+
+/**
+ * From the archive: one held-over story set as a feature, centred at a book measure with air
+ * around it. The source leads as a kicker (and opens its source page), then the headline, a
+ * short rule, the standfirst at length, the picture, and when it was first published.
+ */
+@Composable
+fun ArchiveFeature(story: EditionStory, modifier: Modifier = Modifier) {
+    val colors = MorningIssueTheme.colors
+    val type = MorningIssueTheme.typography
+    val actions = LocalStoryActions.current
+    val wide = LocalPaperLayoutSpec.current.widthClass != PaperWidthClass.Compact
+    Column(
+        modifier.widthIn(max = 640.dp).fillMaxWidth().stepAnchor().story(story).padding(top = 14.dp, bottom = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .heightIn(min = 48.dp)
+                .clickable(onClickLabel = stringResource(R.string.story_more_from, story.feedTitle), role = Role.Button) {
+                    actions.onOpenSource(story.feedId)
+                }
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            SectionLabel(story.feedTitle, color = colors.accent)
+        }
+        Text(
+            text = story.title,
+            style = type.leadHeadline.copy(
+                fontSize = type.leadHeadline.fontSize * 1.12f,
+                lineHeight = type.leadHeadline.lineHeight * 1.12f,
+            ),
+            color = if (story.isRead) colors.inkSecondary else colors.ink,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(16.dp))
+        Box(Modifier.width(56.dp).height(2.dp).background(colors.rule))
+        story.summary?.takeIf { it.isNotBlank() }?.let {
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = it,
+                style = type.standfirst.copy(fontStyle = FontStyle.Italic),
+                color = colors.ink,
+                textAlign = TextAlign.Center,
+                maxLines = 6,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (story.imageUrl != null) {
+            Spacer(Modifier.height(22.dp))
+            FramedImage(story.imageUrl, contentDescription = null, preferredRatio = if (wide) 2f else 3f / 2f)
+        }
+        Spacer(Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Balances the menu button, so the dateline itself sits on the centre line.
+            Spacer(Modifier.width(28.dp))
+            StoryMarks(story.isRead, story.isLiked, story.isSaved)
+            Text(
+                text = listOfNotNull(
+                    story.author?.takeIf { it.isNotBlank() },
+                    stringResource(R.string.archive_first_published, PaperFormat.articleDate(story.publishedAt)),
+                    // Unbreakable, so a narrow page does not leave "read" on a line of its own.
+                    stringResource(R.string.minutes_read, story.readMinutes).replace(' ', '\u00A0'),
+                ).joinToString(" · "),
+                style = type.byline,
+                color = colors.inkSecondary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            StoryMoreButton(story)
+        }
+    }
+}
+
 @Composable
 private fun EmptyPageNote() {
     Text(
@@ -212,10 +328,12 @@ private fun StoriesPage(
     stories: List<EditionStory>,
     intro: String? = null,
     datedBylines: Boolean = false,
+    heading: @Composable () -> Unit = { PageHeading(title, intro = intro) },
 ) {
     val spec = LocalPaperLayoutSpec.current
     val extra: (EditionStory) -> String? = { if (datedBylines) PaperFormat.articleDate(it.publishedAt) else null }
-    PageHeading(title, intro = intro)
+    val orphan: @Composable (EditionStory) -> Unit = { PageLeadStory(it, bylineExtra = extra(it), compact = true) }
+    heading()
     if (stories.isEmpty()) {
         EmptyPageNote()
         return
@@ -232,12 +350,12 @@ private fun StoriesPage(
                 SecondaryStory(story, cell, bylineExtra = extra(story))
             }
         }
-        HairlineRule()
-        StoryGrid(rest.drop(beside), spec.columns, spec.gutter) { story, cell -> SecondaryStory(story, cell, bylineExtra = extra(story)) }
+        if (rest.size > beside) HairlineRule()
+        StoryGrid(rest.drop(beside), spec.columns, spec.gutter, orphan = orphan) { story, cell -> SecondaryStory(story, cell, bylineExtra = extra(story)) }
     } else {
         PageLeadStory(first, bylineExtra = extra(first))
         if (rest.isNotEmpty()) HairlineRule()
-        StoryGrid(rest, spec.columns, spec.gutter) { story, cell -> SecondaryStory(story, cell, bylineExtra = extra(story)) }
+        StoryGrid(rest, spec.columns, spec.gutter, orphan = orphan) { story, cell -> SecondaryStory(story, cell, bylineExtra = extra(story)) }
     }
 }
 
@@ -260,11 +378,12 @@ private fun ArchivePage(page: EditionPage.FromTheArchive) {
         return
     }
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        page.stories.forEach { story ->
-            Spacer(Modifier.height(18.dp))
-            LeadStory(
+        ArchiveFeature(page.stories.first())
+        // The builder prints one; any more are set plainly beneath it.
+        page.stories.drop(1).forEach { story ->
+            HairlineRule(Modifier.widthIn(max = 640.dp))
+            PageLeadStory(
                 story = story,
-                // One story on a wide page reads better at a book measure than edge to edge.
                 modifier = Modifier.widthIn(max = 640.dp),
                 bylineExtra = stringResource(R.string.archive_first_published, PaperFormat.articleDate(story.publishedAt)),
             )

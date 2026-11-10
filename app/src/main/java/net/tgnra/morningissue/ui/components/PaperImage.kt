@@ -2,14 +2,22 @@ package net.tgnra.morningissue.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import android.util.LruCache
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import net.tgnra.morningissue.ui.learning.ImageFrame
 import net.tgnra.morningissue.ui.theme.MorningIssueTheme
 
 /** How images are treated per display mode. */
@@ -58,6 +66,7 @@ fun PaperImage(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
+    onSize: ((width: Int, height: Int) -> Unit)? = null,
 ) {
     val colors = MorningIssueTheme.colors
     val placeholder = if (colors.isEink) Modifier.border(1.dp, colors.ink) else Modifier.background(colors.hairline.copy(alpha = 0.45f))
@@ -67,5 +76,39 @@ fun PaperImage(
         modifier = modifier.then(placeholder),
         contentScale = contentScale,
         colorFilter = ImageTreatment.colorFilter,
+        onSuccess = onSize?.let { report -> { state -> report(state.result.image.width, state.result.image.height) } },
+    )
+}
+
+/** Width ÷ height of pictures already seen, so a page turned back to does not jump as they load again. */
+private val knownShapes = LruCache<String, Float>(256)
+
+/**
+ * A full-width picture set to [preferredRatio] unless that would cut much of it off: a strip or
+ * panorama gets a shallower frame, a tall picture a taller one (down to [tallestRatio]) and
+ * anything taller still is shown whole between bands. See [ImageFrame] for the rule.
+ */
+@Composable
+fun FramedImage(
+    url: String?,
+    contentDescription: String?,
+    preferredRatio: Float,
+    modifier: Modifier = Modifier,
+    tallestRatio: Float = 1f,
+) {
+    var shape by remember(url) { mutableStateOf(url?.let { knownShapes.get(it) }) }
+    val frame = shape?.let { ImageFrame.of(it, 1f, preferredRatio, tallestRatio) } ?: ImageFrame(preferredRatio, fit = false)
+    PaperImage(
+        url = url,
+        contentDescription = contentDescription,
+        modifier = modifier.fillMaxWidth().aspectRatio(frame.ratio),
+        contentScale = if (frame.fit) ContentScale.Fit else ContentScale.Crop,
+        onSize = { width, height ->
+            if (url != null && width > 0 && height > 0) {
+                val ratio = width.toFloat() / height
+                knownShapes.put(url, ratio)
+                shape = ratio
+            }
+        },
     )
 }

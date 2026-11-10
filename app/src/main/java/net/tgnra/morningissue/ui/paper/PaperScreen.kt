@@ -49,8 +49,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -63,6 +65,7 @@ import kotlinx.coroutines.launch
 import net.tgnra.morningissue.R
 import net.tgnra.morningissue.model.Edition
 import net.tgnra.morningissue.model.EditionPage
+import net.tgnra.morningissue.model.Feed
 import net.tgnra.morningissue.ui.LocalAppContainer
 import net.tgnra.morningissue.ui.components.EmptyMessage
 import net.tgnra.morningissue.ui.components.HairlineRule
@@ -78,9 +81,11 @@ import net.tgnra.morningissue.ui.components.pagedKeys
 import net.tgnra.morningissue.ui.components.pagedVerticalScroll
 import net.tgnra.morningissue.ui.components.paperShadow
 import net.tgnra.morningissue.ui.components.rememberPagedScroller
+import net.tgnra.morningissue.ui.components.retainedState
 import net.tgnra.morningissue.ui.components.turnToPage
 import net.tgnra.morningissue.ui.format.PaperFormat
 import net.tgnra.morningissue.ui.layout.LocalPaperLayoutSpec
+import net.tgnra.morningissue.ui.learning.Mutes
 import net.tgnra.morningissue.ui.theme.MorningIssueTheme
 
 /** Distinguishes "still loading" (no value yet) from "loaded, and there is no such edition". */
@@ -101,9 +106,11 @@ fun PaperScreen(
     onBack: () -> Unit,
 ) {
     val container = LocalAppContainer.current
-    val loaded by remember(container, editionId) { container.editions.observeEdition(editionId).map { Loaded(it) } }
-        .collectAsStateWithLifecycle(initialValue = null)
+    val scope = rememberCoroutineScope()
+    val loaded by retainedState("edition-$editionId") { container.editions.observeEdition(editionId).map { Loaded(it) } }
     val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = null)
+    // The story whose menu is open. An ID, so the menu follows the story's state as it changes.
+    var menuArticleId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(editionId) { container.editions.markEditionOpened(editionId) }
 
@@ -123,12 +130,54 @@ fun PaperScreen(
                 onOpenSearch = onOpenSearch,
                 onBackToStand = onBack,
             )
-            CompositionLocalProvider(LocalStoryActions provides remember(onOpenArticle, onOpenSource) { StoryActions(onOpenArticle, onOpenSource) }) {
-                Paper(edition, links, onFinished = { container.appScope.launch { container.editions.markEditionFinished(editionId) } })
+            val storyActions = remember(container, onOpenArticle, onOpenSource) {
+                StoryActions(
+                    onOpenArticle = onOpenArticle,
+                    onOpenSource = onOpenSource,
+                    onOpenMenu = { menuArticleId = it.articleId },
+                    onToggleSaved = { scope.launch { container.articles.setSaved(it.articleId, !it.isSaved) } },
+                    onToggleLiked = { scope.launch { container.articles.setLiked(it.articleId, !it.isLiked) } },
+                )
+            }
+            val menu = menuArticleId?.let { id ->
+                edition.pages.firstNotNullOfOrNull { page -> page.stories.firstOrNull { it.articleId == id }?.let { page to it } }
+            }
+            Box(Modifier.fillMaxSize()) {
+                // While the menu is up, the page under it is not there for screen readers.
+                Box(if (menu != null) Modifier.fillMaxSize().clearAndSetSemantics { } else Modifier.fillMaxSize()) {
+                    CompositionLocalProvider(LocalStoryActions provides storyActions) {
+                        Paper(edition, links, onFinished = { container.appScope.launch { container.editions.markEditionFinished(editionId) } })
+                    }
+                }
+                if (menu != null) {
+                    val (page, story) = menu
+                    val feed by retainedState("menu-feed-${story.feedId}") { container.feeds.observeFeed(story.feedId).map { MenuFeed(it) } }
+                    val feedId = story.feedId
+                    StoryMenu(
+                        story = story,
+                        sectionName = (page as? EditionPage.Section)?.name,
+                        feed = feed?.feed,
+                        now = container.clock.instant(),
+                        actions = StoryMenuActions(
+                            onSavedChange = { scope.launch { container.articles.setSaved(story.articleId, it) } },
+                            onLikedChange = { scope.launch { container.articles.setLiked(story.articleId, it) } },
+                            onStepChange = { scope.launch { container.feeds.setSliderStep(feedId, it) } },
+                            onMute = { days -> scope.launch { container.feeds.setMutedUntil(feedId, Mutes.until(container.clock.instant(), days)) } },
+                            onUnmute = { scope.launch { container.feeds.setMutedUntil(feedId, null) } },
+                            onOpenSource = {
+                                menuArticleId = null
+                                onOpenSource(feedId)
+                            },
+                            onDismiss = { menuArticleId = null },
+                        ),
+                    )
+                }
             }
         }
     }
 }
+
+private class MenuFeed(val feed: Feed?)
 
 @Composable
 private fun Paper(edition: Edition, links: BackPageLinks, onFinished: () -> Unit) {
@@ -330,6 +379,8 @@ private fun ContentsList(pages: List<EditionPage>, current: Int, modifier: Modif
                     modifier = Modifier.width(36.dp),
                 )
                 Column(Modifier.weight(1f)) {
+                    // A tag's page is named after the tag; the kicker says what kind of page that is.
+                    if (page is EditionPage.Section) SectionLabel(stringResource(R.string.contents_section))
                     Text(
                         text = pageTitle(page),
                         style = type.headlineSmall,
@@ -340,7 +391,15 @@ private fun ContentsList(pages: List<EditionPage>, current: Int, modifier: Modif
                         Text(first, style = type.byline, color = colors.inkSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                if (isCurrent) Box(Modifier.size(8.dp).background(colors.accent))
+                if (page !is EditionPage.Back && page.stories.isNotEmpty()) {
+                    Text(
+                        text = pluralStringResource(R.plurals.story_count, page.stories.size, page.stories.size),
+                        style = type.caption,
+                        color = colors.inkSecondary,
+                        modifier = Modifier.padding(start = 10.dp),
+                    )
+                }
+                Box(Modifier.padding(start = 10.dp).size(8.dp).background(if (isCurrent) colors.accent else Color.Transparent))
             }
         }
     }
