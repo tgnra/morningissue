@@ -17,8 +17,13 @@ data class FeedProfile(
     val affinity: Double = 0.5,
     val sliderStep: SliderStep = SliderStep.AUTO,
     val muteUntil: Instant? = null,
-    /** Tag names; unused until section pages arrive. */
+    /** Tag names; each may get a section page. A feed without tags goes in General. */
     val tags: List<String> = emptyList(),
+    /**
+     * Set when [affinity] is high mostly because of this tag rather than the feed's own
+     * record (see `Affinity`, tag borrowing); only used to word the reason line honestly.
+     */
+    val borrowedFromTag: String? = null,
 )
 
 /** A post that may go into an edition. */
@@ -34,6 +39,13 @@ data class Candidate(
     val leadCount: Int = 0,
     val isOpened: Boolean = false,
     val isRead: Boolean = false,
+    /**
+     * An untouched post of a loved Weekly or Rare feed from before the previous cutoff, kept
+     * eligible until it is read. False for the posts first seen since that cutoff.
+     */
+    val isHeldOver: Boolean = false,
+    /** Printed in one of the last `archiveCooldownEditions` editions; bars From the archive. */
+    val ranRecently: Boolean = false,
 )
 
 /** A story's place in an edition draft; mirrors an `edition_item` row (see `ItemKind`). */
@@ -42,7 +54,7 @@ data class DraftItem(
     val feedId: Long,
     /** 1-based page number. */
     val page: Int,
-    /** Tag name for section pages; null otherwise. */
+    /** Tag name for section pages (`EditionBuilder.GENERAL_SECTION` for untagged feeds); null otherwise. */
     val section: String?,
     /** Order within the page, from 0. */
     val slot: Int,

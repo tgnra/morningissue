@@ -41,6 +41,11 @@ data class RankingConfig(
     val sliderFavouriteValue: Double = 1.0,
     /** A feed is "loved" at or above this affinity (or with the slider at More or Favourite). */
     val lovedAffinity: Double = 0.7,
+    /**
+     * Runs and engagement older than this are not read when learning; after six half-lives
+     * their weight is under 2%.
+     */
+    val affinityWindowDays: Long = 180,
 
     // Read detection
     val readScrollFraction: Float = 0.7f,
@@ -63,6 +68,16 @@ data class RankingConfig(
     val topStoriesPerPage: Int = 8,
     val sectionStories: Int = 6,
     val briefLines: Int = 15,
+    /** A tag (or General) needs at least this many stories on the day to get a section page. */
+    val sectionMinStories: Int = 2,
+    /** Unread posts a loved Weekly or Rare feed keeps eligible, newest first (v1 used 5). */
+    val heldOverPerFeed: Int = 5,
+    /**
+     * A held-over post is reprinted on the regular pages only while it scores at least this;
+     * below it (about three unopened runs for a fresh post of a loved feed) it waits for From
+     * the archive instead of filling a thin page day after day.
+     */
+    val heldOverMinScore: Double = 0.2,
     /** A held-over post may lead the front page at most this many times. */
     val maxLeadRuns: Int = 2,
     /** From the archive skips posts that ran in this many most recent editions. */

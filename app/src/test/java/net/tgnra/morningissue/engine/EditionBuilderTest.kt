@@ -98,15 +98,17 @@ class EditionBuilderTest {
 
         fun sizes(length: EditionLength) = build(posts, feeds, length).printed.groupBy { it.page }.toSortedMap().values.map { it.size }
 
-        assertEquals(listOf(5, 8, 8), sizes(EditionLength.STANDARD))
-        assertEquals(listOf(5, 4, 4), sizes(EditionLength.SHORT))
-        assertEquals(listOf(5, 12, 12), sizes(EditionLength.LONG))
+        // Front page, two Top stories pages, then General for these untagged feeds.
+        assertEquals(listOf(5, 8, 8, 6), sizes(EditionLength.STANDARD))
+        assertEquals(listOf(5, 4, 4, 3), sizes(EditionLength.SHORT))
+        assertEquals(listOf(5, 12, 12, 9), sizes(EditionLength.LONG))
 
         val standard = build(posts, feeds)
         assertTrue(standard.onPage(2).all { it.kind == ItemKind.TOP })
         assertTrue(standard.onPage(3).all { it.kind == ItemKind.TOP })
         assertEquals((0 until 8).toList(), standard.onPage(2).map { it.slot })
-        assertEquals(100 - 21, standard.index.size)
+        assertTrue(standard.onPage(4).all { it.kind == ItemKind.SECTION && it.section == EditionBuilder.GENERAL_SECTION })
+        assertEquals(100 - 21 - 6, standard.index.size)
     }
 
     @Test
@@ -144,18 +146,19 @@ class EditionBuilderTest {
         assertEquals(15, briefs.size)
         assertTrue(briefs.all { it.feedId == wire.id || it.feedId == newsletter.id })
         assertEquals(1, briefs.map { it.page }.distinct().size)
-        assertEquals(4, briefs.first().page)
+        assertEquals(5, briefs.first().page)
         assertEquals((0 until 15).toList(), briefs.map { it.slot })
         assertEquals(briefs.map { it.score }.sortedDescending(), briefs.map { it.score })
         // The slow feeds' leftovers are listed, not briefed, even though they score higher.
         val slowLeftovers = draft.index.filter { it.feedId < 100 }
-        assertEquals(50 - 21, slowLeftovers.size)
+        assertEquals(50 - 21 - 6, slowLeftovers.size)
         assertTrue(slowLeftovers.maxOf { it.score } > briefs.minOf { it.score })
     }
 
     @Test
     fun briefsNeedAMinimumScore() {
-        val (slow, slowPosts) = slowFeeds(count = 25, postsEach = 1)
+        // Enough slow posts to fill the mixed pages and General, leaving the wire to the briefs.
+        val (slow, slowPosts) = slowFeeds(count = 27, postsEach = 1)
         val wire = firehose(100)
         // Neutral firehose posts fall under 0.1 a little after 32 hours with the 12 h half-life.
         val fresh = (0 until 3).map { post(wire, ageHours = 20.0 + it) }
@@ -208,7 +211,7 @@ class EditionBuilderTest {
 
         assertEquals((1..byPage.size).toList(), byPage.keys.toList())
         assertEquals(
-            listOf(ItemKind.FRONT, ItemKind.TOP, ItemKind.TOP, ItemKind.BRIEF, ItemKind.INDEX),
+            listOf(ItemKind.FRONT, ItemKind.TOP, ItemKind.TOP, ItemKind.SECTION, ItemKind.BRIEF, ItemKind.INDEX),
             byPage.values.map { items -> items.map { family(it.kind) }.distinct().single() },
         )
         byPage.values.forEach { items -> assertEquals(items.indices.toList(), items.map { it.slot }.sorted()) }
@@ -278,7 +281,7 @@ class EditionBuilderTest {
     fun postsThatRanUnopenedSinkBelowFreshOnes() {
         val a = weekly(1)
         val b = weekly(2)
-        val ranTwice = post(a, ageHours = 1.0).copy(editionsRunUnopened = 2)
+        val ranTwice = post(a, ageHours = 1.0).copy(editionsRunUnopened = 2, isHeldOver = true)
         val fresh = post(b, ageHours = 1.0)
 
         val draft = build(listOf(ranTwice, fresh), listOf(a, b))
@@ -334,9 +337,9 @@ class EditionBuilderTest {
 
         val draft = build(posts, listOf(only))
 
-        assertEquals(listOf(1, 8, 8), draft.printed.groupBy { it.page }.toSortedMap().values.map { it.size })
+        assertEquals(listOf(1, 8, 8, 6), draft.printed.groupBy { it.page }.toSortedMap().values.map { it.size })
         assertEquals(draft.onPage(2).map { it.score }.sortedDescending(), draft.onPage(2).map { it.score })
-        assertEquals(30 - 17, draft.index.size)
+        assertEquals(30 - 23, draft.index.size)
     }
 
     @Test

@@ -3,6 +3,7 @@ package net.tgnra.morningissue.engine
 import java.time.Duration
 import java.time.Instant
 import net.tgnra.morningissue.model.CadenceTier
+import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.model.SliderStep
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -194,6 +195,33 @@ class ScorerTest {
         )
         // A mildly liked monthly blog is there for its rarity, not its affinity.
         assertTrue(reason(feed(affinity = 0.6, medianHours = 30 * 24.0)).startsWith("Rare post"))
-        assertTrue(reason(feed(affinity = 0.9), post(2.0, runUnopened = 1)).startsWith("Held over"))
+        // Running unopened alone is not "held over"; the pool says which posts are.
+        assertTrue(reason(feed(affinity = 0.9), post(2.0, runUnopened = 1)).startsWith("You read most"))
+        assertEquals(
+            "Held over: still unread from Example, a source you read a lot",
+            reason(feed(affinity = 0.9), post(2.0, runUnopened = 1).copy(isHeldOver = true)),
+        )
+        assertEquals(
+            "Held over: still unread from Example, one of your favourites",
+            reason(feed(slider = SliderStep.FAVOURITE), post(2.0).copy(isHeldOver = true)),
+        )
+        assertEquals(
+            "Held over: still unread from Example, a source you asked to see more of",
+            reason(feed(slider = SliderStep.MORE), post(2.0).copy(isHeldOver = true)),
+        )
+        // Affinity borrowed from a tag is not passed off as the feed's own record.
+        val borrowed = feed(affinity = 0.9).copy(tags = listOf("Tech"), borrowedFromTag = "Tech")
+        assertEquals("You read most posts tagged Tech", reason(borrowed))
+        assertEquals(
+            "Held over: still unread from Example, in Tech, which you read a lot",
+            reason(borrowed, post(2.0).copy(isHeldOver = true)),
+        )
+        val held = post(2.0).copy(isHeldOver = true)
+        assertEquals(
+            "From the archive: you have not read this one from Example yet",
+            v2.reason(feed(affinity = 0.9), held, v2.score(feed(affinity = 0.9), held, release), ItemKind.ARCHIVE),
+        )
+        // A slider turned down never reads as affection.
+        assertTrue(reason(feed(affinity = 0.9, slider = SliderStep.LESS)).startsWith("New from"))
     }
 }

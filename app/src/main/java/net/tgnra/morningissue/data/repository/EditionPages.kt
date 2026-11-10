@@ -3,6 +3,7 @@ package net.tgnra.morningissue.data.repository
 import java.time.Instant
 import net.tgnra.morningissue.data.db.EditionEntity
 import net.tgnra.morningissue.data.db.EditionItemRow
+import net.tgnra.morningissue.engine.EditionBuilder
 import net.tgnra.morningissue.model.Edition
 import net.tgnra.morningissue.model.EditionPage
 import net.tgnra.morningissue.model.EditionStory
@@ -11,7 +12,7 @@ import net.tgnra.morningissue.model.ItemKind
 
 /** Turns stored `edition_item` rows into the page model. See `ItemKind` for the contract. */
 internal object EditionPages {
-    const val GENERAL_SECTION = "General"
+    const val GENERAL_SECTION = EditionBuilder.GENERAL_SECTION
 
     fun toEdition(edition: EditionEntity, items: List<EditionItemRow>, nextEditionAt: Instant?): Edition {
         val printed = items.filter { it.item.kind != ItemKind.INDEX }

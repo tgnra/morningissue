@@ -66,6 +66,16 @@ data class EditionRunRow(
     val likedAt: Instant?,
 )
 
+/** An article the reader engaged with, whether or not it was printed; input to affinity. */
+data class EngagedRow(
+    val feedId: Long,
+    val articleId: Long,
+    val openedAt: Instant?,
+    val readAt: Instant?,
+    val savedAt: Instant?,
+    val likedAt: Instant?,
+)
+
 data class FeedUrlRow(
     val id: Long,
     val url: String,

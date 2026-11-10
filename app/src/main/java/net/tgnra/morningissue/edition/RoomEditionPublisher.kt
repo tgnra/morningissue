@@ -14,7 +14,10 @@ import net.tgnra.morningissue.data.db.EditionEntity
 import net.tgnra.morningissue.data.db.EditionItemEntity
 import net.tgnra.morningissue.data.db.FeedWithDetails
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
+import net.tgnra.morningissue.data.repository.AffinityLearner
 import net.tgnra.morningissue.data.settings.SettingsRepository
+import net.tgnra.morningissue.engine.Affinity
+import net.tgnra.morningissue.engine.LearnedAffinities
 import net.tgnra.morningissue.engine.Candidate
 import net.tgnra.morningissue.engine.EditionBuilder
 import net.tgnra.morningissue.engine.EditionClock
@@ -33,9 +36,20 @@ import net.tgnra.morningissue.model.EditionLength
  * cutoff. With no earlier edition, the first one covers posts first seen in the last
  * `firstEditionWindowDays` days: right after onboarding's first sync that is everything.
  *
- * **Nothing to build.** No edition is stored when the pool yields no printable story (no new
- * posts, all of them muted, older than `maxAgeDays`, or already read). The cutoff then stays
- * where it was and the posts are offered to the next build.
+ * **Held-over posts.** Untouched posts of loved Weekly and Rare feeds (`Affinity.holdsPostsOver`,
+ * judged on the affinity learned for this build) from before the previous cutoff join the pool,
+ * the `heldOverPerFeed` newest per feed. "Untouched" means never opened, read, saved or Liked:
+ * a post leaves the pool at the first open, which is the one signal that also covers reading
+ * in the browser, and is what the seen penalty P counts. Muted feeds are not asked; when the
+ * mute runs out their posts are still held over.
+ *
+ * **Learning.** Feed and tag affinity are relearned first (see `AffinityLearner`), counting the
+ * edition being superseded, and stored together with the new edition.
+ *
+ * **Nothing to build.** No edition is stored unless at least one post first seen since the
+ * previous cutoff is printed (there are none, or they are all muted, older than `maxAgeDays`
+ * or already read): held-over posts alone do not make a paper. The cutoff then stays where it
+ * was and the posts are offered to the next build.
  *
  * **Time zones.** [zone] is asked on every call, so a zone change applies at once. An edition
  * belongs to the local date of its reset, and there is one per date: travelling west can make
@@ -59,6 +73,8 @@ class RoomEditionPublisher(
     private val feedDao = database.feedDao()
     private val engagementDao = database.engagementDao()
     private val builder = EditionBuilder(config)
+    private val affinity = Affinity(config)
+    private val learner = AffinityLearner(database, config)
 
     /** One build at a time in this process; the transaction in [build] guards the rest. */
     private val mutex = Mutex()
@@ -107,15 +123,39 @@ class RoomEditionPublisher(
 
             val rows = articleDao.firstSeenBetween(after, now)
             if (rows.isEmpty()) return@withWriteTransaction null
-            val feeds = feedDao.getAllWithDetails().map { it.toProfile() }
-            // Later: held-over posts from loved slow feeds join the pool here. They must be
-            // read after the unopened runs of [previous] are counted below, so that P already
-            // includes the edition being superseded; new posts cannot have run in it.
-            val draft = builder.build(rows.map { it.toCandidate() }, feeds, length, releaseAt)
-            if (draft.printed.isEmpty()) return@withWriteTransaction null
 
-            // The previous edition is superseded: its unopened stories each count one more run.
+            // Building supersedes [previous], so its untouched stories now count as ignored.
+            val learned = learner.learn(now, pendingEditionId = null)
+            val details = feedDao.getAllWithDetails()
+            val tagAffinity = HashMap<String, Double>()
+            details.forEach { feed -> feed.tags.forEach { tagAffinity[it.name] = learned.tags[it.id] ?: it.affinity } }
+            val feeds = details.map { it.toProfile(learned, tagAffinity) }
+
+            // Step 1's held-over posts. Their stored unopened count does not include [previous]
+            // yet (it is only written once this build is known to succeed), so add it here.
+            val inPrevious = previous?.let { editionDao.printedArticleIds(listOf(it.id)).toSet() }.orEmpty()
+            val recent = editionDao.getRecent(config.archiveCooldownEditions).map { it.id }
+            val ranRecently = if (recent.isEmpty()) emptySet() else editionDao.printedArticleIds(recent).toSet()
+            val newIds = rows.mapTo(HashSet()) { it.article.id }
+            val heldOver = feeds
+                .filter { affinity.holdsPostsOver(it) && it.muteUntil?.isAfter(releaseAt) != true }
+                .flatMap { articleDao.heldOverForFeed(it.id, upTo = after, limit = config.heldOverPerFeed) }
+                .filter { it.article.id !in newIds }
+                .map { row ->
+                    val candidate = row.toCandidate()
+                    candidate.copy(
+                        isHeldOver = true,
+                        ranRecently = row.article.id in ranRecently,
+                        editionsRunUnopened = candidate.editionsRunUnopened + if (row.article.id in inPrevious) 1 else 0,
+                    )
+                }
+
+            val draft = builder.build(rows.map { it.toCandidate() } + heldOver, feeds, length, releaseAt, tagAffinity)
+            if (draft.printed.none { it.articleId in newIds }) return@withWriteTransaction null
+
+            // The previous edition is superseded: its untouched stories each count one more run.
             if (previous != null) engagementDao.countUnopenedRun(previous.id)
+            learner.store(learned)
 
             val edition = EditionEntity(
                 date = date,
@@ -156,14 +196,21 @@ class RoomEditionPublisher(
         isRead = readAt != null,
     )
 
-    private fun FeedWithDetails.toProfile() = FeedProfile(
-        id = feed.id,
-        title = feed.title,
-        tier = feed.tier,
-        medianIntervalHours = feed.medianIntervalHrs,
-        affinity = feed.affinity,
-        sliderStep = feed.sliderStep,
-        muteUntil = feed.muteUntil,
-        tags = tags.map { it.name },
-    )
+    private fun FeedWithDetails.toProfile(learned: LearnedAffinities, tagAffinity: Map<String, Double>): FeedProfile {
+        val blended = learned.feeds[feed.id] ?: feed.affinity
+        val own = learned.own[feed.id] ?: blended
+        return FeedProfile(
+            id = feed.id,
+            title = feed.title,
+            tier = feed.tier,
+            medianIntervalHours = feed.medianIntervalHrs,
+            affinity = blended,
+            sliderStep = feed.sliderStep,
+            muteUntil = feed.muteUntil,
+            tags = tags.map { it.name },
+            // The feed's own record would not make it loved; its tags lifted it there.
+            borrowedFromTag = tags.takeIf { own < config.lovedAffinity && blended >= config.lovedAffinity }
+                ?.maxByOrNull { tagAffinity[it.name] ?: it.affinity }?.name,
+        )
+    }
 }

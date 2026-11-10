@@ -14,6 +14,17 @@ abstract class EngagementDao {
     @Query("SELECT * FROM engagement WHERE articleId = :articleId")
     abstract fun observe(articleId: Long): Flow<EngagementEntity?>
 
+    /**
+     * Articles the reader opened, read, saved or Liked at or after [since], with their feed;
+     * input to affinity for posts engaged with outside an edition.
+     */
+    @Query(
+        "SELECT a.feedId AS feedId, g.articleId AS articleId, g.openedAt AS openedAt, g.readAt AS readAt, " +
+            "g.savedAt AS savedAt, g.likedAt AS likedAt FROM engagement g JOIN article a ON a.id = g.articleId " +
+            "WHERE g.openedAt >= :since OR g.readAt >= :since OR g.savedAt >= :since OR g.likedAt >= :since",
+    )
+    abstract suspend fun engagedSince(since: Instant): List<EngagedRow>
+
     /** Creates an empty row if the article has none. */
     @Query("INSERT OR IGNORE INTO engagement (articleId) VALUES (:articleId)")
     abstract suspend fun ensure(articleId: Long)
@@ -41,6 +52,7 @@ abstract class EngagementDao {
 
     @Query(
         "UPDATE engagement SET editionsRunUnopened = editionsRunUnopened + 1 WHERE openedAt IS NULL " +
+            "AND readAt IS NULL AND savedAt IS NULL AND likedAt IS NULL " +
             "AND articleId IN (SELECT articleId FROM edition_item WHERE editionId = :editionId AND kind != 'INDEX')",
     )
     protected abstract suspend fun bumpUnopenedForEdition(editionId: Long)
@@ -88,7 +100,8 @@ abstract class EngagementDao {
 
     /**
      * Adds one to `editionsRunUnopened` for every printed (non-index) story of [editionId] that
-     * has never been opened. Call once per edition, when it is superseded by the next build.
+     * the reader has not touched: never opened, and not marked read, saved or Liked from the
+     * long-press menu either. Call once per edition, when it is superseded by the next build.
      */
     @Transaction
     open suspend fun countUnopenedRun(editionId: Long) {
