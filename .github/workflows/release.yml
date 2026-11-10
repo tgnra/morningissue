@@ -1,3 +1,6 @@
+# Pushing a tag that starts with "v" builds a signed APK and publishes it as a GitHub release.
+# Running the workflow by hand (Actions > Release > Run workflow) builds the same signed APK
+# and uploads it as a workflow artifact, without creating a release.
 name: Release
 
 on:
