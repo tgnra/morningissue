@@ -72,8 +72,7 @@ fun BackIssuesScreen(
 ) {
     val container = LocalAppContainer.current
     val margin = LocalPaperLayoutSpec.current.pageMargin
-    val editions by remember(container) { container.editions.observeReleasedEditions() }
-        .collectAsStateWithLifecycle(initialValue = null)
+    val editions by net.tgnra.morningissue.ui.components.retainedState("editions") { container.editions.observeReleasedEditions() }
 
     PaperScreenFrame(title = stringResource(R.string.backissues_title), onBack = onBack) {
         val list = editions

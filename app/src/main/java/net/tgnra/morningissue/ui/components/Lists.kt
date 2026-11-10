@@ -116,7 +116,9 @@ fun <T> PagedList(
 
 /**
  * An article as a line in a list (a source page, Saved, search results): headline, an excerpt
- * or search snippet, and "Source · date · minutes", with a small photo where thumbnails are shown.
+ * or search snippet, and "Source · date · minutes" behind the article's marks (read, Liked,
+ * Saved), with a small photo where thumbnails are shown. [trailing] is a control at the row's
+ * end, such as a shelf's remove button.
  */
 @Composable
 fun ArticleListItem(
@@ -124,6 +126,7 @@ fun ArticleListItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     showSource: Boolean = true,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
@@ -133,7 +136,7 @@ fun ArticleListItem(
             .clickable(role = Role.Button, onClick = onClick)
             .heightIn(min = 48.dp)
             .padding(vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (trailing == null) 14.dp else 8.dp),
     ) {
         Column(Modifier.weight(1f)) {
             Text(article.title, style = type.headlineSmall, color = if (article.isRead) colors.inkSecondary else colors.ink)
@@ -143,10 +146,7 @@ fun ArticleListItem(
             }
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (article.isRead) {
-                    ReadTick()
-                    Spacer(Modifier.width(4.dp))
-                }
+                StoryMarks(article.isRead, article.isLiked, article.isSaved)
                 Text(
                     text = listOfNotNull(
                         article.feedTitle.takeIf { showSource },
@@ -161,7 +161,8 @@ fun ArticleListItem(
             }
         }
         if (article.imageUrl != null && ImageTreatment.showThumbnails) {
-            PaperImage(article.imageUrl, contentDescription = null, modifier = Modifier.width(76.dp).aspectRatio(1f))
+            PaperImage(article.imageUrl, contentDescription = null, modifier = Modifier.width(if (trailing == null) 76.dp else 64.dp).aspectRatio(1f))
         }
+        if (trailing != null) Box(Modifier.align(Alignment.CenterVertically)) { trailing() }
     }
 }

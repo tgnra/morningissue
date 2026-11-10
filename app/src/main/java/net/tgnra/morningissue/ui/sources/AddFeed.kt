@@ -29,6 +29,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -130,12 +133,26 @@ class AddFeedFlow(
     }
 }
 
+/** Keeps an [AddFeedFlow] across rotation, so a discovery in flight is not thrown away with the screen. */
+class AddFeedHolder : ViewModel() {
+    private val flows = HashMap<Boolean, AddFeedFlow>()
+
+    fun flow(container: AppContainer, resources: Resources, syncAfterAdd: Boolean): AddFeedFlow =
+        flows.getOrPut(syncAfterAdd) { AddFeedFlow(container, viewModelScope, resources, syncAfterAdd) }
+}
+
+/**
+ * The add-feed flow of the current destination. It lives in the destination's view-model store,
+ * not in the composition: rotating the screen while a site is being searched keeps the search,
+ * the typed address and the result.
+ */
 @Composable
 fun rememberAddFeedFlow(syncAfterAdd: Boolean): AddFeedFlow {
     val container = LocalAppContainer.current
-    val scope = rememberCoroutineScope()
-    val resources = LocalResources.current
-    return remember(container, resources, syncAfterAdd) { AddFeedFlow(container, scope, resources, syncAfterAdd) }
+    // The application's resources: the flow outlives any one activity instance.
+    val resources = LocalContext.current.applicationContext.resources
+    val holder: AddFeedHolder = viewModel()
+    return holder.flow(container, resources, syncAfterAdd)
 }
 
 /** The address field, its button and whatever the flow has to say. */

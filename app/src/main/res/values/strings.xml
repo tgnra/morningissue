@@ -28,6 +28,10 @@
     <string name="newsstand_empty_no_sources">Add some sources and your first edition will be printed here.</string>
     <string name="newsstand_empty_waiting">Your first edition will be printed once your sources have been fetched.</string>
     <string name="newsstand_add_sources">Add sources</string>
+    <string name="newsstand_no_edition_title">No new edition today</string>
+    <string name="newsstand_no_edition_since_day">Your feeds had nothing new since %1$s’s paper.</string>
+    <string name="newsstand_no_edition_since_date">Your feeds have had nothing new since the paper of %1$s.</string>
+    <string name="newsstand_next_edition">Next edition at %1$s.</string>
     <string name="refresh_no_new">No new posts since the last check</string>
     <string name="refresh_no_sources">No sources were checked</string>
     <string name="cover_description">Edition No. %1$d, %2$s</string>
@@ -114,9 +118,7 @@
     <string name="sources_export">Export OPML</string>
     <string name="sources_empty_title">No sources yet</string>
     <string name="sources_empty_detail">Add a site or feed address, or import a list from another reader.</string>
-    <string name="source_open">Open</string>
     <string name="source_open_site">Open website</string>
-    <string name="source_options">Options for %1$s</string>
     <string name="source_empty_title">No posts yet</string>
     <string name="source_empty_detail">Posts appear here once this source has been fetched.</string>
     <string name="source_missing_title">This source is gone</string>
@@ -223,5 +225,89 @@
     <string name="saved_tab_liked">Liked</string>
     <string name="saved_empty_title">Nothing saved yet</string>
     <string name="liked_empty_title">Nothing liked yet</string>
-    <string name="saved_empty_detail">Like and Save sit at the end of every article.</string>
+    <string name="saved_empty_detail">Save a story to read it later: hold it down on a page, or use Save at the end of the article.</string>
+    <string name="liked_empty_detail">Like a story you enjoyed, at the end of the article or by holding it down on a page. Likes teach the paper what to print.</string>
+    <string name="saved_tab_count">%1$s · %2$d</string>
+    <string name="saved_order">Most recently saved first</string>
+    <string name="liked_order">Most recently liked first</string>
+    <string name="saved_remove">Remove from Saved</string>
+    <string name="liked_remove">Remove Like</string>
+    <string name="saved_removed">Removed from Saved: %1$s</string>
+    <string name="liked_removed">Like removed: %1$s</string>
+    <string name="action_undo">Undo</string>
+    <string name="action_close">Close</string>
+    <string name="action_add">Add</string>
+
+    <!-- Story menu and learning controls -->
+    <string name="story_options">Story options</string>
+    <string name="story_unsave">Remove from Saved</string>
+    <string name="story_unlike">Remove Like</string>
+    <string name="story_show_more">Show more</string>
+    <string name="story_show_less">Show less</string>
+    <string name="story_more_from">More from %1$s</string>
+    <string name="story_why">Why is this here?</string>
+    <string name="story_menu_note">Today’s edition stays as printed. Changes shape the next one.</string>
+    <string name="reason_lead">It scored highest of everything your sources published for this edition.</string>
+    <string name="reason_front">One of the five best-scoring stories in this edition, one per source.</string>
+    <string name="reason_top">Among the best-scoring stories across all your sources.</string>
+    <string name="reason_section">One of the best stories from your %1$s sources.</string>
+    <string name="reason_brief">A headline from a fast-moving source, worth a line.</string>
+    <string name="reason_archive">An unread post from a slow source you love, held over until you read it.</string>
+    <string name="reason_away">One of the best stories from the editions you missed.</string>
+    <string name="reason_index">It didn’t make the paper, so it is listed here: nothing is silently skipped.</string>
+    <string name="slider_rarely">Rarely</string>
+    <string name="slider_less">Less</string>
+    <string name="slider_auto">Auto</string>
+    <string name="slider_more">More</string>
+    <string name="slider_favourite">Favourite</string>
+    <string name="slider_rarely_detail">Rarely: this source is printed only when little else is new.</string>
+    <string name="slider_less_detail">Less: printed less often than your reading would earn it.</string>
+    <string name="slider_auto_detail">Auto: the paper learns from what you open, read and like.</string>
+    <string name="slider_more_detail">More: favoured over what the paper has learned.</string>
+    <string name="slider_favourite_detail">Favourite: always treated as a source you love.</string>
+    <string name="slider_description">How much of %1$s to print</string>
+    <string name="mute_title">Mute %1$s</string>
+    <string name="mute_until">Muted until %1$s</string>
+    <string name="mute_unmute">Unmute</string>
+    <string name="mute_detail">A muted source is left out of new editions until the mute ends.</string>
+    <string name="mute_active_detail">Its posts are left out of new editions until then, and kept in search.</string>
+    <plurals name="mute_days">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <plurals name="mute_for_days">
+        <item quantity="one">Mute for %d day</item>
+        <item quantity="other">Mute for %d days</item>
+    </plurals>
+    <string name="contents_section">Section</string>
+
+    <!-- Sources: learning controls -->
+    <string name="sources_filter_all">All</string>
+    <string name="sources_filter_untagged">Untagged</string>
+    <string name="sources_filter_muted">Muted</string>
+    <string name="sources_filter_label">Show sources tagged</string>
+    <string name="sources_slider_hint">The slider sets how much of each source is printed. Auto lets the paper learn.</string>
+    <string name="source_edit">Edit %1$s</string>
+    <string name="source_edit_action">Edit source</string>
+    <string name="source_muted_until">Muted until %1$s</string>
+    <string name="detail_how_much">How much to print</string>
+    <string name="detail_tags">Tags</string>
+    <string name="detail_tags_hint">Each tag is a section page in the paper. A source can carry several; its stories run in the one you read most.</string>
+    <string name="detail_no_tags">No tags: its stories run in General.</string>
+    <string name="detail_add_existing">Your other tags</string>
+    <string name="detail_new_tag">New tag</string>
+    <string name="detail_tag_remove">Remove tag %1$s</string>
+    <string name="detail_tag_add">Add tag %1$s</string>
+    <string name="detail_mute">Mute</string>
+    <string name="detail_name">Name</string>
+    <string name="detail_rename">Rename</string>
+    <string name="detail_posts">See its posts</string>
+    <string name="detail_remove_section">Unsubscribe</string>
+    <string name="detail_remove">Remove this source</string>
+
+    <!-- Reader: end of article -->
+    <string name="reader_end_hint">Like tells the paper you enjoyed this. Save keeps it on your shelf for later.</string>
+    <string name="reader_end_liked">Liked. The paper will lean towards more like this.</string>
+    <string name="reader_end_saved">Saved to your shelf.</string>
+    <string name="reader_end_both">Liked, and saved to your shelf.</string>
 </resources>
