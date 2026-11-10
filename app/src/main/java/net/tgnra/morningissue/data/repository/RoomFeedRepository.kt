@@ -1,6 +1,6 @@
 package net.tgnra.morningissue.data.repository
 
-import androidx.room.withTransaction
+import androidx.room3.withWriteTransaction
 import java.time.Clock
 import java.time.Instant
 import kotlinx.coroutines.flow.Flow
@@ -33,11 +33,11 @@ class RoomFeedRepository(
 
     override fun observeTags(): Flow<List<Tag>> = tagDao.observeAll().map { tags -> tags.map { it.toModel() } }
 
-    override suspend fun addFeed(feed: NewFeed): AddFeedResult = database.withTransaction {
+    override suspend fun addFeed(feed: NewFeed): AddFeedResult = database.withWriteTransaction {
         val url = feed.url.trim()
         val key = FeedUrls.normalize(url)
         feedDao.getUrls().firstOrNull { FeedUrls.normalize(it.url) == key }?.let {
-            return@withTransaction AddFeedResult.AlreadySubscribed(it.id)
+            return@withWriteTransaction AddFeedResult.AlreadySubscribed(it.id)
         }
         val id = feedDao.insert(
             FeedEntity(
@@ -52,7 +52,7 @@ class RoomFeedRepository(
         AddFeedResult.Added(id)
     }
 
-    override suspend fun removeFeed(feedId: Long) = database.withTransaction {
+    override suspend fun removeFeed(feedId: Long) = database.withWriteTransaction {
         feedDao.delete(feedId)
         tagDao.deleteUnused()
     }

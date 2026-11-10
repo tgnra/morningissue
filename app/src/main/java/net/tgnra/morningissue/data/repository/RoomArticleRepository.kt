@@ -1,6 +1,6 @@
 package net.tgnra.morningissue.data.repository
 
-import androidx.room.withTransaction
+import androidx.room3.withWriteTransaction
 import java.time.Clock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -35,7 +35,7 @@ class RoomArticleRepository(
 
     override suspend fun markOpened(articleId: Long) = engagementDao.markOpened(articleId, clock.instant())
 
-    override suspend fun setReadFraction(articleId: Long, fraction: Float) = database.withTransaction {
+    override suspend fun setReadFraction(articleId: Long, fraction: Float) = database.withWriteTransaction {
         engagementDao.recordReadFraction(articleId, fraction)
         if (fraction >= config.readScrollFraction) engagementDao.markRead(articleId, clock.instant())
     }

@@ -3,7 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.androidx.room)
+    alias(libs.plugins.androidx.room3)
 }
 
 android {
@@ -51,7 +51,7 @@ android {
     }
 }
 
-room {
+room3 {
     schemaDirectory("$projectDir/schemas")
 }
 
@@ -74,9 +74,9 @@ dependencies {
 
     implementation(libs.androidx.navigation.compose)
 
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.room3.runtime)
+    implementation(libs.androidx.sqlite.framework)
+    ksp(libs.androidx.room3.compiler)
 
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.work.runtime.ktx)
@@ -94,7 +94,7 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.androidx.test.ext.junit)
-    testImplementation(libs.androidx.room.testing)
+    testImplementation(libs.androidx.room3.testing)
     testImplementation(libs.androidx.work.testing)
     testImplementation(libs.okhttp.mockwebserver)
     // A real XmlPullParser for plain JVM parser tests (android.jar only has stubs).
@@ -106,6 +106,6 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.kotlinx.coroutines.test)
-    androidTestImplementation(libs.androidx.room.testing)
+    androidTestImplementation(libs.androidx.room3.testing)
     androidTestImplementation(libs.androidx.work.testing)
 }

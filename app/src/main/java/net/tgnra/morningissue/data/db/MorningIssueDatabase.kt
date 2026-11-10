@@ -1,10 +1,11 @@
 package net.tgnra.morningissue.data.db
 
 import android.content.Context
-import androidx.room.Database
-import androidx.room.Room
-import androidx.room.RoomDatabase
-import androidx.room.TypeConverters
+import androidx.room3.Database
+import androidx.room3.Room
+import androidx.room3.RoomDatabase
+import androidx.sqlite.driver.AndroidSQLiteDriver
+import androidx.room3.ColumnTypeConverters
 
 @Database(
     entities = [
@@ -22,7 +23,7 @@ import androidx.room.TypeConverters
     version = 1,
     exportSchema = true,
 )
-@TypeConverters(Converters::class)
+@ColumnTypeConverters(Converters::class)
 abstract class MorningIssueDatabase : RoomDatabase() {
     abstract fun feedDao(): FeedDao
     abstract fun tagDao(): TagDao
@@ -31,14 +32,19 @@ abstract class MorningIssueDatabase : RoomDatabase() {
     abstract fun editionDao(): EditionDao
     abstract fun feedHealthDao(): FeedHealthDao
 
+    /**
+     * Room 3 needs an explicit SQLite driver. This is the platform's own SQLite, the engine
+     * the database has always run on, so FTS4 `MATCH` and `snippet` behave as before and
+     * Robolectric tests need no extra native library.
+     */
     companion object {
         const val NAME = "morningissue.db"
 
         fun create(context: Context): MorningIssueDatabase =
-            Room.databaseBuilder(context, MorningIssueDatabase::class.java, NAME).build()
+            Room.databaseBuilder<MorningIssueDatabase>(context, NAME).setDriver(AndroidSQLiteDriver()).build()
 
         /** For tests. */
         fun inMemory(context: Context): MorningIssueDatabase =
-            Room.inMemoryDatabaseBuilder(context, MorningIssueDatabase::class.java).build()
+            Room.inMemoryDatabaseBuilder<MorningIssueDatabase>(context).setDriver(AndroidSQLiteDriver()).build()
     }
 }

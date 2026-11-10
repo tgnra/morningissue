@@ -1,6 +1,6 @@
 package net.tgnra.morningissue.sync
 
-import androidx.room.withTransaction
+import androidx.room3.withWriteTransaction
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -186,7 +186,7 @@ class DefaultFeedSyncer(
                 Triple(article, content.blocks.takeIf { it.isNotEmpty() }?.let(ContentBlocks::encode), content.plainText)
             }
         }
-        return database.withTransaction {
+        return database.withWriteTransaction {
             rows.count { (article, blocksJson, plainText) ->
                 articleDao.insertNew(article, blocksJson, plainText.takeIf { blocksJson != null }) != null
             }

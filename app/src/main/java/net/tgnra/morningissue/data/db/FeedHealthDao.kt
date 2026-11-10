@@ -1,9 +1,9 @@
 package net.tgnra.morningissue.data.db
 
-import androidx.room.Dao
-import androidx.room.Query
-import androidx.room.Transaction
-import androidx.room.Upsert
+import androidx.room3.Dao
+import androidx.room3.Query
+import androidx.room3.Transaction
+import androidx.room3.Upsert
 import java.time.Instant
 import kotlinx.coroutines.flow.Flow
 import net.tgnra.morningissue.model.HealthFlag

@@ -1,6 +1,6 @@
 package net.tgnra.morningissue.edition
 
-import androidx.room.withTransaction
+import androidx.room3.withWriteTransaction
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -97,22 +97,22 @@ class RoomEditionPublisher(
      * through different publisher instances) end up with a single edition per date.
      */
     private suspend fun build(date: LocalDate, releaseAt: Instant, now: Instant, length: EditionLength): EditionEntity? =
-        database.withTransaction {
-            editionDao.getByDate(date, EditionKind.MORNING)?.let { return@withTransaction it }
+        database.withWriteTransaction {
+            editionDao.getByDate(date, EditionKind.MORNING)?.let { return@withWriteTransaction it }
 
             val previous = editionDao.getLatestByCutoff()
             val after = previous?.cutoffAt ?: now.minus(Duration.ofDays(config.firstEditionWindowDays))
             // The clock was set back past the last cutoff: nothing can be new yet.
-            if (!now.isAfter(after)) return@withTransaction null
+            if (!now.isAfter(after)) return@withWriteTransaction null
 
             val rows = articleDao.firstSeenBetween(after, now)
-            if (rows.isEmpty()) return@withTransaction null
+            if (rows.isEmpty()) return@withWriteTransaction null
             val feeds = feedDao.getAllWithDetails().map { it.toProfile() }
             // Later: held-over posts from loved slow feeds join the pool here. They must be
             // read after the unopened runs of [previous] are counted below, so that P already
             // includes the edition being superseded; new posts cannot have run in it.
             val draft = builder.build(rows.map { it.toCandidate() }, feeds, length, releaseAt)
-            if (draft.printed.isEmpty()) return@withTransaction null
+            if (draft.printed.isEmpty()) return@withWriteTransaction null
 
             // The previous edition is superseded: its unopened stories each count one more run.
             if (previous != null) engagementDao.countUnopenedRun(previous.id)

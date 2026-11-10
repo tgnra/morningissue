@@ -1,6 +1,6 @@
 package net.tgnra.morningissue.ui.debug
 
-import androidx.room.withTransaction
+import androidx.room3.withWriteTransaction
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -75,7 +75,7 @@ class SampleDataSeeder(
         val random = Random(SEED)
         var articleCount = 0
         var editionCount = 0
-        database.withTransaction {
+        database.withWriteTransaction {
             val now = clock.instant()
             val feedIds = feeds.associateWith { feed ->
                 val id = database.feedDao().insert(

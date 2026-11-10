@@ -1,6 +1,6 @@
 package net.tgnra.morningissue.data.db
 
-import androidx.room.TypeConverter
+import androidx.room3.ColumnTypeConverter
 import java.time.Instant
 import java.time.LocalDate
 
@@ -9,15 +9,15 @@ import java.time.LocalDate
  * Enums are stored by name (Room's built-in handling).
  */
 class Converters {
-    @TypeConverter
+    @ColumnTypeConverter
     fun instantToMillis(value: Instant?): Long? = value?.toEpochMilli()
 
-    @TypeConverter
+    @ColumnTypeConverter
     fun millisToInstant(value: Long?): Instant? = value?.let(Instant::ofEpochMilli)
 
-    @TypeConverter
+    @ColumnTypeConverter
     fun localDateToEpochDay(value: LocalDate?): Long? = value?.toEpochDay()
 
-    @TypeConverter
+    @ColumnTypeConverter
     fun epochDayToLocalDate(value: Long?): LocalDate? = value?.let(LocalDate::ofEpochDay)
 }

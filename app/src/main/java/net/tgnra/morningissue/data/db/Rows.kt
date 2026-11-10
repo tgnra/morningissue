@@ -1,20 +1,20 @@
 package net.tgnra.morningissue.data.db
 
-import androidx.room.Embedded
-import androidx.room.Junction
-import androidx.room.Relation
+import androidx.room3.Embedded
+import androidx.room3.Junction
+import androidx.room3.Relation
 import java.time.Instant
 
 /** A feed with its tags and health row. */
 data class FeedWithDetails(
     @Embedded val feed: FeedEntity,
     @Relation(
-        parentColumn = "id",
-        entityColumn = "id",
-        associateBy = Junction(FeedTagEntity::class, parentColumn = "feedId", entityColumn = "tagId"),
+        parentColumns = ["id"],
+        entityColumns = ["id"],
+        associateBy = Junction(FeedTagEntity::class, parentColumns = ["feedId"], entityColumns = ["tagId"]),
     )
     val tags: List<TagEntity>,
-    @Relation(parentColumn = "id", entityColumn = "feedId")
+    @Relation(parentColumns = ["id"], entityColumns = ["feedId"])
     val health: FeedHealthEntity?,
 )
 
