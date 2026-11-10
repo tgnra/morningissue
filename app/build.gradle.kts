@@ -6,6 +6,15 @@ plugins {
     alias(libs.plugins.androidx.room3)
 }
 
+// Release signing is configured only when all four variables are set (CI, or a local signed build).
+val releaseKeystoreFile = providers.environmentVariable("KEYSTORE_FILE").orNull
+val releaseKeystorePassword = providers.environmentVariable("KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("KEY_PASSWORD").orNull
+val hasReleaseSigning = listOf(
+    releaseKeystoreFile, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword
+).none { it.isNullOrBlank() }
+
 android {
     namespace = "net.tgnra.morningissue"
     // Current AndroidX, Compose, Coil and OkHttp releases require compiling against API 37.
@@ -17,14 +26,29 @@ android {
         applicationId = "net.tgnra.morningissue"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        // CI overrides these from the release tag: -PappVersionCode=<n> -PappVersionName=<x.y.z>
+        versionCode = providers.gradleProperty("appVersionCode").orNull?.toInt() ?: 1
+        versionName = providers.gradleProperty("appVersionName").orNull ?: "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystoreFile!!)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
