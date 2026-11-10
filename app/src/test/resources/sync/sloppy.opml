@@ -1,0 +1,24 @@
+
+
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!DOCTYPE opml>
+<OPML version="1.1">
+<HEAD><TITLE>Export&nbsp;2019</TITLE></HEAD>
+<BODY>
+  <!-- no type attribute, lower-case attribute names -->
+  <OUTLINE TEXT="Caf&eacute; Blog" xmlurl="https://cafe.example/feed?a=1&b=2" htmlurl="https://cafe.example/"/>
+  <outline text="Shouting" XMLURL="HTTPS://Shout.Example/RSS.xml"></outline>
+  <outline title="Folder &amp; Co">
+    <outline text="feed scheme" xmlUrl="feed://old.example/rss"/>
+    <outline text="feed prefix" xmlUrl="feed:https://prefixed.example/rss"/>
+    <outline text="no scheme" xmlUrl="bare.example/atom.xml"/>
+    <outline text="   " xmlUrl="  https://spaces.example/feed  "/>
+    <outline type="rss" text="url attribute" url="https://urlattr.example/rss"/>
+    <outline type="link" text="A web link, not a feed" url="https://not-a-feed.example/"/>
+    <outline text="Broken address" xmlUrl="ftp://files.example/feed"/>
+    <outline text="Empty address" xmlUrl=""/>
+    <outline text="https://titleisurl.example/feed" xmlUrl="https://titleisurl.example/feed"/>
+  </outline>
+  <outline text="Trémas" xmlUrl="https://latin.example/feed"/>
+</BODY>
+</OPML>

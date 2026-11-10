@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/" xml:base="https://blog.example.org/base/">
+  <title type="html">Field &amp;amp; Stream &lt;i&gt;Notes&lt;/i&gt;</title>
+  <subtitle>An Atom fixture</subtitle>
+  <link rel="self" href="https://blog.example.org/atom.xml"/>
+  <link rel="alternate" type="text/html" href="/"/>
+  <icon>/favicon.ico</icon>
+  <id>urn:uuid:60a76c80-d399-11d9-b93C-0003939e0af6</id>
+  <updated>2026-11-09T18:30:02Z</updated>
+  <author><name>Feed Author</name><email>feed@example.org</email></author>
+  <entry>
+    <title>XHTML entry</title>
+    <link rel="replies" href="https://blog.example.org/comments/1"/>
+    <link rel="alternate" type="text/html" href="posts/xhtml"/>
+    <id>tag:blog.example.org,2026:1</id>
+    <published>2026-11-09T10:00:00+02:00</published>
+    <updated>2026-11-09T18:30:02Z</updated>
+    <author><name>Entry Author</name></author>
+    <summary>A plain summary.</summary>
+    <content type="xhtml">
+      <div xmlns="http://www.w3.org/1999/xhtml">
+        <p>Written in <em>XHTML</em> with a <a href="other">link</a>.</p>
+        <blockquote><p>Quoted &amp; escaped.</p></blockquote>
+      </div>
+    </content>
+    <source><title>Not this title</title><id>not-this-id</id></source>
+  </entry>
+  <entry>
+    <title type="text">Escaped HTML entry, updated only</title>
+    <link href="https://blog.example.org/posts/html"/>
+    <id>tag:blog.example.org,2026:2</id>
+    <updated>2026-11-08 09:15:00</updated>
+    <content type="html">&lt;p&gt;Escaped &lt;strong&gt;HTML&lt;/strong&gt; content.&lt;/p&gt;&lt;p&gt;&lt;img src="/img/a.png"&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <title>A video</title>
+    <link rel="alternate" href="https://video.example.org/watch?v=abc"/>
+    <id>yt:video:abc</id>
+    <published>2026-11-07T00:00:00Z</published>
+    <media:group>
+      <media:title>A video</media:title>
+      <media:content url="https://video.example.org/v/abc" type="application/x-shockwave-flash"/>
+      <media:thumbnail url="https://img.example.org/abc/hq.jpg" width="480" height="360"/>
+      <media:description>First line of the description.
+
+Second paragraph.</media:description>
+    </media:group>
+  </entry>
+  <entry>
+    <title>No id, bad date</title>
+    <link href="https://blog.example.org/posts/no-id"/>
+    <updated>0001-01-01T00:00:00Z</updated>
+    <summary type="html">&lt;p&gt;Only a summary.&lt;/p&gt;</summary>
+  </entry>
+</feed>
