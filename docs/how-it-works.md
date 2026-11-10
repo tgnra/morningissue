@@ -295,7 +295,7 @@ Opening the app before the reset time shows the current edition, whose back page
 
 No edition is built unless at least one post first seen since the previous cutoff is printed. If there are no new posts, or they are all muted, too old or already read, nothing is stored. Held-over posts alone do not make a paper. The cutoff stays where it was, the previous edition stays current, and the posts are offered to the next build.
 
-On the newsstand the cover is then captioned "Latest edition" with its date instead of "Today's edition". A clearer notice that there is no new edition today is in progress.
+The newsstand then says so: a "No new edition today" notice above the cover names the last paper, gives the time of the next edition and offers a link to check for new posts, and the cover is captioned "Latest edition" with its date instead of "Today's edition". The notice only appears once the on-open check has finished.
 
 ### Long gaps
 
@@ -377,6 +377,7 @@ Newsstand ─┬─ Paper ── Reader
 
 - A horizontal pager over the edition's pages: front page, Top stories, sections, In brief, From the archive, back page. Pages slide; each page scrolls vertically when its stories exceed the screen.
 - A line across the top has the way back to the stand, the date and edition number, and "Page 3 of 7" over a thin progress bar. Tapping the page count opens a contents list.
+- Every story has a menu, opened by a long press or the "⋯" at the end of its byline: Save, Like, "Why is this here?" with the stored reason, Show less and Show more (each moves the feed's slider one step), mute the source for 1, 3, 7 or 30 days, and a link to more from the source. Changes shape the next edition; today's stays as printed.
 - **Front page**: the masthead (the app's name set modestly, the date, the edition number and the estimated reading time), the lead story, then the secondaries in a grid. A lead with a photo gets the photo, the headline and a two-line standfirst. Without a photo the headline grows, the standfirst runs to four lines, and heavy rules sit above and below.
 - **Inside pages**: a page heading, the page's first story with its excerpt, then the rest in the grid. Stories sit on the page divided by thin rules, with no cards or shadows.
 - **In brief**: headlines with source names, divided by hairlines.
@@ -387,7 +388,7 @@ Newsstand ─┬─ Paper ── Reader
 
 - The article rendered natively from the block model, with no WebView: the source name (which opens its source page), headline, author, date, reading time, lead image, body.
 - A progress bar, a five-step text size control that is remembered, and a button to open the article in the browser.
-- Like and Save buttons at the end of the article.
+- Like and Save switches at the end of the article, then a link to more from the source.
 - When no body is stored, the reader shows the feed's summary and says what is happening: the full text is being fetched, it could not be fetched, or the feed gave no text.
 - Scroll depth and time spent here are the Read signal.
 
@@ -397,16 +398,15 @@ A month calendar of every released edition, read ones ticked, with the month's e
 
 ### Sources (`ui/sources/`)
 
-- The list of feeds, each with its tier, how often it posts and its host. A feed can be opened or removed.
+- The list of feeds, each with its tier, how often it posts, its host, its tags and the 5-step slider (Rarely, Less, Auto, More, Favourite). Chips at the top filter by tag, Untagged or Muted. A muted feed shows when the mute ends, with Unmute.
+- Feed detail, opened from the pencil on a row or from the source page: slider, tag editor, mute, rename, open the website, and remove with confirmation.
 - Add a feed by address; import and export OPML from the overflow menu.
 - A source page lists the feed's 200 most recent posts in date order, with its tags.
 - The Subscriptions desk screen exists as a placeholder that says the feed health check is not built.
 
-The slider, tag editing, muting and renaming are stored and applied by the engine, but their controls are in progress.
-
 ### Saved and search
 
-- **Saved** (`ui/saved/`): two lists, Saved and Liked, most recent first.
+- **Saved** (`ui/saved/`): two shelves, Saved and Liked, most recent first, each with a remove button and Undo.
 - **Search** (`ui/search/`): one field, full-text search over every stored post, newest first, with a matching excerpt. Each word is a prefix and all must match. Filters are not built.
 
 ### Settings (`ui/settings/`)
@@ -503,6 +503,5 @@ Signing is configured in `app/build.gradle.kts` only when `KEYSTORE_FILE`, `KEYS
 
 These are described in [`todo.md`](../todo.md) with the detail needed to build them.
 
-- **In progress:** the long-press story menu with "Why is this here?", the slider, tags and mute controls in Sources, and the "no new edition today" notice.
 - **Planned:** While you were away, search filters, cross-feed deduplication, the feed health check and Subscriptions desk, the storage budget, archive export and import, the 3D page turn, the Evening edition, and a benchmark for the on-open build.
 - **Out of scope for now:** notifications, compression of stored content, and PDF export.

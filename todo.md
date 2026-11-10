@@ -17,18 +17,18 @@ What is built, what is being built and what is left. How the built parts work is
 - [x] **Release signing** and a tag-triggered release workflow (see Known rough edges: it has not run yet).
 - [x] **Learning, engine and data half**: affinity learning from opens, reads, Saves and Likes; tag affinity and tag borrowing; slider caps and floors applied in scoring; mutes respected by the builder; section pages; held-over posts; lead at most twice; From the archive; a stored reason line per story.
 
-## In progress: learning, user interface
+## Done: learning, user interface
 
-Being finished on a separate branch. The engine and data side of each item is already merged; these are the controls.
+Merged. Checked on a phone emulator with real feeds; see Known rough edges for what was not checked.
 
-- [ ] **Long-press story menu** on every story block: Save, Like, Show more and Show less (each moves the feed's slider one step), Mute for 1, 3, 7 or 30 days, and Why is this here?
-- [ ] **Why is this here?** shows the story's stored reason line (`edition_item.reason`), with Show more and Show less beside it as the correction point.
-- [ ] **5-step slider in Sources**: Rarely, Less, Auto, More, Favourite, with Auto in the centre.
-- [ ] **Tags in Sources**: add and remove tags on a feed.
-- [ ] **Feed detail**: slider, tags, mute, rename and remove for one feed in one place.
-- [ ] **Saved and Liked shelves**: finish the lists and show Liked and Saved marks on story bylines.
-- [ ] **Section and From the archive pages**: visual polish now that the builder produces them.
-- [ ] **"No new edition today" notice** on the newsstand when the latest edition is not today's because there were no new posts.
+- [x] **Long-press story menu** on every story block: Save, Like, Show more and Show less (each moves the feed's slider one step), Mute for 1, 3, 7 or 30 days, and Why is this here?
+- [x] **Why is this here?** shows the story's stored reason line (`edition_item.reason`), with Show more and Show less beside it as the correction point.
+- [x] **5-step slider in Sources**: Rarely, Less, Auto, More, Favourite, with Auto in the centre.
+- [x] **Tags in Sources**: add and remove tags on a feed.
+- [x] **Feed detail**: slider, tags, mute, rename and remove for one feed in one place.
+- [x] **Saved and Liked shelves**: finish the lists and show Liked and Saved marks on story bylines.
+- [x] **Section and From the archive pages**: visual polish now that the builder produces them.
+- [x] **"No new edition today" notice** on the newsstand when the latest edition is not today's because there were no new posts.
 
 ## Milestone 3: polish
 
@@ -193,6 +193,13 @@ Dropped when the design moved from a live ranked feed to a daily edition:
 - [ ] **`targetSdk` is 36 while `compileSdk` is 37.**
 - [ ] **E-ink has no tap zones.** Paging is by swipe, keys and the Previous and Next buttons.
 - [ ] **Source comments still cite the deleted plan files** by name ("v1 Live feed", "v2 Daily edition") in `engine/RankingConfig.kt`, `Scorer.kt`, `Cadence.kt`, `EditionBuilder.kt` and `Affinity.kt`. Point them at `docs/how-it-works.md` when those files are next touched.
+
+- [ ] In two-column story cells the byline truncates because the "⋯" menu button takes room.
+- [ ] Undo on the Saved and Liked shelves puts the story back at the top, because re-saving stamps a new time. Exposing `savedAt` / `likedAt` on `ArticleSummary` would fix it.
+- [ ] An OPML import in flight is lost on rotation (add-feed discovery survives it).
+- [ ] Dialogs drawn with the older `PaperDialog` leave the screen beneath visible to screen readers. TalkBack and right-to-left layouts have not been tested at all.
+- [ ] The contents list counts In brief lines as "stories".
+- [ ] Comments in `ui/reader/ReadRule.kt`, `sync/DefaultFeedSyncer.kt` and `ScorerTest.kt` also refer to the deleted v1/v2 plan files.
 
 ## Open questions
 
