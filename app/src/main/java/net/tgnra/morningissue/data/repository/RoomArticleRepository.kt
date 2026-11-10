@@ -25,6 +25,7 @@ class RoomArticleRepository(
 ) : ArticleRepository {
     private val articleDao = database.articleDao()
     private val engagementDao = database.engagementDao()
+    private val learner = AffinityLearner(database, config)
 
     override fun observeReaderArticle(articleId: Long): Flow<ReaderArticle?> =
         combine(articleDao.observeRow(articleId), articleDao.observeContent(articleId)) { row, content ->
@@ -33,20 +34,40 @@ class RoomArticleRepository(
 
     override suspend fun getReaderArticle(articleId: Long): ReaderArticle? = observeReaderArticle(articleId).first()
 
-    override suspend fun markOpened(articleId: Long) = engagementDao.markOpened(articleId, clock.instant())
+    override suspend fun markOpened(articleId: Long) = engage(articleId) {
+        engagementDao.markOpened(articleId, clock.instant())
+    }
 
-    override suspend fun setReadFraction(articleId: Long, fraction: Float) = database.withWriteTransaction {
+    override suspend fun setReadFraction(articleId: Long, fraction: Float) = engage(articleId) {
         engagementDao.recordReadFraction(articleId, fraction)
         if (fraction >= config.readScrollFraction) engagementDao.markRead(articleId, clock.instant())
     }
 
-    override suspend fun markRead(articleId: Long) = engagementDao.markRead(articleId, clock.instant())
+    override suspend fun markRead(articleId: Long) = engage(articleId) {
+        engagementDao.markRead(articleId, clock.instant())
+    }
 
-    override suspend fun setLiked(articleId: Long, liked: Boolean) =
+    override suspend fun setLiked(articleId: Long, liked: Boolean) = engage(articleId) {
         engagementDao.setLiked(articleId, if (liked) clock.instant() else null)
+    }
 
-    override suspend fun setSaved(articleId: Long, saved: Boolean) =
+    override suspend fun setSaved(articleId: Long, saved: Boolean) = engage(articleId) {
         engagementDao.setSaved(articleId, if (saved) clock.instant() else null)
+    }
+
+    /**
+     * Runs [change] and, when it altered what affinity learns from (the opened, read, saved or
+     * Liked state; not the scroll position alone), relearns feed and tag affinity in the same
+     * transaction.
+     */
+    private suspend fun engage(articleId: Long, change: suspend () -> Unit) = database.withWriteTransaction {
+        val before = engagementDao.get(articleId)
+        change()
+        val after = engagementDao.get(articleId)
+        val changed = before?.openedAt != after?.openedAt || before?.readAt != after?.readAt ||
+            (before?.savedAt == null) != (after?.savedAt == null) || (before?.likedAt == null) != (after?.likedAt == null)
+        if (changed) learner.refresh(clock.instant())
+    }
 
     override fun observeSaved(): Flow<List<ArticleSummary>> = articleDao.observeSaved().map(::toSummaries)
 

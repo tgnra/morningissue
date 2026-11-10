@@ -60,14 +60,15 @@ abstract class ArticleDao {
     abstract suspend fun firstSeenBetween(after: Instant, upTo: Instant): List<ArticleRow>
 
     /**
-     * Never-opened posts of the given feeds first seen at or before [upTo], newest first:
-     * the held-over pool for loved slow feeds.
+     * The held-over pool of one loved slow feed: its posts first seen at or before [upTo] that
+     * the reader has not touched (never opened, read, saved or Liked), newest first.
      */
     @Query(
-        "$ROW_SELECT WHERE a.feedId IN (:feedIds) AND a.firstSeenAt <= :upTo AND g.openedAt IS NULL " +
-            "ORDER BY a.publishedAt DESC LIMIT :limit",
+        "$ROW_SELECT WHERE a.feedId = :feedId AND a.firstSeenAt <= :upTo AND g.openedAt IS NULL " +
+            "AND g.readAt IS NULL AND g.savedAt IS NULL AND g.likedAt IS NULL " +
+            "ORDER BY a.publishedAt DESC, a.id DESC LIMIT :limit",
     )
-    abstract suspend fun unopenedForFeeds(feedIds: List<Long>, upTo: Instant, limit: Int): List<ArticleRow>
+    abstract suspend fun heldOverForFeed(feedId: Long, upTo: Instant, limit: Int): List<ArticleRow>
 
     @Query("$ROW_SELECT WHERE a.feedId = :feedId ORDER BY a.publishedAt DESC LIMIT :limit")
     abstract fun observeForFeed(feedId: Long, limit: Int): Flow<List<ArticleRow>>

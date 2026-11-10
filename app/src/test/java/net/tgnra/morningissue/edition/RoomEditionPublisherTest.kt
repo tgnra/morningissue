@@ -333,12 +333,13 @@ class RoomEditionPublisherTest {
                 EditionPage.Front::class,
                 EditionPage.TopStories::class,
                 EditionPage.TopStories::class,
+                EditionPage.Section::class,
                 EditionPage.InBrief::class,
                 EditionPage.Back::class,
             ),
             edition.pages.map { it::class },
         )
-        assertEquals((1..5).toList(), edition.pages.map { it.number })
+        assertEquals((1..6).toList(), edition.pages.map { it.number })
 
         val front = edition.pages[0] as EditionPage.Front
         assertNotNull(front.lead)
@@ -348,13 +349,17 @@ class RoomEditionPublisherTest {
         assertEquals(edition.pages.flatMap { it.stories }.maxOf { it.score }, front.lead!!.score, 0.0)
         assertEquals(8, edition.pages[1].stories.size)
         assertEquals(8, edition.pages[2].stories.size)
-        val briefs = edition.pages[3] as EditionPage.InBrief
+        // The feeds carry no tags, so the one section is General.
+        val general = edition.pages[3] as EditionPage.Section
+        assertEquals("General", general.name)
+        assertEquals(6, general.stories.size)
+        val briefs = edition.pages[4] as EditionPage.InBrief
         assertEquals(15, briefs.stories.size)
         assertTrue(briefs.stories.all { it.feedId == wire })
 
-        val back = edition.pages[4] as EditionPage.Back
+        val back = edition.pages[5] as EditionPage.Back
         assertEquals(Instant.parse("2026-11-11T06:30:00Z"), back.nextEditionAt)
-        assertEquals(70 - 5 - 16 - 15, back.stories.size)
+        assertEquals(70 - 5 - 16 - 6 - 15, back.stories.size)
         assertEquals(back.alsoInYourFeeds.map { it.feedId }.distinct(), back.alsoInYourFeeds.map { it.feedId })
         assertEquals(
             back.alsoInYourFeeds.map { it.feedTitle }.sortedWith(String.CASE_INSENSITIVE_ORDER),
@@ -379,7 +384,7 @@ class RoomEditionPublisherTest {
 
         assertEquals(EditionLength.SHORT, db.editionDao().getById(id)!!.length)
         val perPage = db.editionDao().getItems(id).filter { it.item.kind != ItemKind.INDEX }.groupBy { it.item.page }
-        assertEquals(listOf(5, 4, 4), perPage.toSortedMap().values.map { it.size })
+        assertEquals(listOf(5, 4, 4, 3), perPage.toSortedMap().values.map { it.size })
     }
 
     @Test

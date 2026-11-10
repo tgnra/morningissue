@@ -20,7 +20,7 @@ data class EditionLimits(
 
     companion object {
         /**
-         * Standard takes [config]'s sizes as they are (5 + 16 mixed stories, sections to come,
+         * Standard takes [config]'s sizes as they are (5 + 16 mixed stories, 6 per section,
          * plus 15 briefs); Short and Long scale the per-page sizes of everything after the
          * front page, which gives 13 and 29 mixed stories with 8 and 23 briefs.
          */
@@ -45,7 +45,7 @@ data class EditionLimits(
 /**
  * Lays out an edition. Pure: the same candidates, feeds, length and release time always give
  * the same draft. [build] follows the numbered steps of "Edition assembly" in the v2 spec;
- * the steps that later milestones fill in are marked where they belong.
+ * the one step a later milestone fills in (dedupe) is marked where it belongs.
  */
 class EditionBuilder(
     private val config: RankingConfig = RankingConfig.Default,
@@ -68,15 +68,18 @@ class EditionBuilder(
     }
 
     /**
-     * @param candidates posts first seen since the previous cutoff (plus, later, held-over ones)
+     * @param candidates posts first seen since the previous cutoff, plus the held-over posts
+     *   of loved slow feeds (`Candidate.isHeldOver`)
      * @param feeds every subscribed feed; candidates of feeds not listed are ignored
      * @param releaseAt the edition's release time, the moment freshness is measured at
+     * @param tagAffinity learned affinity by tag name; a tag not listed counts as neutral
      */
     fun build(
         candidates: List<Candidate>,
         feeds: List<FeedProfile>,
         length: EditionLength,
         releaseAt: Instant,
+        tagAffinity: Map<String, Double> = emptyMap(),
     ): EditionDraft {
         val limits = EditionLimits.of(config, length)
         val layout = Layout()
@@ -90,21 +93,54 @@ class EditionBuilder(
 
         // A post the reader has already finished scores 0: it is listed, never printed again.
         val (printable, finished) = unique.partition { it.score.value > 0.0 }
+        // Carry-over: who may still be printed on the regular pages.
+        val carry = applyCarryOver(printable)
 
         // 4. Lay out the front page.
-        var remaining = layOutFrontPage(printable, limits, layout)
+        var remaining = layOutFrontPage(carry.regular, limits, layout)
         // 5. Fill Top stories, then sections.
         remaining = fillTopStories(remaining, limits, layout)
-        remaining = fillSections(remaining, limits, layout)
+        remaining = fillSections(remaining, limits, layout, tagAffinity)
         // 6. Fill In brief.
         remaining = fillInBrief(remaining, limits, layout)
         // 7. Pick From the archive.
-        remaining = pickFromTheArchive(remaining, layout)
+        remaining = pickFromTheArchive((remaining + carry.archiveOnly).sortedBy { it.rank }, layout)
         // Everything left over goes in the back-page index, "Also in your feeds".
-        indexLeftovers(remaining + finished, layout)
+        indexLeftovers(remaining + carry.retired + finished, layout)
         // 8. Freeze and store: the caller's job; a draft is never laid out again.
 
         return EditionDraft(length, releaseAt, layout.items, mutedSkipped = pool.muted, staleSkipped = pool.stale)
+    }
+
+    private class CarryOver(val regular: List<Ranked>, val archiveOnly: List<Ranked>, val retired: List<Ranked>)
+
+    /**
+     * The carry-over rules, applied to the ranked pool (order kept):
+     *
+     * - a post that already ran unopened and is not held over is **retired**: listed in the
+     *   index, never printed again;
+     * - a held-over post that has led the front page `maxLeadRuns` times, or whose score has
+     *   sunk under `heldOverMinScore`, is **archive only**: it leaves the regular pages and
+     *   can only come back through From the archive;
+     * - everything else competes for the regular pages on its score. For a held-over post that
+     *   score already carries P, halved for every edition it ran in unopened.
+     *
+     * Because a post that has led twice never reaches the front page again, the lead-twice
+     * limit needs no check of its own in step 4.
+     */
+    private fun applyCarryOver(printable: List<Ranked>): CarryOver {
+        val regular = ArrayList<Ranked>(printable.size)
+        val archiveOnly = ArrayList<Ranked>()
+        val retired = ArrayList<Ranked>()
+        for (item in printable) {
+            val candidate = item.candidate
+            when {
+                !candidate.isHeldOver -> if (candidate.editionsRunUnopened > 0) retired += item else regular += item
+                candidate.leadCount >= config.maxLeadRuns || item.score.value < config.heldOverMinScore -> archiveOnly += item
+                else -> regular += item
+            }
+        }
+        return CarryOver(regular, archiveOnly, retired)
     }
 
     /**
@@ -112,9 +148,9 @@ class EditionBuilder(
      * than `maxAgeDays` before release (a newly added feed's back catalogue; they stay on the
      * source page and in search), and repeats of the same article.
      *
-     * Later: the caller adds held-over unread posts from loved Weekly and Rare feeds, which
-     * are exempt from the age limit; posts that have led `maxLeadRuns` times leave the pool
-     * here and are only offered to From the archive.
+     * Held-over posts of loved Weekly and Rare feeds are exempt from the age limit: they stay
+     * eligible until read. A muted feed's held-over posts are skipped like its new ones and
+     * come back, still held over, once the mute has run out.
      */
     private fun buildPool(candidates: List<Candidate>, feeds: List<FeedProfile>, releaseAt: Instant): Pool {
         val feedsById = HashMap<Long, FeedProfile>(feeds.size * 2)
@@ -129,7 +165,7 @@ class EditionBuilder(
             if (!seen.add(candidate.articleId)) continue
             when {
                 feed.muteUntil?.isAfter(releaseAt) == true -> muted++
-                candidate.publishedAt.isBefore(oldest) -> stale++
+                !candidate.isHeldOver && candidate.publishedAt.isBefore(oldest) -> stale++
                 else -> kept += candidate to feed
             }
         }
@@ -223,12 +259,82 @@ class EditionBuilder(
     }
 
     /**
-     * Step 5b. Later: one `SECTION` page per tag ("General" for untagged feeds) with its top
-     * `limits.sectionStories` remaining stories; a feed with several tags goes where it scores
-     * best. No section pages yet.
+     * Step 5b. Section pages: one per tag with up to `limits.sectionStories` of the remaining
+     * stories, ranked within the tag, then General for feeds without tags.
+     *
+     * - **Which section.** A story of a feed with several tags goes to the tag with the
+     *   highest tag affinity (ties: name order). Stories are placed best first, so when that
+     *   section is already full the story spills to its next tag's section if there is still
+     *   room there, which is exactly when it makes that section's cut. If all its sections
+     *   are full it stays out and falls to In brief or the index; it does not go to General.
+     * - **Thin sections.** A tag with fewer than `sectionMinStories` stories gets no page; its
+     *   stories move to their other tag, or to General when they have none left. Thin tags
+     *   are dissolved one at a time, highest tag affinity first, and the placement redone, so
+     *   that the stories of a dissolved tag can fill out a lower-ranked one before that is
+     *   judged. A dissolved tag stays dissolved.
+     * - **Order.** Tag pages run by tag affinity, highest first (ties: name order). General
+     *   has no affinity of its own and is the catch-all, so it always comes last.
+     * - **General.** Holds untagged feeds' stories and those whose tags were all dissolved,
+     *   up to the same size. With fewer than `sectionMinStories` it gets no page either: its
+     *   story falls to In brief or the index like any other leftover.
+     *
+     * A tag called "General" (any case) is the General section. Every story is placed at
+     * most once. Returns what was not placed, in rank order.
      */
-    @Suppress("UNUSED_PARAMETER")
-    private fun fillSections(ranked: List<Ranked>, limits: EditionLimits, layout: Layout): List<Ranked> = ranked
+    private fun fillSections(
+        ranked: List<Ranked>,
+        limits: EditionLimits,
+        layout: Layout,
+        tagAffinity: Map<String, Double>,
+    ): List<Ranked> {
+        if (ranked.isEmpty()) return ranked
+        val byAffinity = compareByDescending<String> { tagAffinity[it] ?: config.neutralAffinity }
+            .thenBy(String.CASE_INSENSITIVE_ORDER) { it }
+            .thenBy { it }
+        val tagsByFeed = HashMap<Long, List<String>>()
+        fun tagsOf(feed: FeedProfile): List<String> = tagsByFeed.getOrPut(feed.id) {
+            feed.tags.map { it.trim() }
+                .filter { it.isNotEmpty() && !it.equals(GENERAL_SECTION, ignoreCase = true) }
+                .distinct()
+                .sortedWith(byAffinity)
+        }
+
+        val live = ranked.flatMap { tagsOf(it.feed) }.distinct().sortedWith(byAffinity).toMutableList()
+        var sections: Map<String, List<Ranked>>
+        while (true) {
+            sections = assignToSections(ranked, live, limits.sectionStories, ::tagsOf)
+            val thin = live.firstOrNull { (sections[it]?.size ?: 0) < config.sectionMinStories } ?: break
+            live.remove(thin)
+        }
+
+        val picked = ArrayList<Ranked>()
+        for (name in live + GENERAL_SECTION) {
+            val stories = sections[name].orEmpty()
+            if (stories.size < config.sectionMinStories) continue
+            val page = layout.newPage()
+            stories.forEachIndexed { slot, item -> layout.place(item, page, slot, ItemKind.SECTION, section = name) }
+            picked += stories
+        }
+        return ranked.without(picked)
+    }
+
+    /** One placement pass over [ranked], best first, with [live] the tags that may have a page. */
+    private fun assignToSections(
+        ranked: List<Ranked>,
+        live: List<String>,
+        size: Int,
+        tagsOf: (FeedProfile) -> List<String>,
+    ): Map<String, List<Ranked>> {
+        val sections = HashMap<String, MutableList<Ranked>>()
+        for (item in ranked) {
+            val wanted = tagsOf(item.feed).filter { it in live }
+            // Untagged, or every tag of the feed has been dissolved.
+            val choices = wanted.ifEmpty { listOf(GENERAL_SECTION) }
+            val section = choices.firstOrNull { (sections[it]?.size ?: 0) < size } ?: continue
+            sections.getOrPut(section) { ArrayList() } += item
+        }
+        return sections
+    }
 
     /** Step 6. Remaining Firehose and Daily posts scoring at least `briefMinScore`, best first. */
     private fun fillInBrief(ranked: List<Ranked>, limits: EditionLimits, layout: Layout): List<Ranked> {
@@ -246,11 +352,15 @@ class EditionBuilder(
     }
 
     /**
-     * Step 7. Later: one `ARCHIVE` page with the best held-over post that has not run in the
-     * last `archiveCooldownEditions` editions. Nothing is held over yet.
+     * Step 7. One `ARCHIVE` page with a single story: the best-scoring held-over post not
+     * placed elsewhere in this edition that has not run in the last `archiveCooldownEditions`
+     * editions (`Candidate.ranRecently`). [ranked] is in rank order.
      */
-    @Suppress("UNUSED_PARAMETER")
-    private fun pickFromTheArchive(ranked: List<Ranked>, layout: Layout): List<Ranked> = ranked
+    private fun pickFromTheArchive(ranked: List<Ranked>, layout: Layout): List<Ranked> {
+        val pick = ranked.firstOrNull { it.candidate.isHeldOver && !it.candidate.ranRecently } ?: return ranked
+        layout.place(pick, layout.newPage(), 0, ItemKind.ARCHIVE)
+        return ranked.without(listOf(pick))
+    }
 
     /**
      * "Also in your feeds": every post that was not printed, grouped by source. Sources run
@@ -268,16 +378,16 @@ class EditionBuilder(
         sorted.forEachIndexed { slot, item -> layout.place(item, page, slot, ItemKind.INDEX) }
     }
 
-    private fun Layout.place(item: Ranked, page: Int, slot: Int, kind: ItemKind) {
+    private fun Layout.place(item: Ranked, page: Int, slot: Int, kind: ItemKind, section: String? = null) {
         items += DraftItem(
             articleId = item.candidate.articleId,
             feedId = item.feed.id,
             page = page,
-            section = null,
+            section = section,
             slot = slot,
             kind = kind,
             score = item.score.value,
-            reason = scorer.reason(item.feed, item.candidate, item.score),
+            reason = scorer.reason(item.feed, item.candidate, item.score, kind),
         )
     }
 
@@ -287,5 +397,10 @@ class EditionBuilder(
         val gone = HashSet<Int>(picked.size * 2)
         picked.forEach { gone += it.rank }
         return filter { it.rank !in gone }
+    }
+
+    companion object {
+        /** The section for feeds without tags, and for stories whose tags have no page that day. */
+        const val GENERAL_SECTION = "General"
     }
 }

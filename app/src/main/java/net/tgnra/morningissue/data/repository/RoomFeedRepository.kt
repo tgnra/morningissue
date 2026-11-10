@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import net.tgnra.morningissue.data.db.FeedEntity
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
+import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.model.AddFeedResult
 import net.tgnra.morningissue.model.Feed
 import net.tgnra.morningissue.model.FeedUrls
@@ -17,7 +18,10 @@ import net.tgnra.morningissue.model.Tag
 class RoomFeedRepository(
     private val database: MorningIssueDatabase,
     private val clock: Clock,
+    config: RankingConfig = RankingConfig.Default,
 ) : FeedRepository {
+    /** Tags and subscriptions shape affinity (a feed borrows from its tags), so they relearn it. */
+    private val learner = AffinityLearner(database, config)
     private val feedDao = database.feedDao()
     private val tagDao = database.tagDao()
 
@@ -48,13 +52,17 @@ class RoomFeedRepository(
                 addedAt = clock.instant(),
             ),
         )
-        if (feed.tags.isNotEmpty()) tagDao.setFeedTags(id, feed.tags)
+        if (feed.tags.isNotEmpty()) {
+            tagDao.setFeedTags(id, feed.tags)
+            learner.refresh(clock.instant())
+        }
         AddFeedResult.Added(id)
     }
 
     override suspend fun removeFeed(feedId: Long) = database.withWriteTransaction {
         feedDao.delete(feedId)
         tagDao.deleteUnused()
+        learner.refresh(clock.instant())
     }
 
     override suspend fun renameFeed(feedId: Long, title: String) {
@@ -64,7 +72,10 @@ class RoomFeedRepository(
 
     override suspend fun setSliderStep(feedId: Long, step: SliderStep) = feedDao.updateSliderStep(feedId, step)
 
-    override suspend fun setTags(feedId: Long, tags: List<String>) = tagDao.setFeedTags(feedId, tags)
+    override suspend fun setTags(feedId: Long, tags: List<String>) = database.withWriteTransaction {
+        tagDao.setFeedTags(feedId, tags)
+        learner.refresh(clock.instant())
+    }
 
     override suspend fun setMutedUntil(feedId: Long, until: Instant?) = feedDao.updateMuteUntil(feedId, until)
 }

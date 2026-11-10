@@ -6,12 +6,13 @@ import kotlin.math.ln
 import kotlin.math.min
 import kotlin.math.pow
 import net.tgnra.morningissue.model.CadenceTier
+import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.model.SliderStep
 
 /**
- * Where a feed's learned affinity (0..1) comes from. Milestone 1 reads the feed row, which
- * holds the neutral 0.5 until affinity learning writes to it; a later milestone can swap in a
- * source that falls back to tag affinity without touching [Scorer].
+ * Where a feed's learned affinity (0..1) comes from. The default reads the value on the feed
+ * profile, which affinity learning keeps current with tag borrowing already applied (see
+ * [Affinity]); a test or an experiment can swap in another source without touching [Scorer].
  */
 fun interface AffinitySource {
     fun learnedAffinity(feed: FeedProfile): Double
@@ -47,6 +48,8 @@ class Scorer(
     private val config: RankingConfig = RankingConfig.Default,
     private val affinitySource: AffinitySource = AffinitySource.Stored,
 ) {
+    private val affinityRules = Affinity(config)
+
     /** Scores [candidate] of [feed] as of [at], the edition's release time. */
     fun score(feed: FeedProfile, candidate: Candidate, at: Instant): Score {
         val affinity = effectiveAffinity(affinitySource.learnedAffinity(feed), feed.sliderStep)
@@ -65,17 +68,8 @@ class Scorer(
         )
     }
 
-    /** The slider overrides learning: Rarely and Less cap it, More floors it, Favourite pins it. */
-    fun effectiveAffinity(learned: Double, slider: SliderStep): Double {
-        val affinity = learned.coerceIn(0.0, 1.0)
-        return when (slider) {
-            SliderStep.RARELY -> min(affinity, config.sliderRarelyCap)
-            SliderStep.LESS -> min(affinity, config.sliderLessCap)
-            SliderStep.AUTO -> affinity
-            SliderStep.MORE -> maxOf(affinity, config.sliderMoreFloor)
-            SliderStep.FAVOURITE -> config.sliderFavouriteValue
-        }
-    }
+    /** The slider applied to learned affinity; `Affinity.effective` is the one implementation. */
+    fun effectiveAffinity(learned: Double, slider: SliderStep): Double = affinityRules.effective(learned, slider)
 
     /** The feed's median interval, or its tier's typical one while cadence is unknown. */
     fun intervalHours(feed: FeedProfile): Double =
@@ -106,28 +100,43 @@ class Scorer(
         if (isRead) 0.0 else config.seenPenaltyBase.pow(editionsRunUnopened.coerceAtLeast(0))
 
     /**
-     * The one-line "Why is this here?" for a scored post, from its dominant factor. Each
-     * factor's pull is put on a 0..1 scale: affinity above neutral, scarcity above 1 towards
-     * its cap. A held-over post says so first; then a loved feed (or the user's own slider
-     * choice) or a rare feed, whichever pulls harder; a post neither explains is there because
-     * it is new.
+     * The one-line "Why is this here?" for a scored post. A From the archive pick and a
+     * held-over post say so first. Otherwise the dominant factor speaks, each factor's pull put
+     * on a 0..1 scale (affinity above neutral, scarcity above 1 towards its cap): a loved feed,
+     * worded after the user's own slider choice, what they read from the feed, or what they
+     * read from its tag when the affinity is borrowed; or a rare feed, whichever pulls harder.
+     * A post neither explains is there because it is new.
+     *
+     * @param kind where the post was placed, when known
      */
-    fun reason(feed: FeedProfile, candidate: Candidate, score: Score): String {
-        if (candidate.editionsRunUnopened > 0) {
-            return "Held over: still unread from ${feed.title}"
+    fun reason(feed: FeedProfile, candidate: Candidate, score: Score, kind: ItemKind? = null): String {
+        if (kind == ItemKind.ARCHIVE) {
+            return "From the archive: you have not read this one from ${feed.title} yet"
+        }
+        if (candidate.isHeldOver) {
+            return "Held over: still unread from ${feed.title}, ${lovedBecause(feed)}"
         }
         val affinityPull = ((score.affinity - config.neutralAffinity) / (1.0 - config.neutralAffinity)).coerceIn(0.0, 1.0)
         val scarcityPull = ((score.s - 1.0) / (config.scarcityCap - 1.0)).coerceIn(0.0, 1.0)
         val lovedPull = (config.lovedAffinity - config.neutralAffinity) / (1.0 - config.neutralAffinity)
         return when {
-            affinityPull >= lovedPull && affinityPull >= scarcityPull -> when (feed.sliderStep) {
-                SliderStep.FAVOURITE -> "${feed.title} is one of your favourites"
-                SliderStep.MORE -> "You asked to see more from ${feed.title}"
+            affinityPull >= lovedPull && affinityPull >= scarcityPull -> when {
+                feed.sliderStep == SliderStep.FAVOURITE -> "${feed.title} is one of your favourites"
+                feed.sliderStep == SliderStep.MORE -> "You asked to see more from ${feed.title}"
+                feed.borrowedFromTag != null -> "You read most posts tagged ${feed.borrowedFromTag}"
                 else -> "You read most posts from ${feed.title}"
             }
             scarcityPull >= RARE_PULL -> "Rare post: ${feed.title} publishes ${describeInterval(score.intervalHours)}"
             else -> "New from ${feed.title} since the last edition"
         }
+    }
+
+    /** Why a feed's posts are held over, as the tail of a sentence. */
+    private fun lovedBecause(feed: FeedProfile): String = when {
+        feed.sliderStep == SliderStep.FAVOURITE -> "one of your favourites"
+        feed.sliderStep == SliderStep.MORE -> "a source you asked to see more of"
+        feed.borrowedFromTag != null -> "in ${feed.borrowedFromTag}, which you read a lot"
+        else -> "a source you read a lot"
     }
 
     private fun describeInterval(hours: Double): String {
