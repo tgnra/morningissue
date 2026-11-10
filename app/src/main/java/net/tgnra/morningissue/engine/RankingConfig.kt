@@ -69,6 +69,32 @@ data class RankingConfig(
     val archiveCooldownEditions: Int = 3,
     /** The early build aims for this long before the reset time. */
     val earlyBuildLeadMinutes: Long = 90,
+    /**
+     * The early build only builds the coming edition when its reset is at most this far away;
+     * a job that ran late (after the reset it aimed for) settles for the current edition.
+     */
+    val earlyBuildMaxLeadMinutes: Long = 180,
+
+    // Cadence fallback: the interval assumed for a feed whose median interval is not known yet,
+    // by tier (v1's "typical median interval" column).
+    val firehoseTypicalIntervalHours: Double = 0.5,
+    val dailyTypicalIntervalHours: Double = 24.0,
+    val weeklyTypicalIntervalHours: Double = 168.0,
+    val rareTypicalIntervalHours: Double = 720.0,
+
+    // Edition assembly
+    /** In brief only takes posts scoring at least this. */
+    val briefMinScore: Double = 0.1,
+    /**
+     * Top stories diversity: a story's score counts times this for every story from the same
+     * feed already on the page (v1's greedy diversification). 1.0 switches it off.
+     */
+    val sameFeedPagePenalty: Double = 0.7,
+    /** Short and Long editions scale the per-page limits by these factors. */
+    val shortLengthScale: Double = 0.5,
+    val longLengthScale: Double = 1.5,
+    /** With no earlier edition, the first one covers posts first seen in this many days. */
+    val firstEditionWindowDays: Long = 3,
 ) {
     companion object {
         val Default = RankingConfig()
