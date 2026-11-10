@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>My subscriptions</title>
+    <dateCreated>Tue, 10 Nov 2026 06:30:00 GMT</dateCreated>
+  </head>
+  <body>
+    <outline type="rss" text="Top Level Blog" title="Top Level Blog" xmlUrl="https://top.example/feed.xml" htmlUrl="https://top.example/"/>
+    <outline text="Tech" title="Tech">
+      <outline type="rss" text="Kernel News" xmlUrl="https://kernel.example/rss" htmlUrl="https://kernel.example"/>
+      <outline text="Linux">
+        <outline type="atom" text="Distro Watch" xmlUrl="https://distro.example/atom.xml"/>
+        <outline text="Deep">
+          <outline type="rss" text="Deeply Nested" xmlUrl="https://deep.example/feed"/>
+        </outline>
+      </outline>
+    </outline>
+    <outline text="News">
+      <outline type="rss" text="Kernel News again" xmlUrl="http://www.kernel.example/rss/"/>
+      <outline type="rss" text="World &amp; Local" xmlUrl="https://world.example/feed?format=rss&amp;lang=en" category="/Politics/Europe,Daily"/>
+    </outline>
+    <outline text="Empty folder"/>
+  </body>
+</opml>

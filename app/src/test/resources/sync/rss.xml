@@ -1,0 +1,70 @@
+﻿
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="/rss.xsl"?>
+<rss version="2.0"
+     xmlns:content="http://purl.org/rss/1.0/modules/content/"
+     xmlns:dc="http://purl.org/dc/elements/1.1/"
+     xmlns:media="http://search.yahoo.com/mrss/"
+     xmlns:atom="http://www.w3.org/2005/Atom"
+     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>The Example &amp; Co. Journal</title>
+    <atom:link href="https://example.com/feed.xml" rel="self" type="application/rss+xml"/>
+    <link>https://example.com/</link>
+    <description>Things&nbsp;worth reading</description>
+    <image>
+      <url>/images/logo.png</url>
+      <title>Wrong title: this is the image's</title>
+      <link>https://example.com/wrong</link>
+    </image>
+    <item>
+      <title>Full post with everything</title>
+      <link>https://example.com/posts/full?a=1&b=2</link>
+      <guid isPermaLink="false">post-1</guid>
+      <pubDate>Mon, 09 Nov 2026 08:30:00 +0100</pubDate>
+      <dc:creator><![CDATA[Ada Lovelace]]></dc:creator>
+      <description><![CDATA[<p>A short <b>standfirst</b> for the post.</p>]]></description>
+      <content:encoded><![CDATA[
+        <p>First paragraph with a <a href="/about">relative link</a> &amp; an entity.</p>
+        <h2>A heading</h2>
+        <p><img src="/images/inline.jpg" width="800" height="600" alt="Inline"> Second paragraph.</p>
+      ]]></content:encoded>
+      <media:content url="https://cdn.example.com/lead.jpg" medium="image" width="1200">
+        <media:title>Not the post title</media:title>
+        <media:thumbnail url="https://cdn.example.com/thumb.jpg"/>
+      </media:content>
+      <enclosure url="https://cdn.example.com/enclosure.png" type="image/png" length="1"/>
+    </item>
+    <item>
+      <title>No guid, relative link, &lt;em&gt;markup&lt;/em&gt; in title</title>
+      <link>/posts/no-guid</link>
+      <pubDate>Sun, 8 Nov 26 7:05 EST</pubDate>
+      <author>grace@example.com (Grace Hopper)</author>
+      <description>Plain description with a caf&eacute; and an image &lt;img src="/images/desc.png"&gt; inside.</description>
+      <enclosure url="https://cdn.example.com/episode.mp3" type="audio/mpeg" length="123"/>
+    </item>
+    <item>
+      <title>No guid and no link</title>
+      <pubDate>not a date at all</pubDate>
+      <description>Identified by a hash of title and date.</description>
+    </item>
+    <item>
+      <title>Permalink guid stands in for the link</title>
+      <guid>https://example.com/posts/permalink</guid>
+      <dc:date>2026-11-07T12:00:00Z</dc:date>
+      <media:group>
+        <media:thumbnail url="https://cdn.example.com/group-thumb.jpg"/>
+      </media:group>
+    </item>
+    <item>
+      <description>A titleless microblog post that says just this.</description>
+      <guid isPermaLink="false">micro-1</guid>
+      <enclosure url="https://cdn.example.com/photo.jpg" type="image/jpeg"/>
+    </item>
+    <item>
+      <title>Full post with everything</title>
+      <guid isPermaLink="false">post-1</guid>
+      <description>A duplicate of the first item's guid; must be dropped.</description>
+    </item>
+  </channel>
+</rss>
