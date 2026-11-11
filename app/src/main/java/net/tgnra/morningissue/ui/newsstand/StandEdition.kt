@@ -36,9 +36,17 @@ object StandEditions {
      * when there is none). It reads dates only; see `edition.DueEditions` for whether the
      * edition for the most recent reset is missing for want of news or failed to build.
      */
-    fun of(newestDate: LocalDate?, now: Instant, resetTime: LocalTime, zone: ZoneId): StandEdition = when {
+    fun of(newestDate: LocalDate?, now: Instant, resetTime: LocalTime, zone: ZoneId): StandEdition =
+        of(newestDate, expectedDate(now, resetTime, zone))
+
+    /**
+     * The same, given the date of the edition that is due ([expected]). The stand passes the
+     * date of the due release from `DueEditions`, which follows the release schedule and so
+     * is not moved by a reset time changed earlier today.
+     */
+    fun of(newestDate: LocalDate?, expected: LocalDate): StandEdition = when {
         newestDate == null -> StandEdition.None
-        newestDate.isBefore(expectedDate(now, resetTime, zone)) -> StandEdition.NoNewEdition
+        newestDate.isBefore(expected) -> StandEdition.NoNewEdition
         else -> StandEdition.Current
     }
 

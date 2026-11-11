@@ -8,6 +8,8 @@ import net.tgnra.morningissue.sync.SyncComponents
 class EditionComponents(
     val publisher: EditionPublisher,
     val scheduler: EditionScheduler,
+    /** Changes the release times so that they apply from the next release. */
+    val releaseTimes: ReleaseTimes,
 )
 
 /**
@@ -33,6 +35,11 @@ object EditionModule {
             editionDao = core.database.editionDao(),
             clock = core.clock,
             scope = core.appScope,
+        ),
+        releaseTimes = ReleaseTimes(
+            settings = core.settings,
+            isBuilt = { date, kind -> core.database.editionDao().getByDate(date, kind) != null },
+            clock = core.clock,
         ),
     )
 }

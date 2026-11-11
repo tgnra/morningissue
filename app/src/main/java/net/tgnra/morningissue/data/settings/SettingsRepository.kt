@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.Flow
 import net.tgnra.morningissue.model.AppSettings
 import net.tgnra.morningissue.model.DisplayMode
 import net.tgnra.morningissue.model.EditionLength
+import net.tgnra.morningissue.model.ReleaseChange
 import net.tgnra.morningissue.model.ThemeMode
 
 /** User settings. Implemented by [DataStoreSettingsRepository]; read by every layer. */
@@ -13,8 +14,24 @@ interface SettingsRepository {
     /** Current settings, then every change. Emits defaults before anything has been saved. */
     val settings: Flow<AppSettings>
 
-    /** Sets the local time at which the morning edition is released (seconds are dropped). */
+    /**
+     * Sets the local time at which the morning edition is released (seconds are dropped), as
+     * if it had always been that time: any record of an earlier change is dropped. The app
+     * itself changes the time through `edition.ReleaseTimes`, which calls [changeResetTime].
+     */
     suspend fun setResetTime(time: LocalTime)
+
+    /**
+     * Sets the reset time together with [change], the record of how the change takes effect
+     * (from the next release, never retroactively), in one write.
+     */
+    suspend fun changeResetTime(time: LocalTime, change: ReleaseChange)
+
+    /**
+     * Sets the Evening edition's switch and time together with [change], the record of how
+     * that takes effect, in one write. A null [change] drops the record.
+     */
+    suspend fun changeEveningEdition(enabled: Boolean, time: LocalTime, change: ReleaseChange?)
 
     /** Applies to editions built from now on; stored editions keep their length. */
     suspend fun setEditionLength(length: EditionLength)
@@ -23,6 +40,7 @@ interface SettingsRepository {
 
     suspend fun setDisplayMode(mode: DisplayMode)
 
+    /** Applies at once and drops any record of an earlier change; see [changeEveningEdition]. */
     suspend fun setEveningEditionEnabled(enabled: Boolean)
 
     /**

@@ -3,6 +3,21 @@ package net.tgnra.morningissue.model
 import java.time.Instant
 import java.time.LocalTime
 
+/**
+ * How a change to a release time (the morning reset or the Evening edition's time) takes
+ * effect: the release instants on either side of it. A change applies from the next release
+ * and never to one that has already come; `engine.ReleaseSchedule` has the rule and reads
+ * this back, and `edition.ReleaseTimes` writes it.
+ */
+data class ReleaseChange(
+    /** The latest release when the change was made. It stays the latest release until [kept] or [from]. Null if there had been none. */
+    val settled: Instant?,
+    /** A coming release that stays at the old time, because the new time had passed for its date or its edition was already built. */
+    val kept: Instant?,
+    /** The first release at the new time. From this instant on the record no longer matters. */
+    val from: Instant,
+)
+
 /** User settings. Defaults here are the app's defaults. */
 data class AppSettings(
     /** Local time at which a new morning edition is released. */
@@ -25,6 +40,10 @@ data class AppSettings(
      * from one that failed to build: see `edition.DueEditions`.
      */
     val nothingNewFor: List<Instant> = emptyList(),
+    /** How the last change of [resetTime] takes effect; null when it was never changed. */
+    val resetChange: ReleaseChange? = null,
+    /** How the last change of [eveningEditionTime], or switching the Evening edition on, takes effect. */
+    val eveningChange: ReleaseChange? = null,
 ) {
     companion object {
         val DEFAULT_RESET_TIME: LocalTime = LocalTime.of(6, 30)

@@ -28,6 +28,7 @@ import net.tgnra.morningissue.engine.EditionClock
 import net.tgnra.morningissue.engine.EditionDraft
 import net.tgnra.morningissue.engine.FeedProfile
 import net.tgnra.morningissue.engine.RankingConfig
+import net.tgnra.morningissue.engine.schedule
 import net.tgnra.morningissue.model.AppSettings
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
@@ -109,7 +110,7 @@ class RoomEditionPublisher(
         val now = clock.instant()
         val settings = settings.settings.first()
         val zone = zone()
-        val reset = EditionClock.latestReset(now, settings.resetTime, zone)
+        val reset = settings.schedule.latestReset(now, zone)
         val date = EditionClock.editionDate(reset, zone)
 
         val released = editionDao.getLatestReleasedOf(EditionKind.MORNING, now)
@@ -119,10 +120,9 @@ class RoomEditionPublisher(
                 build(EditionKind.MORNING, date, releaseAt = reset, now = now, length = settings.editionLength)
             }
         }
-        if (settings.eveningEditionEnabled) {
-            EditionClock.currentEveningRelease(now, settings.resetTime, settings.eveningEditionTime, zone)?.let { evening ->
-                build(EditionKind.EVENING, EditionClock.editionDate(evening, zone), releaseAt = evening, now = now, length = settings.editionLength)
-            }
+        // Null when the Evening edition is switched off.
+        settings.schedule.currentEveningRelease(now, zone)?.let { evening ->
+            build(EditionKind.EVENING, EditionClock.editionDate(evening, zone), releaseAt = evening, now = now, length = settings.editionLength)
         }
         // Whatever is newest on the stand, of any kind. An edition whose own release time is
         // still ahead (built early, or see "Time zones") is not shown yet.
@@ -133,13 +133,13 @@ class RoomEditionPublisher(
         val now = clock.instant()
         val settings = settings.settings.first()
         val zone = zone()
-        val next = EditionClock.nextRelease(now, settings.resetTime, settings.eveningTimeIfEnabled, zone)
+        val next = settings.schedule.nextRelease(now, zone)
         build(next.kind, EditionClock.editionDate(next.at, zone), releaseAt = next.at, now = now, length = settings.editionLength)?.id
     }
 
     override suspend fun nextReleaseAt(): Instant? {
         val settings = settings.settings.first()
-        return EditionClock.nextRelease(clock.instant(), settings.resetTime, settings.eveningTimeIfEnabled, zone()).at
+        return settings.schedule.nextRelease(clock.instant(), zone()).at
     }
 
     override suspend fun publishExtraEdition(feedIds: Set<Long>): Long? = mutex.withLock {
@@ -149,8 +149,6 @@ class RoomEditionPublisher(
         val date = now.atZone(zone()).toLocalDate()
         build(EditionKind.EXTRA, date, releaseAt = now, now = now, length = settings.editionLength, extraFeedIds = feedIds)?.id
     }
-
-    private val AppSettings.eveningTimeIfEnabled get() = eveningEditionTime.takeIf { eveningEditionEnabled }
 
     /**
      * Returns the [kind] edition for [date], building and storing it first if it is missing;

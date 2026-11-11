@@ -28,6 +28,7 @@ import net.tgnra.morningissue.edition.EditionModule
 import net.tgnra.morningissue.edition.EditionPrinter
 import net.tgnra.morningissue.edition.EditionPublisher
 import net.tgnra.morningissue.edition.EditionScheduler
+import net.tgnra.morningissue.edition.ReleaseTimes
 import net.tgnra.morningissue.sync.FeedDiscovery
 import net.tgnra.morningissue.sync.FeedSyncer
 import net.tgnra.morningissue.sync.FullTextFetcher
@@ -64,6 +65,9 @@ interface AppContainer {
 
     val editionPublisher: EditionPublisher
     val editionScheduler: EditionScheduler
+
+    /** Changes the reset time and the Evening edition's time so that they apply from the next release. */
+    val releaseTimes: ReleaseTimes
 
     /** Print now: the foreground build of an edition that was not printed in the background. */
     val editionPrinter: EditionPrinter
@@ -151,6 +155,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
 
     override val editionPublisher: EditionPublisher get() = edition.publisher
     override val editionScheduler: EditionScheduler get() = edition.scheduler
+    override val releaseTimes: ReleaseTimes get() = edition.releaseTimes
     override val editionPrinter: EditionPrinter by lazy {
         EditionPrinter(appScope, earlyBuild = { EarlyBuild.from(appContext, this) }, clock = clock)
     }

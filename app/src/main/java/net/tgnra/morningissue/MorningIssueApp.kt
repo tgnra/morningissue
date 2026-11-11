@@ -20,7 +20,7 @@ class MorningIssueApp : Application(), SingletonImageLoader.Factory {
             container.syncScheduler.ensurePeriodicSync()
             // Runs once now and again whenever a release time changes.
             container.settings.settings
-                .map { Triple(it.resetTime, it.eveningEditionEnabled, it.eveningEditionTime) }
+                .map { listOf(it.resetTime, it.eveningEditionEnabled, it.eveningEditionTime, it.resetChange, it.eveningChange) }
                 .distinctUntilChanged()
                 .collect { container.editionScheduler.scheduleEarlyBuild() }
         }

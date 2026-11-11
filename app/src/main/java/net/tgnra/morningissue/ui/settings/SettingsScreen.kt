@@ -77,7 +77,8 @@ fun SettingsScreen(
                     onDismiss = { pickingTime = false },
                     onConfirm = { time ->
                         pickingTime = false
-                        scope.launch { container.settings.setResetTime(time) }
+                        // From the next release: see `ReleaseTimes`.
+                        scope.launch { container.releaseTimes.setResetTime(time) }
                     },
                 )
             }
@@ -89,7 +90,7 @@ fun SettingsScreen(
                     onDismiss = { pickingEveningTime = false },
                     onConfirm = { time ->
                         pickingEveningTime = false
-                        scope.launch { container.settings.setEveningEditionTime(time) }
+                        scope.launch { container.releaseTimes.setEveningEditionTime(time) }
                     },
                 )
             }
@@ -120,7 +121,7 @@ fun SettingsScreen(
                                 true to stringResource(R.string.settings_evening_on),
                             ),
                             selected = settings.eveningEditionEnabled,
-                            onSelect = { scope.launch { container.settings.setEveningEditionEnabled(it) } },
+                            onSelect = { scope.launch { container.releaseTimes.setEveningEditionEnabled(it) } },
                         )
                         if (settings.eveningEditionEnabled) {
                             PaperButton(

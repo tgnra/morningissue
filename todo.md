@@ -119,7 +119,9 @@ Built; see "When an edition failed to build" in `docs/how-it-works.md`. Not seen
 - [x] Print now runs the early build's stages in the foreground from an app-scoped holder (`EditionPrinter`): sync, build, full text, pictures, with progress; it survives rotation and leaving the screen, cannot be started twice, prints from stored posts when offline and says so, and offers Try again on failure.
 - [x] `nothingNewFor` in the settings store records the releases a run found nothing new for, so "No new edition today" is not mistaken for a failure.
 - [ ] Look at the placeholder, the progress display and the result notices on a phone, a small tablet and a landscape tablet, in Light, Dark and E-ink.
-- [ ] Changing the reset time to one that has already passed today puts the placeholder up at once, because that reset is now due and unprinted. Decide whether that is wanted.
+- [x] A changed reset time or Evening edition time applies from the next release, never retroactively (`ReleaseSchedule`, `ReleaseTimes`), so changing it no longer puts the placeholder up. An edition already built for the old time is released at the old time.
+- [ ] Settings does not say when a changed time takes effect ("from tomorrow's edition"). The schedule knows; the screen does not show it.
+- [ ] A release time changed while the early build is running is not handled specially.
 - [ ] Onboarding's first edition is still built by onboarding itself, without the full-text and picture prefetch and without recording "nothing new". If its sync found nothing recent, the stand shows the placeholder rather than the "nothing recent" empty state until Print now has been pressed once.
 - [ ] A Print now result notice stays on the stand until the next release time or the end of the process; it cannot be dismissed.
 - [ ] Print now's result says only whether the sources could be reached at all, not how many failed.

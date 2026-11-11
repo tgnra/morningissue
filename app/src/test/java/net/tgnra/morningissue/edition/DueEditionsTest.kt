@@ -5,6 +5,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import net.tgnra.morningissue.engine.ReleaseSchedule
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.EditionSummary
@@ -52,7 +53,7 @@ class DueEditionsTest {
         nothingNewFor: List<Instant> = emptyList(),
         hasSources: Boolean = true,
         eveningOn: Boolean = false,
-    ) = DueEditions.status(now, reset, eveningTime.takeIf { eveningOn }, zone, released, nothingNewFor, hasSources)
+    ) = DueEditions.status(now, ReleaseSchedule(reset, eveningTime.takeIf { eveningOn }), zone, released, nothingNewFor, hasSources)
 
     private val nine = at("2026-11-10", "09:00")
     private val sevenInTheEvening = at("2026-11-10", "19:00")
@@ -167,14 +168,15 @@ class DueEditionsTest {
     @Test
     fun theEveningEditionIsOnlyDueOnceItsTimeHasPassedAndOnlyWhenSwitchedOn() {
         val five = at("2026-11-10", "17:00")
-        assertEquals(listOf(morning), DueEditions.due(five, reset, eveningTime, zone))
-        assertEquals(listOf(evening, morning), DueEditions.due(sevenInTheEvening, reset, eveningTime, zone))
-        assertEquals(listOf(morning), DueEditions.due(sevenInTheEvening, reset, null, zone))
+        val on = ReleaseSchedule(reset, eveningTime)
+        assertEquals(listOf(morning), DueEditions.due(five, on, zone))
+        assertEquals(listOf(evening, morning), DueEditions.due(sevenInTheEvening, on, zone))
+        assertEquals(listOf(morning), DueEditions.due(sevenInTheEvening, ReleaseSchedule(reset, null), zone))
         // After midnight it is still that evening's paper, until the morning reset.
-        assertEquals(listOf(evening, morning), DueEditions.due(at("2026-11-11", "02:00"), reset, eveningTime, zone))
+        assertEquals(listOf(evening, morning), DueEditions.due(at("2026-11-11", "02:00"), on, zone))
         assertEquals(
             listOf(DueRelease(EditionKind.MORNING, at("2026-11-11", "06:30"), day("2026-11-11"))),
-            DueEditions.due(at("2026-11-11", "07:00"), reset, eveningTime, zone),
+            DueEditions.due(at("2026-11-11", "07:00"), on, zone),
         )
     }
 

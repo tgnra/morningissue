@@ -23,6 +23,7 @@ import net.tgnra.morningissue.model.EditionStory
 import net.tgnra.morningissue.model.EditionSummary
 import net.tgnra.morningissue.model.IndexGroup
 import net.tgnra.morningissue.model.ItemKind
+import net.tgnra.morningissue.model.ReleaseChange
 import net.tgnra.morningissue.model.ThemeMode
 import net.tgnra.morningissue.sync.FeedSyncer
 import net.tgnra.morningissue.sync.FullTextFetcher
@@ -40,12 +41,18 @@ internal class FakeSettings(initial: AppSettings = AppSettings()) : SettingsRepo
     private val state = MutableStateFlow(initial)
     override val settings: Flow<AppSettings> = state
 
-    override suspend fun setResetTime(time: LocalTime) = state.update { it.copy(resetTime = time) }
+    override suspend fun setResetTime(time: LocalTime) = state.update { it.copy(resetTime = time, resetChange = null) }
+    override suspend fun changeResetTime(time: LocalTime, change: ReleaseChange) =
+        state.update { it.copy(resetTime = time, resetChange = change) }
+    override suspend fun changeEveningEdition(enabled: Boolean, time: LocalTime, change: ReleaseChange?) =
+        state.update { it.copy(eveningEditionEnabled = enabled, eveningEditionTime = time, eveningChange = change) }
     override suspend fun setEditionLength(length: EditionLength) = state.update { it.copy(editionLength = length) }
     override suspend fun setThemeMode(mode: ThemeMode) = state.update { it.copy(themeMode = mode) }
     override suspend fun setDisplayMode(mode: DisplayMode) = state.update { it.copy(displayMode = mode) }
-    override suspend fun setEveningEditionEnabled(enabled: Boolean) = state.update { it.copy(eveningEditionEnabled = enabled) }
-    override suspend fun setEveningEditionTime(time: LocalTime) = state.update { it.copy(eveningEditionTime = time) }
+    override suspend fun setEveningEditionEnabled(enabled: Boolean) =
+        state.update { it.copy(eveningEditionEnabled = enabled, eveningChange = null) }
+    override suspend fun setEveningEditionTime(time: LocalTime) =
+        state.update { it.copy(eveningEditionTime = time, eveningChange = null) }
     override suspend fun setStorageBudgetMb(megabytes: Int) = state.update { it.copy(storageBudgetMb = megabytes) }
     override suspend fun setOnboardingDone(done: Boolean) = state.update { it.copy(onboardingDone = done) }
     override suspend fun recordNothingNew(releaseAt: Instant) =

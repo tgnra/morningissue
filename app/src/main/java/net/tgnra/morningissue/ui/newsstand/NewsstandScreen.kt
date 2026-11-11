@@ -67,7 +67,7 @@ import net.tgnra.morningissue.edition.DueRelease
 import net.tgnra.morningissue.edition.DueStatus
 import net.tgnra.morningissue.edition.PrintResult
 import net.tgnra.morningissue.edition.PrintState
-import net.tgnra.morningissue.engine.EditionClock
+import net.tgnra.morningissue.engine.schedule
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionSummary
 import net.tgnra.morningissue.sync.SyncStatus
@@ -124,18 +124,19 @@ fun NewsstandScreen(
     val printState by container.editionPrinter.state.collectAsStateWithLifecycle()
     val zone = ZoneId.systemDefault()
 
-    val resetTime = settings?.resetTime
-    val eveningTime = settings?.takeIf { it.eveningEditionEnabled }?.eveningEditionTime
+    // Every release time below comes from the schedule, which knows how a time changed in
+    // Settings takes effect: from the next release, never for one that has already come.
+    val schedule = settings?.schedule
 
     // Release is a clock check, taken when the stand comes to the foreground and again each
     // time a release time passes while it is on screen. Nothing is built or fetched here.
     var clockCheck by remember { mutableIntStateOf(0) }
-    LifecycleStartEffect(container, resetTime, eveningTime) {
+    LifecycleStartEffect(container, settings?.resetTime, settings?.eveningEditionEnabled, settings?.eveningEditionTime, settings?.resetChange, settings?.eveningChange) {
         clockCheck++
         val job = scope.launch {
-            if (resetTime == null) return@launch
+            if (schedule == null) return@launch
             while (true) {
-                val next = EditionClock.nextRelease(container.clock.instant(), resetTime, eveningTime, zone).at
+                val next = schedule.nextRelease(container.clock.instant(), zone).at
                 delay(Duration.between(container.clock.instant(), next).toMillis().coerceAtLeast(0) + 1)
                 clockCheck++
             }
@@ -152,11 +153,10 @@ fun NewsstandScreen(
 
     // Null until the editions, the sources and the settings have all been read: until then a
     // missing edition may simply not have been loaded, so nothing is said about it.
-    val status = if (onStand != null && subscribed != null && resetTime != null) {
+    val status = if (onStand != null && subscribed != null && schedule != null) {
         DueEditions.status(
             now = now,
-            resetTime = resetTime,
-            eveningTime = eveningTime,
+            schedule = schedule,
             zone = zone,
             released = onStand,
             nothingNewFor = settings?.nothingNewFor.orEmpty(),
@@ -175,7 +175,7 @@ fun NewsstandScreen(
 
     // What the last Print now run came to, while it is still about the paper that is due.
     val lastResult = (printState as? PrintState.Finished)
-        ?.takeIf { resetTime != null && !it.at.isBefore(DueEditions.due(now, resetTime, eveningTime, zone).first().at) }
+        ?.takeIf { schedule != null && !it.at.isBefore(DueEditions.due(now, schedule, zone).first().at) }
         ?.result
     val printMessage = when (lastResult) {
         PrintResult.PrintedFromStored -> R.string.print_from_stored
@@ -189,8 +189,8 @@ fun NewsstandScreen(
     // An Extra edition is not the day's paper: the notice below is about scheduled editions.
     val newest = onStand?.firstOrNull { it.kind != EditionKind.EXTRA }
     // Set when a reset has passed and the feeds had nothing new to print.
-    val noNewEdition = status is DueStatus.NothingNew && unprinted == null && newest != null && resetTime != null &&
-        StandEditions.of(newest.date, now, resetTime, zone) == StandEdition.NoNewEdition
+    val noNewEdition = status is DueStatus.NothingNew && unprinted == null && newest != null && schedule != null &&
+        StandEditions.of(newest.date, status.release.date) == StandEdition.NoNewEdition
 
     var notice by rememberSaveable { mutableStateOf<String?>(null) }
     val printNow: () -> Unit = {
@@ -266,8 +266,8 @@ fun NewsstandScreen(
                     if (noNewEdition) {
                         NoNewEditionNotice(
                             newestDate = newest.date,
-                            expectedDate = StandEditions.expectedDate(now, resetTime, zone),
-                            nextEditionAt = EditionClock.nextReset(now, resetTime, zone).atZone(zone).toLocalTime(),
+                            expectedDate = status.release.date,
+                            nextEditionAt = schedule.nextReset(now, zone).atZone(zone).toLocalTime(),
                             onCheck = printNow,
                             modifier = Modifier.padding(horizontal = spec.pageMargin),
                         )

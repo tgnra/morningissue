@@ -340,6 +340,30 @@ The length is a setting. It applies to editions built from then on; a stored edi
 
 Daylight saving: on the day the clocks go forward, a reset time inside the skipped hour moves to the first valid moment after it. On the day they go back, a reset time that happens twice uses the first.
 
+### Changing a release time
+
+A changed reset time, and likewise a changed Evening edition time, **applies from the next release and never to one that has already come** (`engine/ReleaseSchedule.kt`, a pure class; `edition/ReleaseTimes.kt` is what Settings calls). The latest release at the moment of the change stays the latest release, so whatever was settled for it (printed, nothing new, or failed to build) stays settled, and no edition becomes due, or due again, on the day of the change.
+
+With the reset at 06:30:
+
+| Changed at | New time | Today | Tomorrow |
+| --- | --- | --- | --- |
+| 09:00 (today's edition has come) | 08:00, earlier and already passed | Stays the 06:30 release. Nothing new is due | 08:00 |
+| 09:00 | 10:00, later today | Stays the 06:30 release. No second release at 10:00 | 10:00 |
+| 05:00 (today's edition still to come) | 07:00, or 05:30: still ahead today | The edition comes at the new time | The new time |
+| 05:00 | 04:00, already passed today | The edition still comes at 06:30: making it due at once would be retroactive, and skipping it would lose a day | 04:00 |
+| 05:30, with today's edition already built ahead of time | Any | The built edition is released at 06:30, the time it was built for. It is not re-timed, rebuilt or discarded | The new time |
+
+So there is exactly one release per date across any change. Changing the time again before the first change has taken effect starts from the same settled release.
+
+The mechanism is a small record stored beside each time (`resetChange`, `eveningChange` in the settings store): the release instants on either side of the change, namely the latest release when it was made, a coming release that stays at the old time if there is one, and the first release at the new time. Until that first release the schedule is read from those instants; after it, from the plain time. Keeping the instants (rather than the old time) is what makes the settled release still match its edition and its "nothing new" record.
+
+Everything that asks for a release time goes through the schedule: the publisher (which edition to build, and its release time), the early build's scheduler (which run to queue; it is re-aimed when a time changes), the newsstand (what is due, and the "Next edition at" in its notice) and the back page's "next edition" time.
+
+**Evening edition.** Its time follows the same rule. Switching it on counts as a change: switched on at 19:00 with the time at 18:00, tonight's edition is not due and the first one is tomorrow's. Switching it off takes effect at once.
+
+Not covered: a time changed in the few minutes while the early build is running may or may not see that run's edition as built.
+
 ### Early build
 
 Android will not reliably run a job at an exact time, so the edition is built ahead of time and released by a clock check.
@@ -350,7 +374,7 @@ Android will not reliably run a job at an exact time, so the edition is built ah
 - Each stage is isolated. A failed or slow sync (four-minute limit) does not stop the build, and a failed prefetch does not undo it.
 - If the job runs so late that the reset it aimed for has passed, or the next reset is more than 3 hours away, it makes sure the current edition exists instead of freezing tomorrow's paper a day early.
 - When its sync reached the feeds and there was still nothing new to print, it writes that down for the release it was for. That record is what separates "nothing new" from a build that failed; see [When an edition failed to build](#when-an-edition-failed-to-build).
-- The schedule is renewed on process start, when the reset time or an Evening edition setting changes, and when the device's clock or time zone changes (`TimeChangeReceiver`).
+- The schedule is renewed on process start, when the reset time or an Evening edition setting changes (see [Changing a release time](#changing-a-release-time) for which release it then aims at), and when the device's clock or time zone changes (`TimeChangeReceiver`).
 
 Anything fetched after the early build belongs to the following edition, because posts are assigned by first-seen time.
 
@@ -385,6 +409,7 @@ Special cases:
 - **Extra editions** are printed on request and are never due. One on the stand does not count as today's paper. While the placeholder is up the offer of an Extra edition is withheld: Print now fetches the new sources too.
 - **Time zones.** An edition dated after the latest local reset (after travelling west) counts as printed.
 - **Before today's reset** the edition that is due is yesterday's.
+- **A release time changed in Settings** never makes an edition due on the day it is changed, and never un-settles one: see [Changing a release time](#changing-a-release-time).
 
 **Print now** (`edition/EditionPrinter.kt`) runs in the foreground with its progress shown where the button was. It runs the early build's own stages (`EarlyBuild.run(BuildTarget.Current)`), not a copy of them:
 
@@ -488,7 +513,7 @@ A single Room 3 database (`data/db/`, schema version 1, exported to `app/schemas
 
 Removing a feed deletes its posts, their engagement and their placements in editions.
 
-Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, the storage budget (default 500 MB), and whether onboarding is done. The same store holds two things that are not settings: when the offer of an Extra edition was last turned down, and `nothingNewFor`, the last four release times for which a run found nothing new to print (see [When an edition failed to build](#when-an-edition-failed-to-build)). The reader's text size is in its own preferences file.
+Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, the storage budget (default 500 MB), and whether onboarding is done. The same store holds two things that are not settings: when the offer of an Extra edition was last turned down, `nothingNewFor`, the last four release times for which a run found nothing new to print (see [When an edition failed to build](#when-an-edition-failed-to-build)), and `resetChange` and `eveningChange`, how the last change of each release time takes effect (see [Changing a release time](#changing-a-release-time)). The reader's text size is in its own preferences file.
 
 Images are not in the database; they are in Coil's disk cache.
 
@@ -647,10 +672,10 @@ net.tgnra.morningissue
   sync/      FeedFetcher, parsers, FeedDiscovery, FullTextFetcher, OPML, FeedSyncer, SyncWorker,
              FeedHealthChecker, FeedRepairer
   engine/    pure Kotlin, no Android imports: RankingConfig, Cadence, Scorer, Affinity,
-             EditionBuilder, EditionClock, FeedHealthRules
+             EditionBuilder, EditionClock, ReleaseSchedule, FeedHealthRules
   edition/   RoomEditionPublisher, EarlyBuild, EarlyBuildWorker, WorkManagerEditionScheduler,
              TimeChangeReceiver, DueEditions (pure: did the due edition fail to build?),
-             EditionPrinter (Print now)
+             EditionPrinter (Print now), ReleaseTimes (changing a release time)
   ui/        theme, layout, navigation, components, newsstand, paper, reader, backissues,
              sources, saved, search, settings, onboarding
 ```

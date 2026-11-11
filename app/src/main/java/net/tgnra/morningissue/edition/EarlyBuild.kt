@@ -21,6 +21,7 @@ import net.tgnra.morningissue.AppContainer
 import net.tgnra.morningissue.data.repository.EditionRepository
 import net.tgnra.morningissue.data.settings.SettingsRepository
 import net.tgnra.morningissue.engine.RankingConfig
+import net.tgnra.morningissue.engine.schedule
 import net.tgnra.morningissue.model.EditionPage
 import net.tgnra.morningissue.sync.FeedSyncer
 import net.tgnra.morningissue.sync.FullTextFetcher
@@ -201,12 +202,7 @@ class EarlyBuild(
         // stored editions say which of the due ones now exist.
         publisher.ensureCurrentEdition()
         val current = settings.settings.first()
-        val due = DueEditions.due(
-            now = clock.instant(),
-            resetTime = current.resetTime,
-            eveningTime = current.eveningEditionTime.takeIf { current.eveningEditionEnabled },
-            zone = zone(),
-        )
+        val due = DueEditions.due(clock.instant(), current.schedule, zone())
         val released = editions.observeReleasedEditions().first()
         return Built(
             editionId = due.firstNotNullOfOrNull { DueEditions.editionFor(it, released) }?.id,

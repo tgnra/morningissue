@@ -2,9 +2,9 @@ package net.tgnra.morningissue.edition
 
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalTime
 import java.time.ZoneId
 import net.tgnra.morningissue.engine.EditionClock
+import net.tgnra.morningissue.engine.ReleaseSchedule
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionSummary
 
@@ -74,20 +74,26 @@ sealed interface DueStatus {
  *   back to the morning edition.
  * - **Extra editions** are printed on request and are never due: one on the stand does not
  *   count as today's paper, and none is ever reported as unprinted.
+ * - **A release time changed in Settings** applies from the next release (`ReleaseSchedule`),
+ *   so it never makes an edition due, or due again, on the day it is changed: the release
+ *   that had come keeps its instant, and with it its edition or its "nothing new" record.
  * - **Time zones.** Travelling west can leave a morning edition on the stand dated after the
  *   latest local reset. That edition is current, so the reset counts as printed.
  */
 object DueEditions {
     /**
      * The releases whose editions are current at [now], newest first: the Evening edition's
-     * when [eveningTime] is given (it is switched on) and its time has passed since the
-     * latest morning reset, then that morning reset. Never empty.
+     * when it is switched on and its time has passed since the latest morning reset, then
+     * that morning reset. Never empty.
+     *
+     * They come from [schedule], not from the bare times, so a release time changed in
+     * Settings does not move a release that has already come: see [ReleaseSchedule].
      */
-    fun due(now: Instant, resetTime: LocalTime, eveningTime: LocalTime?, zone: ZoneId): List<DueRelease> = buildList {
-        eveningTime?.let { EditionClock.currentEveningRelease(now, resetTime, it, zone) }?.let { evening ->
+    fun due(now: Instant, schedule: ReleaseSchedule, zone: ZoneId): List<DueRelease> = buildList {
+        schedule.currentEveningRelease(now, zone)?.let { evening ->
             add(DueRelease(EditionKind.EVENING, evening, EditionClock.editionDate(evening, zone)))
         }
-        val reset = EditionClock.latestReset(now, resetTime, zone)
+        val reset = schedule.latestReset(now, zone)
         add(DueRelease(EditionKind.MORNING, reset, EditionClock.editionDate(reset, zone)))
     }
 
@@ -114,14 +120,13 @@ object DueEditions {
      */
     fun status(
         now: Instant,
-        resetTime: LocalTime,
-        eveningTime: LocalTime?,
+        schedule: ReleaseSchedule,
         zone: ZoneId,
         released: List<EditionSummary>,
         nothingNewFor: Collection<Instant>,
         hasSources: Boolean,
     ): DueStatus {
-        val due = due(now, resetTime, eveningTime, zone)
+        val due = due(now, schedule, zone)
         val open = unprinted(due, released)
         // Oldest first: when both of the day's papers failed, the morning one is asked for.
         val failed = open.lastOrNull { it.at !in nothingNewFor }
