@@ -25,7 +25,7 @@
     <string name="newsstand_older_issues">Older issues</string>
     <string name="newsstand_check">Check for new posts</string>
     <string name="newsstand_empty_title">No edition yet</string>
-    <string name="newsstand_empty_no_sources">Add some sources and your first edition will be printed here.</string>
+    <string name="newsstand_empty_no_sources">Add some sources and your first edition will be printed.</string>
     <string name="newsstand_empty_waiting">Your sources have had nothing recent to print. Your first edition will be printed when they post.</string>
     <string name="newsstand_add_sources">Add sources</string>
     <string name="newsstand_no_edition_title">No new edition today</string>
