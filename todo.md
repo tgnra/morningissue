@@ -72,8 +72,30 @@ Built; see "Storage budget" in `docs/how-it-works.md`. Not yet seen on a device.
 
 - [x] A storage budget control in Settings (discrete steps, 50 MB to 4 GB) showing current usage.
 - [x] When the budget fills, the stored text of the oldest editions' articles is trimmed first, after a sync. Liked and saved posts are never trimmed; headlines, summaries and edition rows stay.
-- The budget counts stored text only. Cached images are in Coil's disk cache, which has its own fixed cap and is not managed by the budget.
+- [x] The budget counts stored images as well as text, and Settings says how much is each. Images are trimmed before text, oldest editions first; Liked and saved posts keep both.
 - Content stays uncompressed (see Out of scope).
+
+### Image store, full-screen pictures and greyscale
+
+Built; see "The image store", "Storage budget", "Reader" and "Greyscale pictures" in `docs/how-it-works.md`. **None of it has been seen on a device.**
+
+- [x] **Image store** in the app's files (`data/images/`): the pictures of an edition's printed stories at prefetch, and of an article when it is opened; decoded with downsampling to 1,280 px, EXIF applied, re-encoded as lossy WebP at quality 80; the original kept when re-encoding is not smaller; animations and SVG kept as they came up to 2 MB.
+- [x] **Display reads the store first** through a Coil fetcher ahead of the network fetcher, for every picture in the app.
+- [x] **`stored_image`** in database version 2, with files and rows deleted together on feed removal, trimming and "export and free up space", and a sweep after sync and app start.
+- [x] **Tap a picture in the reader** to see the original full screen, with pinch, drag and double tap; stepped and paged in E-ink mode.
+- [x] **Greyscale option** in Settings for any theme, dithered (4 × 4 Bayer, 16 levels) as a Coil transformation at the size shown; E-ink mode implies it and keeps its raised contrast.
+
+Open:
+
+- [ ] **Run it on a device.** Unseen: real WebP sizes and encoding time on a phone (the figures in the docs are from Robolectric's desktop build of Android's encoder), the encoder on Android 8 to 10 (the older `WEBP` format, exercised only under Robolectric at API 28), memory while a very large photograph is handled, the full-screen picture's gestures, the Settings option, and how the dither looks on a phone screen and on an e-ink panel.
+- [ ] **The grain at 16 levels may be too faint on a dense phone screen.** It was chosen from enlarged samples on a desktop. `Dither.LEVELS` at 8 is the stronger alternative.
+- [ ] **Editions built on open store no images** until their articles are opened, because that build never touches the network. Their pages' pictures come from the network and Coil's cache. A background pass that stores the current edition's pictures when a connection allows would close this.
+- [ ] **The early build's time limit is shared.** Full text and images together have four minutes. A long edition with many body images may not finish; what is missing is stored when the article is opened.
+- [ ] **A stored image belongs to one post.** A picture several posts share (a podcast's cover on every episode) is trimmed with the first post that stored it, whatever the others are, and fetched again.
+- [ ] **Opening an article can download a picture twice**: once by the screen and once by the store, when the store starts before Coil has finished. The store waits four seconds and takes what Coil has cached; a slow connection defeats that.
+- [ ] **The full-screen original is not dithered** in greyscale and E-ink, because it is drawn scaled. Re-dithering at each zoom step would be needed for E-ink.
+- [ ] **No animated or vector decoder is included**, as before: a GIF shows its first frame and an SVG shows nothing. The store keeps their bytes untouched so that adding `coil-gif` or `coil-svg` later needs no re-download.
+- [ ] `CoilImagePrefetcher` in `edition/EarlyBuild.kt` is no longer used and can be removed.
 
 ### Archive export and import
 
@@ -228,6 +250,7 @@ Dropped when the design moved from a live ranked feed to a daily edition:
 
 - [ ] **Milestone 3 health, storage and archive screens are unchecked on a device**: the Subscriptions desk, the Quiet group in Sources, the back-page desk notice, the storage budget stepper and usage bar, and archive export and import through the file picker. Their logic is unit-tested.
 - [ ] **Measuring stored text reads every body's length** (two full scans) after each sync and when Settings opens. Unmeasured on a large library.
+- [ ] **The image store, the full-screen picture and the greyscale option are unchecked on a device.** Their logic is unit-tested, with real decoding and encoding under Robolectric.
 - [ ] **Repair onto a common path can pick the wrong feed** when the broken feed was one of several on a site (for example a category feed, and `/feed` is the whole site). The reader is told through the Moved flag.
 - [ ] **A Like or save removed after an export comes back on import**, because the archive cannot tell "never Liked" from "un-Liked since".
 

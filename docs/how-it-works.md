@@ -77,7 +77,7 @@ Two subscriptions are the same feed when their normalised URLs match (`model/Fee
 
 `DefaultFeedSyncer` fetches every feed that is due, six at a time, and stores the posts it has not seen before with first-seen time set to now, each with its categories and traits (see [Post signals](#post-signals)). Every feed is due at every sync except quiet ones, which are checked less often (see [Feed health](#feed-health)). Syncing never builds or changes an edition.
 
-After every full sync, `MaintainedFeedSyncer` runs three pieces of housekeeping on the same background thread, in this order: the feed health check, the signals upkeep (traits and embeddings for posts that lack them, see [Post signals](#post-signals)), then the trim to the storage budget (see [What is stored](#what-is-stored)). The upkeep comes before the trim because the trim removes the text that embeddings are computed from. A failure in one does not fail the sync or stop the others.
+After every full sync, `MaintainedFeedSyncer` runs four pieces of housekeeping on the same background thread, in this order: the feed health check, the signals upkeep (traits and embeddings for posts that lack them, see [Post signals](#post-signals)), the sweep of the [image store](#the-image-store), then the trim to the storage budget (see [What is stored](#what-is-stored)). The upkeep comes before the trim because the trim removes the text that embeddings are computed from. A failure in one does not fail the sync or stop the others.
 
 | When | What runs |
 | --- | --- |
@@ -497,7 +497,7 @@ Android will not reliably run a job at an exact time, so the edition is built ah
 
 - `WorkManagerEditionScheduler` keeps one one-off `EarlyBuildWorker` queued, aimed at 90 minutes before the coming reset, and requiring a network connection. If that moment has already passed, the job runs as soon as it can.
 - With the Evening edition switched on, the job aims at whichever release comes next, the morning reset or the evening time, and builds that edition.
-- The job (`edition/EarlyBuild.kt`) does a final sync, builds the next edition with `cutoffAt` = now and `releaseAt` = the coming reset, and stores it unreleased. It then prefetches full text for every printed story (briefs included) and the images its pages show, so the edition reads offline. Last, it schedules the next run.
+- The job (`edition/EarlyBuild.kt`) does a final sync, builds the next edition with `cutoffAt` = now and `releaseAt` = the coming reset, and stores it unreleased. It then prefetches full text for every printed story (briefs included) and puts those stories' pictures in the [image store](#the-image-store), so the edition reads offline. Last, it schedules the next run.
 - Each stage is isolated. A failed or slow sync (four-minute limit) does not stop the build, and a failed prefetch does not undo it.
 - If the job runs so late that the reset it aimed for has passed, or the next reset is more than 3 hours away, it makes sure the current edition exists instead of freezing tomorrow's paper a day early.
 - The schedule is renewed on process start, when the reset time or an Evening edition setting changes, and when the device's clock or time zone changes (`TimeChangeReceiver`).
@@ -594,12 +594,13 @@ A single Room 3 database (`data/db/`, schema version 2, exported to `app/schemas
 | `article_category` | A feed's category for a post | `articleId`, `key` (the two are the primary key), `label` |
 | `article_traits` | A post's structural traits | `articleId`, `traitsVersion`, `linkCount`, `imageCount`, `hasCode`, `enclosure`, `isLinkPost`, `titlePrefix` |
 | `article_embedding` | A post's text vector, or the mark that it has none | `articleId`, `model`, `vector` |
+| `stored_image` | One image kept in the image store | `url` (the key), `articleId`, `fileName`, `byteSize`, `originalBytes`, `width`, `height`, `storedAt` |
 
 `edition_item.kind` is one of `LEAD`, `FRONT`, `TOP`, `SECTION`, `BRIEF`, `ARCHIVE`, `AWAY` or `INDEX`. All items on a page share a page type. `edition.kind` is `MORNING`, `EVENING` or `EXTRA`.
 
 `article_traits.enclosure` is one of `NONE`, `AUDIO`, `VIDEO` or `OTHER`. The last three tables are described under [Post signals](#post-signals).
 
-Removing a feed deletes its posts, their engagement, their signals and their placements in editions.
+Removing a feed deletes its posts, their engagement, their signals, their placements in editions and their stored images, files included.
 
 ### Schema changes
 
@@ -608,21 +609,73 @@ Every change to the schema raises the database version and ships a migration (`d
 | Version | Change | How older databases are filled |
 | --- | --- | --- |
 | 2 | Adds `article_category`, `article_traits` and `article_embedding` | Traits by `TraitsBackfill` and embeddings by `EmbeddingBackfill`, run by `SignalsUpkeep` after app start and after each sync. Categories exist only in the feeds, so the migration clears every feed's `ETag` and `Last-Modified`; the next sync fetches each feed in full and files the posts it already holds. Posts no longer in their feed stay without categories. |
+| 2 | Adds `stored_image` | Nothing to fill it from: version 1 kept no images, only what Coil's cache happened to hold. It starts empty. Back issues' pictures are shown from the network as before, and an article's pictures are stored when it is next opened. |
 | 2 | Adds `article.feedWordCount` | By the migration: a post whose stored body is the feed's own, or that has none, takes its `wordCount`. A post whose body was fetched from its page takes the word count of its summary, which is the feed's text cut to 400 characters; a longer feed text is undercounted. |
 
-Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, the storage budget (default 500 MB), and whether onboarding is done. The reader's text size is in its own preferences file.
+Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, whether pictures are shown in greyscale, the storage budget (default 500 MB), and whether onboarding is done. The reader's text size is in its own preferences file.
 
-Images are not in the database; they are in Coil's disk cache.
+### The image store
+
+Pictures are kept in the app's files (`files/images/`, not the cache, which Android may clear), re-encoded smaller, with one row each in `stored_image`. The code is in `data/images/`; every number is in `ImageStoreConfig`.
+
+**When an image is stored.**
+
+- When an edition is prefetched by the early build: the lead image and the body images of every printed story, briefs included. Lead images of the stories the pages show come first, so a build that runs out of time has the pages' pictures.
+- When an article is opened in the reader, from anywhere (an edition built on open, a back issue, a source page, search, Saved): that article's lead and body images, four seconds after its text is in hand, on the app's scope.
+- Not otherwise. A picture passed in a list (a source page, search results, the Saved shelf, a cover) or in an edition that was built on open is shown from the network and held for a while in Coil's own disk cache, as before. Storing every thumbnail scrolled past would fill the budget with pictures of articles nobody opened.
+- At most 24 body images per article, and none the feed says is narrower than 80 px (the reader does not show those).
+
+**How it is stored** (`FileImageStore`, `ImageRecompressor`).
+
+1. The original is taken from Coil's disk cache when the picture has just been shown, otherwise downloaded, streamed to a temporary file. Four downloads at a time; 20 MB at most; 30 seconds for each download. Anything slower, larger or failing is skipped, and the build goes on.
+2. The file's first bytes say what it is; its address and stated type are not trusted. An error page is not stored.
+3. An animated GIF, WebP or PNG and an SVG are never re-encoded. They are stored as they came if they are 2 MB or less, and not stored if they are larger.
+4. Everything else is decoded, one image at a time, at the largest power-of-two reduction that keeps its longest edge at 1,280 px or more, then scaled to 1,280 px. A smaller picture keeps its size: nothing is enlarged. A 40-megapixel photograph is never held in full; it costs about 10 MB while it is handled. The EXIF orientation is applied to the pixels.
+5. It is written as lossy WebP at quality 80: `WEBP_LOSSY` from Android 11, and before that the older `WEBP` format, which is also lossy below quality 100 and keeps transparency. No picture is flattened onto a background and JPEG is only a fallback should the encoder refuse.
+6. If the result is not smaller than the original, the original is kept instead (2 MB or less, as above).
+7. The file is named by a hash of the image's address, moved into place and its row written.
+
+1,280 px is the reader's 640 dp column on a tablet at 2× density, the largest slot an image is shown in. On a 1,440 px phone a stored picture is scaled up by an eighth.
+
+**Measured.** `ImageRecompressionMeasurementTest` re-encoded pictures from Wikimedia Commons at three qualities and compared each result with the pixels that were encoded (PSNR over the colour channels; mean SSIM over 8 × 8 blocks of luma). The encoder is Android's as Robolectric's native graphics builds it for a desktop; it has not been run on a device.
+
+| Picture | Original | Stored size | q70 | q80 | q90 |
+| --- | --- | --- | --- | --- | --- |
+| Sunflower, 1,280 px JPEG | 225 kB | 1,280 × 892 | 89 kB, 35.5 dB, 0.961 | 116 kB, 37.0 dB, 0.967 | 194 kB, 39.4 dB, 0.981 |
+| Mountain panorama, 1,600 px JPEG | 460 kB | 1,280 × 575 | 101 kB, 32.9 dB, 0.938 | 137 kB, 34.9 dB, 0.964 | 217 kB, 38.6 dB, 0.987 |
+| Eiffel Tower, 1,920 px JPEG | 1,449 kB | 692 × 1,280 | 76 kB, 34.4 dB, 0.969 | 97 kB, 36.2 dB, 0.980 | 149 kB, 38.8 dB, 0.991 |
+| Golden Gate Bridge, 2,048 px JPEG | 1,813 kB | 1,280 × 800 | 102 kB, 32.8 dB, 0.960 | 133 kB, 34.3 dB, 0.975 | 207 kB, 36.1 dB, 0.989 |
+| Mandelbrot set, 960 px JPEG | 67 kB | 960 × 720 | 31 kB, 38.1 dB, 0.992 | 38 kB, 40.0 dB, 0.995 | 55 kB, 42.6 dB, 0.997 |
+| Cat, JPEG larger than 1,280 px | 280 kB | 1,280 × 1,278 | 56 kB, 38.3 dB, 0.969 | 77 kB, 39.5 dB, 0.976 | 146 kB, 42.1 dB, 0.987 |
+| Golden Gate Bridge, camera original | 13,849 kB | 1,280 × 800 | 76 kB, 34.1 dB, 0.966 | 100 kB, 35.6 dB, 0.977 | 163 kB, 37.8 dB, 0.990 |
+| Photograph with transparency, PNG | 225 kB | 800 × 600 | 66 kB, 34.6 dB, 0.992 | 70 kB, 35.2 dB, 0.993 | 79 kB, 35.8 dB, 0.995 |
+| Line chart, PNG | 27 kB | 600 × 436 | 27 kB, larger: original kept | 31 kB, larger: original kept | 39 kB, larger: original kept |
+| Tube map, PNG | 100 kB | 1,280 × 730 | 92 kB, 33.9 dB, 0.995 | 108 kB, larger: original kept | 144 kB, larger: original kept |
+| Rotating Earth, animated GIF | 1,002 kB | | kept as it came | | |
+| Wikipedia logo, SVG | 165 kB | | kept as it came | | |
+
+The five web-sized photographs, which are what feeds mostly carry, came to 10% of their original bytes at quality 70, 13% at 80 and 20% at 90. 80 was chosen. Flat drawings in PNG are often smaller than any lossy copy, which is what rule 6 is for.
+
+**How display finds a stored image** (`StoredImageFetcher`). The app's one Coil loader has a fetcher registered ahead of the network fetcher. For every `http(s)` address it checks whether the store's file for that address exists (one file check, no database read) and hands Coil the file. When there is none it answers nothing and Coil goes on to the network fetcher and its own disk cache. So every picture in the app reads the store first, and no screen knows about it.
+
+**Upkeep.**
+
+- Removing a feed deletes its images' rows and files before the feed itself.
+- A sweep after every full sync, and once after the app starts, removes rows whose file is gone, files that have no row, and downloads abandoned more than an hour ago.
+- An image belongs to one post, the first it was stored for. A picture two posts share goes with that post and is fetched again for the other.
+- The archive does not carry images. An imported library's pictures are fetched as they are shown and stored as its articles are opened.
 
 ### Storage budget
 
-The budget (`data/storage/StorageRepository.kt`) governs stored article text: the bodies in `article_content` plus their copy in the search index, measured in characters. Images are not counted; Coil's disk cache keeps to its own fixed cap. The budget is the answer to "how long are back issues kept?": there is no fixed period.
+The budget (`data/storage/StorageRepository.kt`) governs stored article text (the bodies in `article_content` plus their copy in the search index, measured in characters) and the files of the image store, measured in bytes. Settings shows the two together against the budget and says how much is each. Coil's own disk cache is outside it and keeps to its fixed cap. The budget is the answer to "how long are back issues kept?": there is no fixed period.
 
-After every full sync, if the text is over budget it is trimmed down to 90% of the budget:
+After every full sync, if the two together are over budget they are trimmed down to 90% of the budget:
 
-- The oldest editions' posts go first (by first-seen time, which is what assigns a post to an edition).
-- Only the body is dropped, from `article_content` and from the search index together. The post, its headline, summary and image link, its engagement and its place in its editions all stay, so back issues remain browsable and the post is still found by headline and summary.
-- Never trimmed: Liked and saved posts, the stories of the two newest editions, and posts waiting for the next edition.
+- **Images go before text.** An image can be fetched again for as long as its site keeps it, and an article reads without it. A post's text often cannot be had again once the post has left its feed, and without it there is nothing to read or search. So every image that may go has gone before the first body is dropped.
+- Within each, the oldest editions' posts go first (by first-seen time, which is what assigns a post to an edition).
+- An image is dropped as its row and its file together. It is shown from the network the next time it is on screen, and stored again when its article is opened.
+- Of text, only the body is dropped, from `article_content` and from the search index together. The post, its headline, summary and image link, its engagement and its place in its editions all stay, so back issues remain browsable and the post is still found by headline and summary.
+- Never trimmed, text or images: Liked and saved posts, the stories of the two newest editions, and posts waiting for the next edition.
 - A trimmed post opens in the reader with its summary, and the reader fetches the page again as it does for any post without a body.
 
 No post, edition or engagement is ever deleted automatically.
@@ -640,7 +693,9 @@ Import merges:
 - An edition is matched by date and kind; one already held is skipped. Imported editions keep their number.
 - Unknown fields, unreadable lines and unknown enum names are skipped. A file whose format version is higher than this app's is refused.
 
-"Export and free up space" trims every body that may be trimmed (the rules above, regardless of the budget) once the file has been written.
+The file does not carry images, stored or not: they would multiply its size and can be fetched again.
+
+"Export and free up space" trims every image and every body that may be trimmed (the rules above, regardless of the budget) once the file has been written.
 
 ## The screens
 
@@ -684,6 +739,13 @@ Newsstand ─┬─ Paper ── Reader
 - Like and Save switches at the end of the article, then a link to more from the source.
 - When no body is stored, the reader shows the feed's summary and says what is happening: the full text is being fetched, it could not be fetched, or the feed gave no text.
 - Scroll depth and time spent here are the Read signal.
+- **Tapping a picture** (the lead image or one in the body) opens it full screen (`ImageViewer.kt`) and loads the original from its own address, not the smaller stored copy.
+  - The copy on the device is shown at once and the original is drawn over it when it arrives. If it does not (no connection, or the site has dropped it), a line says so and the copy stays.
+  - Pinch enlarges it up to five times, a drag moves it, a double tap enlarges it and fits it again. It cannot be dragged off the screen. The gestures are the app's own code (`ImageZoom`); no library was added.
+  - The arrow or the system's back returns to the article at the place it was left.
+  - In E-ink mode nothing follows the finger: Enlarge and Reduce step through 1×, 2× and 4×, and a swipe moves an enlarged picture by 80% of the screen once the finger lifts.
+  - The original is decoded no larger than it needs to be to keep its longest edge at 2,048 px or more, so a very large one is not held in full.
+- Opening an article puts its pictures in the [image store](#the-image-store).
 
 ### Back issues (`ui/backissues/`)
 
@@ -708,9 +770,9 @@ A month calendar of every released edition, read ones ticked, with the month's e
 
 ### Settings (`ui/settings/`)
 
-Reset time, edition length (Short, Standard, Long), the Evening edition (Off or On, with its release time when on), theme (System, Light, Dark) and display mode (Auto, Standard, E-ink).
+Reset time, edition length (Short, Standard, Long), the Evening edition (Off or On, with its release time when on), theme (System, Light, Dark), display mode (Auto, Standard, E-ink) and pictures (Colour, Greyscale).
 
-- **Storage**: the budget for stored article text, moved one step at a time (50, 100, 250, 500 MB, 1, 2, 4 GB) with Less and More, a bar and "Using 132 MB of 500 MB" beneath. Over budget it says so and offers "Trim now".
+- **Storage**: the budget for stored text and pictures, moved one step at a time (50, 100, 250, 500 MB, 1, 2, 4 GB) with Less and More, a bar and "Using 132 MB of 500 MB" beneath, then "12 MB of text, 120 MB of pictures". Over budget it says so and offers "Trim now".
 - **Archive**: Export, Export and free up space, and Import, through the system file picker (no storage permission). The job runs in the app's scope, so it carries on if the screen is left; progress and the result ("Imported 1,240 posts, skipped 310.") show under the buttons.
 
 Debug builds add buttons that load or clear invented sample data.
@@ -726,6 +788,21 @@ Every screen is built from theme tokens (`ui/theme/Color.kt`), so all three them
 - **E-ink**: pure black on white; overrides both.
 
 Type is three bundled open-licence variable fonts: Fraunces for headlines, Newsreader for body text and Inter for labels.
+
+### Greyscale pictures
+
+Settings has Pictures: Colour or Greyscale. Greyscale shows every picture in grey, in any theme, and dithers it. E-ink mode does the same whatever the setting says, and raises the contrast by 1.3 as well (`ImageTreatment.EINK_CONTRAST`).
+
+- **Where it happens** (`ui/components/ImageTone.kt`). `PaperImage`, which draws every picture in the app, adds a Coil transformation to its request and asks for the bitmap at exactly the size it is shown. The transformation turns each pixel to its Rec. 709 luma, applies the contrast, and dithers. It works on the pixels the screen will light, which a colour filter cannot do. Stored images stay in colour: this is display only, so switching the option off downloads nothing.
+- **At once.** The transformation's key is part of Coil's memory-cache key, so a picture in another tone is another cache entry: changing the option redraws every picture on screen, and changing it back finds the colour ones still cached.
+- **The dither** is ordered: a 4 × 4 Bayer matrix, to 16 grey levels (`Dither.MATRIX_SIZE`, `Dither.LEVELS`). Each pixel is compared with a fixed threshold that depends only on its position, so the pattern stays still: a page turned back to looks as it did. Error diffusion would redraw the whole texture for a one-pixel change in the crop.
+  - 16 levels are the 16 greys an e-ink panel has, so the panel's own rounding never runs. In sample pictures a photograph at 16 levels reads as a photograph with a fine grain in skies and soft backgrounds; at 8 a sky is visibly dotted; at 4 the pattern covers the picture. On a phone's dense screen the grain at 16 is faint.
+  - The 8 × 8 matrix gave the same pictures as 4 × 4 at 16 levels, and 2 × 2 left bands in a gradient.
+  - A grey that is exactly on a level, black and white included, is left flat.
+- **The full-screen original** is greyscale too (with E-ink's contrast in E-ink mode) but not dithered: it is drawn scaled, and a pattern made for one size smears at another.
+- Covers' mastheads, rules and the other drawn furniture are not images and are not touched. A cover's lead photograph is.
+
+`DitherSamplesTest` writes before-and-after pictures through this code path when given a folder of pictures.
 
 ### Tablet layouts
 
@@ -750,7 +827,7 @@ In E-ink mode:
 - **Colour**: black on white, no shadows or tints. Body text is one weight heavier.
 - **Motion**: none. No ripples, no transitions between screens, no animated scrolling.
 - **Movement is paged.** Dragging does nothing until the finger lifts; then the content jumps one screen in the direction of the swipe, snapped to a story row or text line with a one-line overlap. In the paper a sideways swipe turns a whole page. Volume keys, page keys, arrow keys and space step forward and back. Previous and Next buttons appear under the content; in the paper they step through a long page before turning it.
-- **Images** are greyscale with raised contrast. Small thumbnails are dropped in favour of text.
+- **Images** are greyscale with raised contrast, dithered to 16 greys (see [Greyscale pictures](#greyscale-pictures)). Small thumbnails are dropped in favour of text. A picture opened full screen is enlarged in steps and moved a screen at a time.
 - Pull to refresh is replaced by the header button, and the phone shelf wraps instead of scrolling sideways.
 - **Code blocks** cannot scroll sideways, so they are set smaller, just far enough for the longest line to fit (down to 70% of the usual size). Only lines longer than that wrap.
 
@@ -763,6 +840,7 @@ net.tgnra.morningissue
   model/     plain data classes and enums shared by every layer
   data/      db (Room 3 entities, DAOs, migrations), repositories, AffinityLearner,
              WithinFeedLearner, settings (DataStore), storage (budget and trimming),
+             images (the image store, re-encoding, the Coil fetcher that reads it),
              archive (export and import), signals (TraitsBackfill, EmbeddingBackfill,
              SignalsUpkeep)
   embedding/ pure Kotlin apart from EmbedderAsset: StaticEmbedder, WordPieceTokenizer,
@@ -790,7 +868,7 @@ net.tgnra.morningissue
 | Network | OkHttp |
 | Feed parsing | Own `XmlPullParser` parser for RSS and Atom; kotlinx.serialization for JSON Feed |
 | Full text | Readability4J and Jsoup, converted to the block model |
-| Images | Coil 3 |
+| Images | Coil 3, reading the app's own image store first |
 
 `minSdk` is 26, `targetSdk` 36 and `compileSdk` 37. The only permission is `INTERNET`.
 
@@ -807,7 +885,7 @@ You need JDK 21 and the Android SDK (platform 37).
 
 **Benchmark.** The `:macrobenchmark` module measures the budget "the on-open fallback build takes under 300 ms on a low-end phone". It runs against the app's `benchmark` build type: the release build made profileable and signed with the debug key, plus a seeding receiver (`app/src/benchmark`) that only the shell can call. Each iteration stores 1,000 unread posts from 40 feeds, with their traits and embeddings, and no edition or reading history, starts the app cold and measures the trace section `MorningIssue.onOpenEditionBuild`, which wraps the build in `RoomEditionPublisher.ensureCurrentEdition`. Results are written under `macrobenchmark/build/outputs/connected_android_test_additional_output/`. Numbers from an emulator are only indicative, and it has not yet been run on a phone. To run it without Gradle, install `app-benchmark.apk` and `macrobenchmark-benchmark.apk` and start `net.tgnra.morningissue.macrobenchmark/androidx.test.runner.AndroidJUnitRunner` with `am instrument -w` (add `-e androidx.benchmark.suppressErrors EMULATOR` on an emulator).
 
-Unit tests are in `app/src/test`: the engine (scoring, cadence, affinity, within-feed ranking, edition building, sections, carry-over, the clock), the publisher and early build against an in-memory database and `work-testing`, the sync layer against saved feed fixtures and a mock web server, the embedder against the real asset and reference vectors from the original model, the migrations against the exported schemas, and the pure parts of the UI. The debug sample data has traits and embeddings (the upkeep runs after it is loaded) but no categories.
+Unit tests are in `app/src/test`: the engine (scoring, cadence, affinity, within-feed ranking, edition building, sections, carry-over, the clock), the publisher and early build against an in-memory database and `work-testing`, the sync layer against saved feed fixtures and a mock web server, the embedder against the real asset and reference vectors from the original model, the migrations against the exported schemas, the image store against a local web server and Robolectric's native graphics (real decoding and WebP encoding, on the desktop), the greyscale option through a real Coil loader, and the pure parts of the UI. The debug sample data has traits and embeddings (the upkeep runs after it is loaded) but no categories.
 
 **Releases.** `master` is the default branch. Pushing a tag that starts with `v` (for example `v0.1.0`) runs `.github/workflows/release.yml`, which runs the unit tests, builds a signed release APK and attaches it to a GitHub release for that tag. The version name is the tag without its `v`. Running the workflow by hand builds the APK as a workflow artifact without publishing a release.
 
@@ -820,4 +898,5 @@ These are described in [`todo.md`](../todo.md) with the detail needed to build t
 - **Planned:** nothing from the three milestones is left unbuilt. The smaller gaps against the original spec are in `todo.md`.
 - **Built, not proven:** ranking posts within a feed (the W factor) has not been validated on real reading history or run on a device. The open items are in `todo.md`.
 - **Engine built, screen missing:** the Extra edition has no button, the comeback label is not shown as a badge, and the While you were away page has no "12 posts from 7 feeds" summary line.
+- **Built, not seen:** the image store, the full-screen picture and the greyscale option have not been run on a device.
 - **Out of scope for now:** notifications, compression of stored content, and PDF export.
