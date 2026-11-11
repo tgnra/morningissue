@@ -135,7 +135,30 @@ fun SourcePageScreen(
                         }
                     },
                 ) { article ->
-                    ArticleListItem(article, onClick = { onOpenArticle(article.articleId) }, showSource = false)
+                    // Save for later is offered on posts not yet read; a saved post keeps the
+                    // button, whatever its read state, so it can be taken off the shelf here.
+                    val canSave = !article.isRead || article.isSaved
+                    ArticleListItem(
+                        article = article,
+                        onClick = { onOpenArticle(article.articleId) },
+                        showSource = false,
+                        trailing = if (!canSave) null else {
+                            {
+                                PaperIconButton(
+                                    icon = if (article.isSaved) PaperIcons.Bookmark else PaperIcons.BookmarkBorder,
+                                    contentDescription = stringResource(
+                                        if (article.isSaved) R.string.source_unsave_post else R.string.source_save_post,
+                                        article.title,
+                                    ),
+                                    onClick = {
+                                        val save = !article.isSaved
+                                        container.appScope.launch { container.articles.setSaved(article.articleId, save) }
+                                    },
+                                    tint = if (article.isSaved) MorningIssueTheme.colors.ink else MorningIssueTheme.colors.inkSecondary,
+                                )
+                            }
+                        },
+                    )
                 }
             }
         }

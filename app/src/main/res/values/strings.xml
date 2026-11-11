@@ -241,6 +241,8 @@
     <!-- Story menu and learning controls -->
     <string name="story_options">Story options</string>
     <string name="story_unsave">Remove from Saved</string>
+    <string name="source_save_post">Save for later: %1$s</string>
+    <string name="source_unsave_post">Remove from Saved: %1$s</string>
     <string name="story_unlike">Remove Like</string>
     <string name="story_show_more">Show more</string>
     <string name="story_show_less">Show less</string>
