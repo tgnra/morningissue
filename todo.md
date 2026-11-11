@@ -156,6 +156,22 @@ Built; see "When an edition failed to build" in `docs/how-it-works.md`. Not seen
 - [ ] The broadcast trigger compiles but has not been run on a device or emulator.
 - [ ] Run it on a real low-end phone. The budget is under 300 ms there; an emulator's numbers are only indicative. On the software-rendered API 37 emulator, on a host short of memory, five cold starts gave 371 ms at best, 573 ms median and 1,061 ms at worst for the build, which is over budget there. If a real phone is over too, see "Scores kept current during sync" below.
 
+### Discovery (Find sources)
+
+Built on `discovery-app`; see "Discovery" in `docs/how-it-works.md`. Unit-tested on simulated readers and a hand-built catalogue; not run on a device, and not yet run with the real `assets/discovery/catalogue.db`, which comes from the pipeline in `tools/discovery/`.
+
+- [x] Schema version 3: `feed.status` (`SUBSCRIBED` or `DISCOVERED`), `feed.discoveredAt`, `discovery_verdict` and `discovery_candidate`, with `MIGRATION_2_3` and tests from versions 1 and 2. Archive format version 2 carries feed status.
+- [x] Discovered feeds are left out of editions, sync, the health check, affinity learning, Sources, OPML and search filters; `SubscribedOnlyQueryTest` guards the DAO queries.
+- [x] Ranking (`engine/Discovery.kt`): centred vectors, z-scored similarities, top-k profile terms, passes as negatives, MMR deck of 20, an exploration card every fifth slot by Thompson sampling, cold-start topics, reason lines.
+- [x] Cards with Pass and Subscribe buttons (no gestures), Undo, TalkBack actions, the Passed list, live headlines for the card on screen and the next two (metered-aware, 1 MB cap, 24-hour cache).
+- [x] Reading a suggested post stores a discovered feed; "Not subscribed" bar in the reader and on the source page, Subscribe on the Saved shelf; unsaved posts of discovered feeds deleted after 7 days.
+- [x] From your reading list: a saved, unread post from a discovered feed in the Morning edition at most once a week.
+- [ ] Look at every discovery screen on a phone, a tablet and in E-ink, with the real catalogue.
+- [ ] **The blogroll and outbound-link crawler.** `discovery_candidate` and its DAO exist, but nothing fills them. A crawler would read the blogroll pages and outbound links of subscribed feeds' posts, count mentions per feed (`mentions`, `foundVia`), fetch each candidate's feed once to fill tier, full-text share and centroid, and offer the best as cards beside the catalogue's ("Linked from Lost Art Press"). Needs: a budget for fetches, robots.txt, and a rule for how candidates and catalogue feeds share a deck.
+- [ ] **Webcomics in discovery need UX thought.** They are filtered out for now. They are image-led, post on a different cadence, and it is unclear how they print in the paper (a strip in In brief? a page of their own?). Source for a catalogue of them: Kagi's `smallcomic.txt`.
+- [ ] Discovery's verdicts are not in the archive, so passes do not move to a new device.
+- [ ] The design report's rule that a feed with a discovered row is shown as a card again only once something from it is saved was simplified: only a verdict (pass, subscribe, unsubscribe) or a subscription keeps a feed off the cards, so a feed whose post was opened but not saved can be suggested again. Decide whether that is wanted.
+
 ## Smaller gaps against the original spec
 
 Specified but not built, and not assigned to a milestone.
@@ -209,7 +225,6 @@ Open:
 
 Roadmap ideas, not scheduled.
 
-- [ ] Feed discovery: suggest feeds based on what the reader Likes.
 - [ ] A home-screen widget showing today's front page.
 - [ ] Likes as a public feed.
 - [ ] A true paper-curl page turn (AGSL shader).

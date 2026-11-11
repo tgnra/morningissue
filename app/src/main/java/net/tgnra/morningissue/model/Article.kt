@@ -22,6 +22,8 @@ data class ArticleSummary(
     val isSaved: Boolean,
     /** Matching excerpt for search results; null elsewhere. */
     val snippet: String? = null,
+    /** False for a post saved or opened from discovery whose feed the reader does not subscribe to. */
+    val feedSubscribed: Boolean = true,
 )
 
 /** Everything the reader view needs for one article. */
@@ -47,6 +49,8 @@ data class ReaderArticle(
     val isSaved: Boolean,
     /** Furthest scroll position reached, 0..1. */
     val readFraction: Float,
+    /** False when the post comes from a feed the reader does not subscribe to (opened from discovery). */
+    val feedSubscribed: Boolean = true,
 )
 
 /** Filters for full-text search. [text] is what the user typed, not FTS syntax. */

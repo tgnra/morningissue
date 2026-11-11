@@ -14,12 +14,13 @@ This describes the app as the code on this branch behaves today. Work that is pl
 8. [How an edition is assembled](#how-an-edition-is-assembled)
 9. [Timing](#timing)
 10. [Carry-over and From the archive](#carry-over-and-from-the-archive)
-11. [What is stored](#what-is-stored)
-12. [The screens](#the-screens)
-13. [Themes, tablets and e-ink](#themes-tablets-and-e-ink)
-14. [Architecture](#architecture)
-15. [Building, testing and releasing](#building-testing-and-releasing)
-16. [Not built yet](#not-built-yet)
+11. [Discovery](#discovery)
+12. [What is stored](#what-is-stored)
+13. [The screens](#the-screens)
+14. [Themes, tablets and e-ink](#themes-tablets-and-e-ink)
+15. [Architecture](#architecture)
+16. [Building, testing and releasing](#building-testing-and-releasing)
+17. [Not built yet](#not-built-yet)
 
 ## The idea
 
@@ -654,13 +655,163 @@ A held-over post competes for the regular pages on its score, with these limits:
 
 **From the archive** is a page of its own with one story: the best-scoring held-over post that is not already placed in this edition and was not printed in any of the last 3 editions. It gives slow, loved feeds a slot even on heavy news days. If no post qualifies, the page is left out.
 
+## Discovery
+
+Find sources (`ui/discover/`, reached from the Sources screen and from onboarding) suggests feeds the reader does not subscribe to. Everything is decided on the device, from a catalogue that ships with the app; nothing about what the reader reads leaves the device.
+
+### The catalogue
+
+`assets/discovery/catalogue.db` is built offline by the pipeline in `tools/discovery/`. The app reads it read-only with the platform's SQLite API, not through Room (`data/discovery/CatalogueStore.kt`). On first use it is copied to the app's no-backup files. After an app update it is copied again only if its `built_at` or `format_version` has changed.
+
+Its format (`PRAGMA user_version = 1`):
+
+| Table | Holds |
+| --- | --- |
+| `meta` | `format_version` (`1`), `built_at` (epoch ms), `model_id`, `dims` (`256`), `mean` (256 little-endian float32: the mean of every feed centroid) |
+| `cluster` | `id`, `label`, `centroid` (256 int8), `scale` |
+| `feed` | `id`, `url`, `url_key`, `site_url`, `host`, `title`, `description`, `icon_url`, `language`, `tier`, `median_interval_hours`, `posts_per_week`, `full_text_share`, `last_post_at`, `cluster_id`, `categories` (one per line), `source`, `quality`, `centroid` (256 int8), `scale` |
+| `headline` | `feed_id`, `position` (0 newest), `title`, `url`, `published_at`, `word_count` |
+
+- A vector is `int8 × scale`, normalised.
+- A catalogue is refused when its `model_id` is not the app's embedder (`StaticEmbedder.MODEL_ID`), because its vectors cannot be compared with the reader's. One in an unknown format is refused too.
+- Without a catalogue, or with a refused one, the screen says "No suggestions available". Nothing crashes.
+- The catalogue is English only, with no YouTube channels and no webcomics. The ranking filters these out again.
+
+### The profile
+
+`DiscoveryRepository` builds the profile each time the screen opens, from what is already stored, and keeps nothing:
+
+- **Subscribed feeds.** Each feed's centroid is the normalised mean of its newest 50 post vectors in `article_embedding`. A feed with fewer than 3 is left out.
+  - Its weight is `clamp((a − 0.35) / 0.65, 0, 1)`, where `a` is its effective affinity with the slider applied.
+  - Less and Rarely weigh nothing; Favourite weighs 1.
+- **Posts.** Every post Liked (weight 1) or read (weight 0.5) in the last 180 days, up to 200, whatever its feed.
+- **Negatives.** Every passed feed, whose weight halves every 90 days, and every feed the reader unsubscribed from, at full weight for good.
+- **Terms.** The reader's tags, and the categories of the posts they read.
+- **Exclusions.** Every subscribed feed's address and host, and every feed with a verdict.
+  - Some hosts give each user a site of their own: Substack, Medium, WordPress.com, Blogspot, GitHub Pages and others. On these only the exact host is excluded, so one Substack subscription does not hide every Substack.
+
+### The score
+
+All of it is in `engine/Discovery.kt`, which is pure and tested with simulated readers (`DiscoveryTest`).
+
+- **Centring.** Static embeddings crowd into a narrow cone, so raw cosines all look alike. The catalogue's mean is subtracted from every vector before similarities are taken.
+- **z-scores.** Each profile point's similarity to a candidate is put on a common scale: `z = (cos − m) / s`. The mean `m` and spread `s` are taken over up to 1,000 evenly spaced catalogue feeds.
+- **Topic.**
+  - `feedSim` is the mean of the top 3 weighted z-scores against subscribed feeds and picked topics.
+  - `postSim` is the mean of the top 5 against posts.
+  - `negSim` is the largest against a negative.
+  - `topic = 0.6·feedSim + 0.4·postSim − 0.5·max(0, negSim)`. When only one of `feedSim` and `postSim` exists, it takes the place of both.
+  - The top few are used rather than a mean, so a reader of woodworking and Rust is shown feeds about either, not feeds about neither.
+- **Score.** `topic + ln(cadenceFit) + ln(quality) + 0.15·categoryOverlap`:
+  - Cadence fit is 1.0 for Rare and Weekly, 0.85 for Daily and 0.5 for Firehose. It is 0.8 for Firehose when the reader loves a Firehose feed.
+  - Quality is 1.0 for full posts or 0.8 for excerpts. It is multiplied by 0.7 when the newest post is more than 45 days old, and by (0.5 + 0.5 × the catalogue's own estimate).
+  - Category overlap is the Jaccard overlap of the feed's categories and cluster label with the reader's terms.
+- **Filters.** A feed is never shown when it:
+  - has no centroid;
+  - is already subscribed, or has a verdict;
+  - is on an excluded host;
+  - is not in English, is on YouTube, or is a comic;
+  - is nearly the same as a subscription (raw cosine above 0.97).
+
+### The deck
+
+A week's suggestions are a finite deck of 20 cards, not an endless stack.
+
+- The deck is built once per ISO week and catalogue, with a random generator seeded from both, and kept in `DeckStore`.
+- Every opening that week shows the same cards, less those already decided. When all are decided, the screen says so.
+
+How the cards are chosen:
+
+- **MMR.** From the best 200, each card is the one with the best `0.7·relevance − 0.3·max similarity to the cards already picked`. No two cards come from one host.
+- **Exploration.** Every fifth card comes from a cluster that none of the reader's feeds sits nearest to, and that was not picked as a topic.
+  - The cluster is chosen by Thompson sampling: one draw from `Beta(1 + subscribes, 1 + passes)` per cluster, using the verdicts so far.
+  - The card is that cluster's best-scoring feed. Its reason reads "Something different: Astronomy".
+- **Cold start.** A reader with no weighted subscriptions and no Liked or read posts is asked to pick topics first, from the catalogue's clusters shown as chips.
+  - Picked topics count as subscribed feeds of weight 1.
+  - "Browse by topic" builds a deck from picked topics at any time.
+- **Reasons.** A card says why it is there:
+  - "Close to A and B", naming the subscribed feeds it is nearest;
+  - "Because you picked Rust";
+  - "Like posts you have Liked", or "Like posts you have read";
+  - "Recommended in Woodworking".
+
+### Cards and decisions
+
+A card shows the source's name, its tier, posting rate and host, its description, the reason, and three recent headlines. Each headline opens in the reader.
+
+The decisions are two buttons, Pass and Subscribe:
+
+- There is no swiping or dragging.
+- Screen readers get both as actions on the card.
+- Nothing animates, so E-ink mode needs nothing special.
+- The line under the card says what was done, with Undo.
+
+What each part does:
+
+- **Live headlines.** The card on screen and the next two are fetched (`sync/CandidateFetcher.kt`).
+  - Each fetch is capped at 1 MB and kept in `cacheDir/discovery/` for 24 hours.
+  - On a metered connection nothing is fetched until the reader taps "Load latest".
+  - A fetched feed's centroid is recomputed with the app's embedder from its newest 20 posts. It replaces the catalogue's centroid in the verdict.
+  - A feed that answers with an error is dropped from the screen. One that cannot be reached keeps the catalogue's headlines.
+- **Pass** is permanent: the feed is never suggested again, and feeds like it are pushed down for a while. The Passed list, in the overflow menu, is the one place to take a pass back.
+- **Subscribe** adds the feed as an ordinary subscription and fetches it at once.
+- **Undo** restores exactly what was there before. The verdict is deleted, and a feed that the subscription created is removed with its posts and pictures.
+- **Unsubscribing** in Sources writes a `DROPPED` verdict with the feed's centroid. The feed is never suggested again, and it counts against feeds like it.
+
+Every decision is a row in `discovery_verdict` (`PASSED`, `SUBSCRIBED` or `DROPPED`), with the feed's cluster and centroid.
+
+### Reading a suggested feed
+
+Opening a headline stores its feed as a **discovered** feed (`feed.status = DISCOVERED`) and the post as an ordinary article. The reader, Save, search and the image store then work as they do for any post.
+
+A "Not subscribed" bar with a Subscribe button appears:
+
+- in the reader, with Save beside it;
+- on the source page, which then has no edit or remove;
+- under such a post on the Saved shelf.
+
+A discovered feed is not a subscription anywhere. It is never:
+
+- synced;
+- in an edition, the health check or the learned affinities;
+- in Sources, OPML export, the search filters or the onboarding count.
+
+Every query over `feed` or `article` says which status it wants, and `SubscribedOnlyQueryTest` fails on any that does not. The few that must see every feed are listed in that test with their reasons: the Saved shelf, search results, storage trimming and the archive, among others.
+
+Subscribing a discovered feed turns the same row into the subscription, so its saved posts stay. This happens however the reader subscribes: from discovery, from a Subscribe button, or by adding its address.
+
+Unsaved posts of discovered feeds are deleted 7 days after they were opened, or first stored if never opened (`DiscoveryCleanup`, which runs after every full sync).
+
+- Their pictures are deleted first.
+- A discovered feed left with no posts is deleted too.
+
+### From your reading list
+
+A post saved from a discovered feed comes back in the Morning edition, at most once a week.
+
+- The post chosen is the oldest one that is unread and has never run in this slot.
+- It gets a page of its own after From the archive, with a Subscribe button under it.
+- Its reason says it was saved from a source the reader does not subscribe to.
+
+It is never a candidate for the edition:
+
+- It is placed only after an edition has been built from subscribed feeds.
+- It never counts as something new, so a saved discovered post alone never makes an edition.
+
+### Not built
+
+- **The crawler.** `discovery_candidate` is meant to hold feeds found on the device, through the blogrolls and outbound links of subscribed feeds. It is in the schema and has a DAO, but nothing fills it yet.
+- **Webcomics.** They are left out until their place in the paper has been thought through.
+
+Both are in `todo.md`.
+
 ## What is stored
 
-A single Room 3 database (`data/db/`, schema version 2, exported to `app/schemas/`) on the platform's own SQLite.
+A single Room 3 database (`data/db/`, schema version 3, exported to `app/schemas/`) on the platform's own SQLite.
 
 | Table | Holds | Key columns |
 | --- | --- | --- |
-| `feed` | One subscription | `url` (unique), `siteUrl`, `title`, `iconUrl`, `medianIntervalHrs`, `burstiness`, `tier`, `affinity`, `sliderStep`, `muteUntil`, `lastSyncAt`, `etag`, `lastModified`, `addedAt`, `notify` (unused) |
+| `feed` | One subscription, or a feed looked into through discovery | `url` (unique), `siteUrl`, `title`, `iconUrl`, `medianIntervalHrs`, `burstiness`, `tier`, `affinity`, `sliderStep`, `muteUntil`, `lastSyncAt`, `etag`, `lastModified`, `addedAt`, `notify` (unused), `status` (`SUBSCRIBED` or `DISCOVERED`), `discoveredAt` |
 | `tag` | One tag | `name` (unique), `affinity` |
 | `feed_tag` | Which feeds carry which tags | `feedId`, `tagId` |
 | `article` | One post | `feedId`, `guid` (unique together), `url`, `title`, `summary`, `imageUrl`, `author`, `publishedAt`, `firstSeenAt`, `wordCount`, `feedWordCount`, `contentHash` |
@@ -674,8 +825,10 @@ A single Room 3 database (`data/db/`, schema version 2, exported to `app/schemas
 | `article_traits` | A post's structural traits | `articleId`, `traitsVersion`, `linkCount`, `imageCount`, `hasCode`, `enclosure`, `isLinkPost`, `titlePrefix` |
 | `article_embedding` | A post's text vector, or the mark that it has none | `articleId`, `model`, `vector` |
 | `stored_image` | One image kept in the image store | `url` (the key), `articleId`, `fileName`, `byteSize`, `originalBytes`, `width`, `height`, `storedAt` |
+| `discovery_verdict` | A decision on a feed: passed, subscribed from discovery, or unsubscribed | `urlKey` (the key), `url`, `verdict`, `decidedAt`, `title`, `clusterId`, `centroid` |
+| `discovery_candidate` | A feed found on the device, for a crawler not built yet | `urlKey` (the key), `url`, `source`, `foundVia`, `foundViaTitle`, `title`, `siteUrl`, `host`, `description`, `mentions`, `foundAt`, `fetchedAt`, `tier`, `medianIntervalHrs`, `fullTextShare`, `lastPostAt`, `centroid` |
 
-`edition_item.kind` is one of `LEAD`, `FRONT`, `TOP`, `SECTION`, `BRIEF`, `ARCHIVE`, `AWAY` or `INDEX`. All items on a page share a page type. `edition.kind` is `MORNING`, `EVENING` or `EXTRA`.
+`edition_item.kind` is one of `LEAD`, `FRONT`, `TOP`, `SECTION`, `BRIEF`, `ARCHIVE`, `AWAY`, `READING_LIST` or `INDEX`. All items on a page share a page type. `edition.kind` is `MORNING`, `EVENING` or `EXTRA`.
 
 `article_traits.enclosure` is one of `NONE`, `AUDIO`, `VIDEO` or `OTHER`. The last three tables are described under [Post signals](#post-signals).
 
@@ -690,6 +843,7 @@ Every change to the schema raises the database version and ships a migration (`d
 | 2 | Adds `article_category`, `article_traits` and `article_embedding` | Traits by `TraitsBackfill` and embeddings by `EmbeddingBackfill`, run by `SignalsUpkeep` after app start and after each sync. Categories exist only in the feeds, so the migration clears every feed's `ETag` and `Last-Modified`; the next sync fetches each feed in full and files the posts it already holds. Posts no longer in their feed stay without categories. |
 | 2 | Adds `stored_image` | Nothing to fill it from: version 1 kept no images, only what Coil's cache happened to hold. It starts empty. Back issues' pictures are shown from the network as before, and an article's pictures are stored when it is next opened. |
 | 2 | Adds `article.feedWordCount` | By the migration: a post whose stored body is the feed's own, or that has none, takes its `wordCount`. A post whose body was fetched from its page takes the word count of its summary, which is the feed's text cut to 400 characters; a longer feed text is undercounted. |
+| 3 | Adds `feed.status` and `feed.discoveredAt`, and the tables `discovery_verdict` and `discovery_candidate` | By the migration: every existing feed becomes a subscription, since `status` defaults to `SUBSCRIBED`. The two tables start empty: no decision has been made yet, and the crawler that would fill the candidates is not built. Subscribed feeds need no verdict row, because discovery excludes them by their address. |
 
 Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, whether pictures are shown in greyscale, the storage budget (default 500 MB), and whether onboarding is done. The same store holds two things that are not settings: when the offer of an Extra edition was last turned down, `nothingNewFor`, the last four release times for which a run found nothing new to print (see [When an edition failed to build](#when-an-edition-failed-to-build)), and `resetChange` and `eveningChange`, how the last change of each release time takes effect (see [Changing a release time](#changing-a-release-time)). The reader's text size is in its own preferences file.
 
@@ -763,11 +917,16 @@ No post, edition or engagement is ever deleted automatically.
 
 ### Archive export and import
 
-`data/archive/` writes the whole library to one file and merges such a file back. The file is a zip of four entries (`ArchiveFormat`): `manifest.json` (format name, format version 1, export time, counts), then `feeds.jsonl`, `posts.jsonl` and `editions.jsonl` with one JSON object per line, so a library of any size is written and read a line at a time. It holds every feed with its tags and slider, every post with its stored body and engagement, and every released edition with its items. A post's line also carries the two signals only its feed could supply again: `categories` (key and label) and `enclosure` (the attachment kind). A post's line also has `feedWordCount`. All three fields were added without raising the format version; a file written before them imports as posts without categories, with `feedWordCount` estimated as the migration to version 2 does. Traits and embeddings are not in the file.
+`data/archive/` writes the whole library to one file and merges such a file back. The file is a zip of four entries (`ArchiveFormat`): `manifest.json` (format name, format version 2, export time, counts), then `feeds.jsonl`, `posts.jsonl` and `editions.jsonl` with one JSON object per line, so a library of any size is written and read a line at a time. It holds every feed with its tags and slider, every post with its stored body and engagement, and every released edition with its items. A post's line also carries the two signals only its feed could supply again: `categories` (key and label) and `enclosure` (the attachment kind). A post's line also has `feedWordCount`. All three fields were added without raising the format version; a file written before them imports as posts without categories, with `feedWordCount` estimated as the migration to version 2 does. Traits and embeddings are not in the file.
+
+Version 2 adds each feed's `status` and `discoveredAt`, so discovered feeds and their saved posts are carried too. A version 1 file has every feed imported as a subscription. Discovery's verdicts are not in the file.
 
 Import merges:
 
-- A feed is matched by its normalised address. One that is not subscribed is added back with its tags and slider; a subscribed feed keeps its own name, tags and slider.
+- A feed is matched by its normalised address.
+  - One that is not held is added back with its tags, slider and status.
+  - One already held keeps its own name, tags and slider.
+  - One subscribed in the file but only discovered here becomes a subscription.
 - A post is matched by feed and post ID. One already held is skipped, except that a body it has lost to trimming is put back (and fetched full text replaces a feed excerpt).
 - Categories are added to a post that has none, and an attachment kind to a post that has none recorded. Traits and embeddings of imported posts are rebuilt by the next signals upkeep.
 - Engagement never overwrites anything set locally: a local time stands, counters only go up, and the archive fills in what is missing. A Like or save removed after the export therefore comes back.
@@ -785,7 +944,7 @@ Newsstand ─┬─ Paper ── Reader
            ├─ Back issues ── Paper
            ├─ Search ── Reader
            ├─ Saved / Liked ── Reader
-           ├─ Sources ── Source page, Subscriptions desk
+           ├─ Sources ── Source page, Subscriptions desk, Find sources ── Reader, Passed
            └─ Settings
 ```
 
@@ -801,7 +960,7 @@ Newsstand ─┬─ Paper ── Reader
 
 ### Paper (`ui/paper/`)
 
-- A horizontal pager over the edition's pages: front page, Top stories, sections, In brief, From the archive, back page. Each page scrolls vertically when its stories exceed the screen.
+- A horizontal pager over the edition's pages: front page, Top stories, sections, In brief, From the archive, From your reading list, back page. Each page scrolls vertically when its stories exceed the screen.
 - **Pages turn** (`ui/paper/PageTurn.kt`). A page is one sheet hinged at its left edge (the right edge in right-to-left layouts). Dragging lifts the sheet towards the reader and swings it round the spine while the next page lies flat beneath it; the sheet darkens a little as it stands up, the page beneath starts in its shadow, and a thin line marks the sheet's free edge. The free edge stays under the finger, so a half-turned page can be let go and settles whichever way it was heading. Turning back is the same motion in reverse. The sheet is gone when it stands edge-on, so its back is never seen. The hinge stays at the edge on tablets too: a page is a single sheet, not a spread, and a hinge in the middle would fold through the lead story.
   - The geometry is a pure function of how far the pager has moved (`PageTurnMath`), applied in a graphics layer: a turn re-runs no composition, layout or drawing of the page. A page at rest has no transform at all.
   - When the system's animations are switched off (animator duration scale 0) pages slide plainly instead. In E-ink mode they change at once.
@@ -839,12 +998,13 @@ A month calendar of every released edition, read ones ticked, with the month's e
 - Feed detail, opened from the pencil on a row or from the source page: slider, tag editor, mute, rename, open the website, and remove with confirmation.
 - Add a feed by address; import and export OPML from the overflow menu.
 - A source page lists the feed's 200 most recent posts in date order, with its tags.
+- Find sources (see [Discovery](#discovery)) is linked from the header, the overflow menu, the empty list, and onboarding.
 - Feeds that have not posted in 90 days are listed last, under a Quiet heading. When a feed needs attention the header links to the Subscriptions desk, which is always in the overflow menu.
 - **Subscriptions desk** (`SubscriptionsDeskScreen.kt`): flagged feeds grouped by flag, each group with a line of explanation and each feed with its one-tap fixes (see [Feed health](#feed-health)). Unsubscribe asks first. With nothing flagged it says "All in order".
 
 ### Saved and search
 
-- **Saved** (`ui/saved/`): two shelves, Saved and Liked, most recent first, each with a remove button and Undo.
+- **Saved** (`ui/saved/`): two shelves, Saved and Liked, most recent first, each with a remove button and Undo. A post saved from a feed the reader does not subscribe to has a Subscribe button under it.
 - **Search** (`ui/search/`): one field, full-text search over every stored post, newest first, with a matching excerpt. Each word is a prefix and all must match.
   - **Filters** narrow the search: when (any time, past week, month or year), Saved only, Liked only, one tag, one source. A line under the field has a Filters button that says how many are set, and each active filter as a token that removes it. The button opens the controls in place of the results; on a tablet in landscape they stay open in a column beside the results. The source is chosen from a list in a dialog.
   - A filter needs a word to search for: with filters set and nothing typed the screen says so. With filters set and nothing found it offers to clear them.
@@ -986,5 +1146,5 @@ These are described in [`todo.md`](../todo.md) with the detail needed to build t
 - **Planned:** nothing from the three milestones is left unbuilt. The smaller gaps against the original spec are in `todo.md`.
 - **Built, not proven:** ranking posts within a feed (the W factor) has not been validated on real reading history or run on a device. The open items are in `todo.md`.
 - **Engine built, screen missing:** the Extra edition has no button, the comeback label is not shown as a badge, and the While you were away page has no "12 posts from 7 feeds" summary line.
-- **Built, not seen:** the image store, the full-screen picture and the greyscale option have not been run on a device.
+- **Built, not seen:** the image store, the full-screen picture and the greyscale option have not been run on a device. Nor has discovery. Its ranking is tested on simulated readers only, and the app has not yet run with the real catalogue.
 - **Out of scope for now:** notifications, compression of stored content, and PDF export.

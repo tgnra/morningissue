@@ -80,6 +80,7 @@ import net.tgnra.morningissue.ui.theme.MorningIssueTheme
 fun SourcesScreen(
     onOpenSource: (feedId: Long) -> Unit,
     onOpenSubscriptionsDesk: () -> Unit,
+    onFindSources: () -> Unit,
     onBack: () -> Unit,
 ) {
     val container = LocalAppContainer.current
@@ -109,6 +110,7 @@ fun SourcesScreen(
                 PaperIconButton(Icons.Filled.Add, stringResource(R.string.sources_add), onClick = { adding = true })
                 OverflowMenu(
                     items = listOf(
+                        MenuItem(stringResource(R.string.discover_entry), onFindSources),
                         MenuItem(stringResource(R.string.sources_import), opml.import),
                         MenuItem(stringResource(R.string.sources_export), opml.export),
                         MenuItem(stringResource(R.string.desk_title), onOpenSubscriptionsDesk),
@@ -145,6 +147,7 @@ fun SourcesScreen(
                     Spacer(Modifier.height(6.dp))
                     PaperButton(stringResource(R.string.sources_add), { adding = true }, icon = Icons.Filled.Add, primary = true)
                     PaperButton(stringResource(R.string.sources_import), opml.import)
+                    PaperButton(stringResource(R.string.discover_entry), onFindSources)
                 }
                 else -> {
                     val filter = SourceFilter.valid(SourceFilter.decode(filterKey), list, now)
@@ -153,7 +156,14 @@ fun SourcesScreen(
                         items = SourceRow.of(list.filter { filter.matches(it, now) }, now),
                         key = { it.key },
                         header = {
-                            SourcesHeader(list, filter, now, onFilter = { filterKey = it.encode() }, onOpenDesk = onOpenSubscriptionsDesk)
+                            SourcesHeader(
+                                list,
+                                filter,
+                                now,
+                                onFilter = { filterKey = it.encode() },
+                                onOpenDesk = onOpenSubscriptionsDesk,
+                                onFindSources = onFindSources,
+                            )
                         },
                     ) { row ->
                         when (row) {
@@ -194,6 +204,7 @@ private fun SourcesHeader(
     now: Instant,
     onFilter: (SourceFilter) -> Unit,
     onOpenDesk: () -> Unit,
+    onFindSources: () -> Unit,
 ) {
     val colors = MorningIssueTheme.colors
     val tags = feeds.flatMap { it.tags }.distinctBy { it.lowercase() }.sortedBy { it.lowercase() }
@@ -223,6 +234,7 @@ private fun SourcesHeader(
         // The Subscriptions desk is always in the overflow menu; this points at it when it has something.
         val attention = Desk.needingAttention(feeds, now)
         if (attention > 0) TextLink(pluralStringResource(R.plurals.sources_desk_link, attention, attention), onOpenDesk)
+        TextLink(stringResource(R.string.discover_entry), onFindSources)
     }
 }
 

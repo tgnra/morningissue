@@ -73,6 +73,7 @@ private enum class Step {
 @Composable
 fun OnboardingScreen(
     onFinished: () -> Unit,
+    onFindSources: () -> Unit = {},
 ) {
     val container = LocalAppContainer.current
     val colors = MorningIssueTheme.colors
@@ -97,7 +98,7 @@ fun OnboardingScreen(
 
     Box(Modifier.fillMaxSize().background(colors.paper).windowInsetsPadding(WindowInsets.safeDrawing).imePadding()) {
         when (step) {
-            Step.AddSources -> AddSources(feeds, onPrint = { step = Step.FirstEdition }, onSkip = { step = Step.Skip })
+            Step.AddSources -> AddSources(feeds, onPrint = { step = Step.FirstEdition }, onSkip = { step = Step.Skip }, onFindSources = onFindSources)
             Step.FirstEdition -> FirstEditionProgress(feedCount = feeds.size, status = syncStatus, syncing = !syncDone)
             Step.Skip -> Unit
         }
@@ -119,7 +120,7 @@ private fun Nameplate() {
 }
 
 @Composable
-private fun AddSources(feeds: List<Feed>, onPrint: () -> Unit, onSkip: () -> Unit) {
+private fun AddSources(feeds: List<Feed>, onPrint: () -> Unit, onSkip: () -> Unit, onFindSources: () -> Unit) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
     val margin = LocalPaperLayoutSpec.current.pageMargin
@@ -149,6 +150,12 @@ private fun AddSources(feeds: List<Feed>, onPrint: () -> Unit, onSkip: () -> Uni
         Spacer(Modifier.height(10.dp))
         PaperButton(stringResource(R.string.sources_import), opml.import)
         importNotice?.let { NoticeLine(it, Modifier.padding(top = 12.dp), isError = importFailed) }
+        Spacer(Modifier.height(12.dp))
+        HairlineRule()
+        Spacer(Modifier.height(12.dp))
+        Text(stringResource(R.string.onboarding_discover_detail), style = type.body, color = colors.inkSecondary)
+        Spacer(Modifier.height(10.dp))
+        PaperButton(stringResource(R.string.discover_entry), onFindSources)
 
         if (feeds.isNotEmpty()) {
             Spacer(Modifier.height(28.dp))

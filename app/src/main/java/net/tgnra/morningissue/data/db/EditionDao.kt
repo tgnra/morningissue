@@ -84,7 +84,7 @@ abstract class EditionDao {
         "${ArticleDao.ROW_SELECT} WHERE a.id IN (SELECT articleId FROM edition_item WHERE editionId IN (:editionIds) AND kind != 'INDEX') " +
             "AND a.id NOT IN (SELECT i.articleId FROM edition_item i JOIN edition e ON e.id = i.editionId " +
             "WHERE i.kind = 'AWAY' AND e.openedAt IS NOT NULL) " +
-            "AND g.openedAt IS NULL AND g.readAt IS NULL AND g.savedAt IS NULL AND g.likedAt IS NULL",
+            "AND g.openedAt IS NULL AND g.readAt IS NULL AND g.savedAt IS NULL AND g.likedAt IS NULL AND f.status = 'SUBSCRIBED'",
     )
     abstract suspend fun untouchedPrintedIn(editionIds: List<Long>): List<ArticleRow>
 
@@ -139,13 +139,17 @@ abstract class EditionDao {
     @Query("SELECT * FROM edition_item WHERE articleId = :articleId")
     abstract suspend fun getItemsForArticle(articleId: Long): List<EditionItemEntity>
 
-    /** Printed (non-index) stories of editions released since [since], with what the reader did. */
+    /**
+     * Printed (non-index) stories of subscribed feeds in editions released since [since], with
+     * what the reader did. A reading-list post printed before its feed was subscribed counts
+     * from the day it is subscribed, like the rest of that feed's dormant evidence.
+     */
     @Query(
         "SELECT a.feedId AS feedId, i.articleId AS articleId, i.editionId AS editionId, e.releaseAt AS ranAt, " +
             "g.openedAt AS openedAt, g.readAt AS readAt, g.savedAt AS savedAt, g.likedAt AS likedAt " +
             "FROM edition_item i JOIN edition e ON e.id = i.editionId JOIN article a ON a.id = i.articleId " +
-            "LEFT JOIN engagement g ON g.articleId = i.articleId " +
-            "WHERE i.kind != 'INDEX' AND e.releaseAt >= :since",
+            "JOIN feed f ON f.id = a.feedId LEFT JOIN engagement g ON g.articleId = i.articleId " +
+            "WHERE i.kind != 'INDEX' AND e.releaseAt >= :since AND f.status = 'SUBSCRIBED'",
     )
     abstract suspend fun getRunsSince(since: Instant): List<EditionRunRow>
 
@@ -157,6 +161,13 @@ abstract class EditionDao {
     @Query("UPDATE edition SET finishedAt = COALESCE(finishedAt, :at) WHERE id = :editionId")
     abstract suspend fun markFinished(editionId: Long, at: Instant)
 
+    /** When a From your reading list story was last printed, in an edition released by [now]; null if never. */
+    @Query(
+        "SELECT MAX(e.releaseAt) FROM edition_item i JOIN edition e ON e.id = i.editionId " +
+            "WHERE i.kind = 'READING_LIST' AND e.releaseAt <= :now",
+    )
+    abstract suspend fun lastReadingListAt(now: Instant): Instant?
+
     /** When the reader last opened any edition; null if never. */
     @Query("SELECT MAX(openedAt) FROM edition")
     abstract suspend fun lastOpenedAt(): Instant?
@@ -165,7 +176,7 @@ abstract class EditionDao {
         const val ITEM_SELECT =
             "SELECT i.editionId AS item_editionId, i.articleId AS item_articleId, i.page AS item_page, " +
                 "i.section AS item_section, i.slot AS item_slot, i.kind AS item_kind, i.score AS item_score, " +
-                "i.reason AS item_reason, a.*, f.title AS feedTitle, f.iconUrl AS feedIconUrl, g.openedAt AS openedAt, " +
+                "i.reason AS item_reason, a.*, f.title AS feedTitle, f.iconUrl AS feedIconUrl, f.status AS feedStatus, g.openedAt AS openedAt, " +
                 "g.readFraction AS readFraction, g.readAt AS readAt, g.savedAt AS savedAt, g.likedAt AS likedAt, " +
                 "g.editionsRunUnopened AS editionsRunUnopened, g.leadCount AS leadCount " +
                 "FROM edition_item i JOIN article a ON a.id = i.articleId JOIN feed f ON f.id = a.feedId " +

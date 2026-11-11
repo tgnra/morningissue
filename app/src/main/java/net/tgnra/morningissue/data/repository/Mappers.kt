@@ -10,6 +10,7 @@ import net.tgnra.morningissue.model.ArticleSummary
 import net.tgnra.morningissue.model.EditionStory
 import net.tgnra.morningissue.model.EditionSummary
 import net.tgnra.morningissue.model.Feed
+import net.tgnra.morningissue.model.FeedStatus
 import net.tgnra.morningissue.model.ReadingTime
 import net.tgnra.morningissue.model.Tag
 
@@ -32,6 +33,7 @@ internal fun FeedWithDetails.toModel(): Feed = Feed(
     healthFlag = health?.lastFlag,
     flagDismissedUntil = health?.flagDismissedUntil,
     lastPostAt = health?.lastPostAt,
+    isSubscribed = feed.status == FeedStatus.SUBSCRIBED,
 )
 
 internal fun TagEntity.toModel(): Tag = Tag(id = id, name = name, affinity = affinity)
@@ -54,6 +56,7 @@ internal fun ArticleRow.toSummary(snippet: String? = null): ArticleSummary = Art
     isLiked = likedAt != null,
     isSaved = savedAt != null,
     snippet = snippet,
+    feedSubscribed = feedStatus == FeedStatus.SUBSCRIBED,
 )
 
 internal fun EditionItemRow.toStory(): EditionStory = EditionStory(
@@ -77,6 +80,7 @@ internal fun EditionItemRow.toStory(): EditionStory = EditionStory(
     isLiked = row.likedAt != null,
     isSaved = row.savedAt != null,
     comebackLabel = Scorer.comebackLabelOf(item.reason),
+    feedSubscribed = row.feedStatus == FeedStatus.SUBSCRIBED,
 )
 
 internal fun EditionCoverRow.toSummary(): EditionSummary = EditionSummary(

@@ -158,6 +158,9 @@ class Scorer(
         if (kind == ItemKind.ARCHIVE) {
             return "From the archive: you have not read this one from ${feed.title} yet"
         }
+        if (kind == ItemKind.READING_LIST) {
+            return "From your reading list: you saved this from ${feed.title}, which you don't subscribe to"
+        }
         if (kind == ItemKind.AWAY) {
             return "While you were away: ${feed.title} ran this in an edition you missed"
         }

@@ -86,6 +86,7 @@ import net.tgnra.morningissue.ui.components.pagedVerticalScroll
 import net.tgnra.morningissue.ui.components.paperShadow
 import net.tgnra.morningissue.ui.components.rememberPagedScroller
 import net.tgnra.morningissue.ui.components.retainedState
+import net.tgnra.morningissue.ui.components.subscribeAndSync
 import net.tgnra.morningissue.ui.components.turnToPage
 import net.tgnra.morningissue.ui.format.PaperFormat
 import net.tgnra.morningissue.ui.layout.LocalPaperLayoutSpec
@@ -147,6 +148,7 @@ fun PaperScreen(
                     onOpenMenu = { menuArticleId = it.articleId },
                     onToggleSaved = { scope.launch { container.articles.setSaved(it.articleId, !it.isSaved) } },
                     onToggleLiked = { scope.launch { container.articles.setLiked(it.articleId, !it.isLiked) } },
+                    onSubscribe = { story -> subscribeAndSync(container, story.feedId) },
                 )
             }
             val menu = menuArticleId?.let { id ->

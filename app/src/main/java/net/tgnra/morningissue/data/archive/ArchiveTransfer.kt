@@ -36,6 +36,7 @@ import net.tgnra.morningissue.model.FeedWordCount
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.EnclosureKind
+import net.tgnra.morningissue.model.FeedStatus
 import net.tgnra.morningissue.model.FeedUrls
 import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.model.SliderStep
@@ -78,8 +79,11 @@ interface ArchiveTransfer {
      * Merges an archive into the database. [open] is called once per pass over the file and
      * must return a fresh stream each time; each is closed here.
      *
-     * - A feed is matched by its normalised address; one not subscribed is added back with
-     *   its tags and slider. Feeds already subscribed keep their own tags and slider.
+     * - A feed is matched by its normalised address; one not held is added back with its
+     *   tags, slider and status (a feed that only held posts saved from discovery comes back
+     *   as such). Feeds already held keep their own tags and slider; one held only as
+     *   discovered becomes a subscription when the file says it is one. A version 1 file's
+     *   feeds are all subscriptions.
      * - A post is matched by feed and post ID. One already held is left alone, except that
      *   text it has lost to trimming is put back.
      * - Engagement is merged without overwriting anything set locally.
@@ -113,7 +117,7 @@ class RoomArchiveTransfer(
         // One read transaction, so the file is the library at one moment.
         database.withReadTransaction {
             val now = clock.instant()
-            val feeds = feedDao.getAllWithDetails()
+            val feeds = feedDao.getAllWithDetailsIncludingDiscovered()
             val editions = archiveDao.releasedEditions(now)
             val postsTotal = articleDao.count()
             val zip = ZipOutputStream(BufferedOutputStream(output))
@@ -144,6 +148,7 @@ class RoomArchiveTransfer(
                         ArchiveFeed(
                             n = feed.id, url = feed.url, title = feed.title, siteUrl = feed.siteUrl, iconUrl = feed.iconUrl,
                             tags = details.tags.map { it.name }, sliderStep = feed.sliderStep.name, addedAt = feed.addedAt.toEpochMilli(),
+                            status = feed.status.name, discoveredAt = feed.discoveredAt?.toEpochMilli(),
                         ),
                     ),
                 )
@@ -228,18 +233,27 @@ class RoomArchiveTransfer(
                 var added = 0
                 for (feed in feeds) {
                     val key = FeedUrls.normalize(feed.url)
-                    val id = known[key] ?: run {
+                    // A version 1 file has no status: every feed in it was a subscription.
+                    val status = enumOrNull<FeedStatus>(feed.status) ?: FeedStatus.SUBSCRIBED
+                    val existing = known[key]
+                    if (existing != null && status == FeedStatus.SUBSCRIBED) {
+                        // Subscribed in the file, only discovered here: the file's word stands.
+                        if (feedDao.subscribeDiscovered(existing, Instant.ofEpochMilli(feed.addedAt)) > 0) added++
+                    }
+                    val id = existing ?: run {
                         val newId = feedDao.insert(
                             FeedEntity(
                                 url = feed.url, siteUrl = feed.siteUrl, title = feed.title, iconUrl = feed.iconUrl,
                                 sliderStep = enumOrNull<SliderStep>(feed.sliderStep) ?: SliderStep.AUTO,
                                 addedAt = Instant.ofEpochMilli(feed.addedAt),
+                                status = status,
+                                discoveredAt = if (status == FeedStatus.DISCOVERED) Instant.ofEpochMilli(feed.discoveredAt ?: feed.addedAt) else null,
                             ),
                         )
                         if (newId == -1L) return@run null
                         if (feed.tags.isNotEmpty()) tagDao.setFeedTags(newId, feed.tags)
                         known[key] = newId
-                        added++
+                        if (status == FeedStatus.SUBSCRIBED) added++
                         newId
                     } ?: continue
                     feedIds[feed.n] = id

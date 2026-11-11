@@ -15,13 +15,15 @@ abstract class EngagementDao {
     abstract fun observe(articleId: Long): Flow<EngagementEntity?>
 
     /**
-     * Articles the reader opened, read, saved or Liked at or after [since], with their feed;
-     * input to affinity for posts engaged with outside an edition.
+     * Subscribed feeds' articles the reader opened, read, saved or Liked at or after [since];
+     * input to affinity for posts engaged with outside an edition. Posts saved from discovery
+     * are dormant evidence: they count once their feed is subscribed.
      */
     @Query(
         "SELECT a.feedId AS feedId, g.articleId AS articleId, g.openedAt AS openedAt, g.readAt AS readAt, " +
             "g.savedAt AS savedAt, g.likedAt AS likedAt FROM engagement g JOIN article a ON a.id = g.articleId " +
-            "WHERE g.openedAt >= :since OR g.readAt >= :since OR g.savedAt >= :since OR g.likedAt >= :since",
+            "JOIN feed f ON f.id = a.feedId WHERE f.status = 'SUBSCRIBED' " +
+            "AND (g.openedAt >= :since OR g.readAt >= :since OR g.savedAt >= :since OR g.likedAt >= :since)",
     )
     abstract suspend fun engagedSince(since: Instant): List<EngagedRow>
 

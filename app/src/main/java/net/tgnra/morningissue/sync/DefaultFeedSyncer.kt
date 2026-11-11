@@ -32,6 +32,7 @@ import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.model.ArticleTraitRules
 import net.tgnra.morningissue.model.ContentBlocks
 import net.tgnra.morningissue.model.EnclosureKind
+import net.tgnra.morningissue.model.FeedStatus
 import net.tgnra.morningissue.model.FeedUrls
 import net.tgnra.morningissue.model.HealthFlag
 
@@ -83,8 +84,8 @@ class DefaultFeedSyncer(
 
     private suspend fun runAll(): SyncReport {
         try {
-            // Every feed, every time: a quiet feed is checked as often as any other.
-            val feeds = feedDao.getAll()
+            // Every subscribed feed, every time: a quiet feed is checked as often as any other.
+            val feeds = feedDao.getSubscribed()
             _status.value = SyncStatus.Running(0, feeds.size)
             val done = AtomicInteger()
             val permits = Semaphore(parallelism)
@@ -115,8 +116,9 @@ class DefaultFeedSyncer(
     private suspend fun syncGuarded(feed: FeedEntity): Outcome =
         feedLocks.getOrPut(feed.id) { Mutex() }.withLock {
             try {
-                // Re-read: the row may have changed while this feed waited its turn.
-                val current = feedDao.getById(feed.id) ?: return@withLock Outcome()
+                // Re-read: the row may have changed while this feed waited its turn. A feed that
+                // only holds posts from discovery is never fetched.
+                val current = feedDao.getById(feed.id)?.takeIf { it.status == FeedStatus.SUBSCRIBED } ?: return@withLock Outcome()
                 syncOne(current)
             } catch (e: CancellationException) {
                 throw e

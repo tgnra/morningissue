@@ -49,6 +49,7 @@ import net.tgnra.morningissue.ui.components.ColumnRule
 import net.tgnra.morningissue.ui.components.DoubleRule
 import net.tgnra.morningissue.ui.components.HairlineRule
 import net.tgnra.morningissue.ui.components.HeavyRule
+import net.tgnra.morningissue.ui.components.NotSubscribedBar
 import net.tgnra.morningissue.ui.components.PaperButton
 import net.tgnra.morningissue.ui.components.PaperIcons
 import net.tgnra.morningissue.ui.components.stepAnchor
@@ -66,6 +67,7 @@ fun pageTitle(page: EditionPage): String = when (page) {
     is EditionPage.Section -> page.name
     is EditionPage.InBrief -> stringResource(R.string.page_in_brief)
     is EditionPage.FromTheArchive -> stringResource(R.string.page_archive)
+    is EditionPage.FromYourReadingList -> stringResource(R.string.page_reading_list)
     is EditionPage.WhileYouWereAway -> stringResource(R.string.page_away)
     is EditionPage.Back -> stringResource(R.string.page_back)
 }
@@ -105,6 +107,7 @@ fun EditionPageContent(edition: Edition, page: EditionPage, links: BackPageLinks
         )
         is EditionPage.InBrief -> BriefPage(page)
         is EditionPage.FromTheArchive -> ArchivePage(page)
+        is EditionPage.FromYourReadingList -> ReadingListPage(page)
         is EditionPage.Back -> BackPage(edition, page, links)
     }
 }
@@ -393,6 +396,33 @@ private fun ArchivePage(page: EditionPage.FromTheArchive) {
                 story = story,
                 modifier = Modifier.widthIn(max = 640.dp),
                 bylineExtra = stringResource(R.string.archive_first_published, PaperFormat.articleDate(story.publishedAt)),
+            )
+        }
+    }
+}
+
+/**
+ * From your reading list: a saved, unread post from a source the reader does not subscribe to,
+ * set like From the archive, with the source's Subscribe button beneath it.
+ */
+@Composable
+private fun ReadingListPage(page: EditionPage.FromYourReadingList) {
+    PageHeading(pageTitle(page), intro = stringResource(R.string.page_reading_list_intro))
+    if (page.stories.isEmpty()) {
+        EmptyPageNote()
+        return
+    }
+    val actions = LocalStoryActions.current
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        page.stories.forEachIndexed { index, story ->
+            if (index > 0) HairlineRule(Modifier.widthIn(max = 640.dp))
+            ArchiveFeature(story)
+            NotSubscribedBar(
+                feedTitle = story.feedTitle,
+                subscribed = story.feedSubscribed,
+                onSubscribe = { actions.onSubscribe(story) },
+                modifier = Modifier.widthIn(max = 640.dp).padding(bottom = 20.dp),
+                compact = true,
             )
         }
     }

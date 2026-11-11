@@ -256,12 +256,48 @@ class MigrationTest {
         assertEquals(signals.getValue(1).embedding!!.toList(), dao.getEmbedding(1)!!.vector.toList())
     }
 
+    /** What version 3 must hold after an upgrade: every feed subscribed, the discovery tables empty and usable. */
+    private fun assertVersion3(db: SQLiteConnection) {
+        for ((table, rows) in listOf("feed" to 2L, "article" to 3L, "engagement" to 1L, "edition_item" to 1L, "feed_health" to 1L)) {
+            assertEquals(table, rows, db.long("SELECT COUNT(*) FROM $table"))
+        }
+        assertEquals(2L, db.long("SELECT COUNT(*) FROM feed WHERE status = 'SUBSCRIBED' AND discoveredAt IS NULL"))
+        assertEquals("A blog", db.text("SELECT title FROM feed WHERE id = 1"))
+        assertEquals(0L, db.long("SELECT COUNT(*) FROM discovery_verdict"))
+        assertEquals(0L, db.long("SELECT COUNT(*) FROM discovery_candidate"))
+        assertEquals(1L, db.long("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'index_discovery_verdict_decidedAt'"))
+        assertEquals(1L, db.long("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'index_discovery_candidate_fetchedAt'"))
+        // A feed added after the upgrade without a status is a subscription, as the column's default says.
+        db.execSQL("INSERT INTO feed (id, url, title, tier, affinity, sliderStep, notify, addedAt) VALUES (3, 'https://new.example/feed', 'New', 'WEEKLY', 0.5, 'AUTO', 0, 2000)")
+        assertEquals("SUBSCRIBED", db.text("SELECT status FROM feed WHERE id = 3"))
+        db.execSQL("INSERT INTO discovery_verdict (urlKey, url, verdict, decidedAt) VALUES ('k', 'https://k.example/feed', 'PASSED', 3000)")
+        db.execSQL("INSERT INTO discovery_candidate (urlKey, url, source, foundAt) VALUES ('c', 'https://c.example/feed', 'BLOGROLL', 3000)")
+        assertEquals(1L, db.long("SELECT mentions FROM discovery_candidate WHERE urlKey = 'c'"))
+    }
+
+    @Test
+    fun version2To3MarksEveryFeedSubscribedAndAddsTheDiscoveryTables() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(2, listOf(Migrations.MIGRATION_1_2)).close()
+        // Validated against 3.json.
+        helper.runMigrationsAndValidate(3, listOf(Migrations.MIGRATION_2_3)).use(::assertVersion3)
+    }
+
+    @Test
+    fun version1To3RunsBothSteps() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(3, listOf(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3)).use { db ->
+            assertVersion3(db)
+            assertEquals(0L, db.long("SELECT COUNT(*) FROM feed WHERE etag IS NOT NULL"))
+        }
+    }
+
     @Test
     fun aFreshInstallIsCreatedAtTheCurrentVersion() = runBlocking<Unit> {
-        // Version 2 built directly must be what the migration arrives at; validation compares both with 2.json.
-        helper.createDatabase(2).use { db ->
-            assertEquals(0L, db.long("SELECT COUNT(*) FROM article_traits"))
+        // Version 3 built directly must be what the migrations arrive at; validation compares both with 3.json.
+        helper.createDatabase(3).use { db ->
+            assertEquals(0L, db.long("SELECT COUNT(*) FROM discovery_verdict"))
         }
-        helper.runMigrationsAndValidate(2, emptyList()).close()
+        helper.runMigrationsAndValidate(3, emptyList()).close()
     }
 }

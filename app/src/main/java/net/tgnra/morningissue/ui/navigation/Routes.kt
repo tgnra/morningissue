@@ -24,3 +24,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object SubscriptionsDeskRoute
 
 @Serializable data object SettingsRoute
+
+@Serializable data object DiscoverRoute
+
+@Serializable data object DiscoverPassedRoute

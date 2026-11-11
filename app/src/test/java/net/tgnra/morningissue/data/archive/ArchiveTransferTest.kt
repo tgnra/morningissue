@@ -40,6 +40,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import net.tgnra.morningissue.model.FeedStatus
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -130,7 +131,7 @@ class ArchiveTransferTest {
 
     /** Everything that should survive a round trip, keyed without database IDs. */
     private suspend fun snapshot(db: MorningIssueDatabase): Map<String, Any?> {
-        val feeds = db.feedDao().getAllWithDetails()
+        val feeds = db.feedDao().getSubscribedWithDetails()
         val urlOf = feeds.associate { it.feed.id to it.feed.url }
         val articles = db.archiveDao().articlesAfter(0, 500)
         val keyOf = articles.associate { it.id to "${urlOf[it.feedId]}#${it.guid}" }
@@ -175,7 +176,7 @@ class ArchiveTransferTest {
         }
         assertEquals(listOf("manifest.json", "feeds.jsonl", "posts.jsonl", "editions.jsonl"), entries.keys.toList())
         val manifest = ArchiveFormat.json.decodeFromString<ArchiveManifest>(entries.getValue("manifest.json").single())
-        assertEquals(ArchiveManifest("morning-issue-archive", 1, T0.toEpochMilli(), feeds = 2, posts = 12, editions = 3), manifest)
+        assertEquals(ArchiveManifest("morning-issue-archive", 2, T0.toEpochMilli(), feeds = 2, posts = 12, editions = 3), manifest)
         assertEquals(2, entries.getValue("feeds.jsonl").size)
         assertEquals(12, entries.getValue("posts.jsonl").size)
         assertEquals(3, entries.getValue("editions.jsonl").size)
@@ -193,7 +194,7 @@ class ArchiveTransferTest {
         assertEquals(before, snapshot(target))
         assertEquals(12, target.articleDao().count())
         assertEquals(3, target.editionDao().count())
-        assertEquals(2, target.feedDao().count())
+        assertEquals(2, target.feedDao().countSubscribed())
     }
 
     @Test
@@ -231,7 +232,7 @@ class ArchiveTransferTest {
         )
 
         // No duplicates: one news feed, 12 posts, each (feed, guid) once.
-        assertEquals(2, target.feedDao().count())
+        assertEquals(2, target.feedDao().countSubscribed())
         assertEquals(12, target.articleDao().count())
         val feed = target.feedDao().getById(news)!!
         assertEquals("the local feed keeps its own address and name", "https://news.example/rss/" to "News (renamed)", feed.url to feed.title)
@@ -348,9 +349,9 @@ class ArchiveTransferTest {
         )
         assertEquals(
             ArchiveFormatException.Reason.NEWER_VERSION,
-            reasonFor(zipOf("manifest.json" to """{"format":"morning-issue-archive","version":2,"exportedAt":0}""")),
+            reasonFor(zipOf("manifest.json" to """{"format":"morning-issue-archive","version":3,"exportedAt":0}""")),
         )
-        assertEquals(0, target.feedDao().count())
+        assertEquals(0, target.feedDao().countSubscribed())
     }
 
     @Test
@@ -501,6 +502,54 @@ class ArchiveTransferTest {
         assertEquals(listOf(ArticleCategory("long reads", "Long Reads")), categoriesOf(target, idOf(target, url, "untidy")))
         assertEquals(0, target.articleSignalDao().traitsCount())
         assertEquals(3, TraitsBackfill(target).run())
+    }
+
+    // --- Feed status (archive version 2) -----------------------------------------------------------
+
+    @Test
+    fun aVersion1ArchiveImportsEveryFeedAsASubscription() = runBlocking<Unit> {
+        val file = ByteArrayOutputStream().also { out ->
+            ZipOutputStream(out).use { zip ->
+                fun entry(name: String, text: String) {
+                    zip.putNextEntry(ZipEntry(name))
+                    zip.write(text.toByteArray())
+                    zip.closeEntry()
+                }
+                entry("manifest.json", """{"format":"morning-issue-archive","version":1,"exportedAt":0,"posts":0}""")
+                entry("feeds.jsonl", """{"n":1,"url":"https://a.example/feed","title":"A","addedAt":0}""" + "\n" + """{"n":2,"url":"https://b.example/feed","title":"B","addedAt":0}""")
+                entry("posts.jsonl", "")
+                entry("editions.jsonl", "")
+            }
+        }.toByteArray()
+
+        assertEquals(ImportReport(feedsAdded = 2), import(target, file))
+        assertEquals(listOf(FeedStatus.SUBSCRIBED, FeedStatus.SUBSCRIBED), target.feedDao().getUrls().map { target.feedDao().getById(it.id)!!.status })
+    }
+
+    @Test
+    fun aDiscoveredFeedRoundTripsAsDiscoveredAndASubscriptionInTheFileSubscribesIt() = runBlocking<Unit> {
+        seed(source)
+        val peek = source.feedDao().insert(
+            FeedEntity(url = "https://peek.example/feed", title = "Peek", addedAt = day(5), status = FeedStatus.DISCOVERED, discoveredAt = day(5)),
+        )
+        val saved = source.articleDao().insertNew(article(peek, "peek-1", title = "A saved find", summary = null, firstSeenAt = day(5)))!!
+        source.engagementDao().setSaved(saved, day(5))
+
+        val (file, _) = export(source)
+        val report = import(target, file)
+        // Only subscriptions count as feeds added.
+        assertEquals(2, report.feedsAdded)
+        val imported = target.feedDao().getByUrl("https://peek.example/feed")!!
+        assertEquals(FeedStatus.DISCOVERED, imported.status)
+        assertEquals(day(5), imported.discoveredAt)
+        assertEquals(2, target.feedDao().countSubscribed())
+        assertNotNull(target.engagementDao().get(idOf(target, "https://peek.example/feed", "peek-1"))!!.savedAt)
+
+        // The reader subscribed on the other device: importing that subscribes the local row.
+        source.feedDao().subscribeDiscovered(peek, day(6))
+        val (later, _) = export(source)
+        assertEquals(1, import(target, later).feedsAdded)
+        assertEquals(FeedStatus.SUBSCRIBED, target.feedDao().getById(imported.id)!!.status)
     }
 
     @Test

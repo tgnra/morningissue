@@ -31,6 +31,8 @@ import net.tgnra.morningissue.ui.LocalAppContainer
 import net.tgnra.morningissue.ui.components.ArticleListItem
 import net.tgnra.morningissue.ui.components.EmptyMessage
 import net.tgnra.morningissue.ui.components.HeavyRule
+import net.tgnra.morningissue.ui.components.NotSubscribedBar
+import net.tgnra.morningissue.ui.components.subscribeAndSync
 import net.tgnra.morningissue.ui.components.MenuItem
 import net.tgnra.morningissue.ui.components.OverflowMenu
 import net.tgnra.morningissue.ui.components.PagedList
@@ -62,6 +64,7 @@ fun SourcePageScreen(
     val articles by retainedState("feed-articles-$feedId") { container.articles.observeFeedArticles(feedId) }
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
     var editing by rememberSaveable { mutableStateOf(false) }
+    var justSubscribed by rememberSaveable { mutableStateOf(false) }
 
     val feed = loaded?.feed
     Box(Modifier.fillMaxSize()) {
@@ -70,7 +73,8 @@ fun SourcePageScreen(
             onBack = onBack,
             modifier = if (editing) Modifier.clearAndSetSemantics { } else Modifier,
             actions = {
-                if (feed != null) {
+                // A source found through discovery has nothing to edit or remove: only Subscribe, below.
+                if (feed != null && feed.isSubscribed) {
                     PaperIconButton(Icons.Filled.Edit, stringResource(R.string.source_edit, feed.title), onClick = { editing = true })
                     OverflowMenu(
                         items = listOfNotNull(
@@ -105,6 +109,16 @@ fun SourcePageScreen(
                     key = { it.articleId },
                     header = {
                         Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (!feed.isSubscribed || justSubscribed) {
+                                NotSubscribedBar(
+                                    feedTitle = feed.title,
+                                    subscribed = feed.isSubscribed,
+                                    onSubscribe = {
+                                        justSubscribed = true
+                                        subscribeAndSync(container, feed.id)
+                                    },
+                                )
+                            }
                             FeedCadence(feed)
                             if (feed.tags.isNotEmpty()) SectionLabel(feed.tags.joinToString("  ·  "))
                             val mutedUntil = Mutes.activeUntil(feed.muteUntil, container.clock.instant())

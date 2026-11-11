@@ -1,6 +1,7 @@
 package net.tgnra.morningissue
 
 import android.content.Context
+import android.net.ConnectivityManager
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import java.time.Clock
@@ -11,6 +12,9 @@ import kotlinx.coroutines.SupervisorJob
 import net.tgnra.morningissue.data.archive.ArchiveController
 import net.tgnra.morningissue.data.archive.RoomArchiveTransfer
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
+import net.tgnra.morningissue.data.discovery.CatalogueStore
+import net.tgnra.morningissue.data.discovery.DeckStore
+import net.tgnra.morningissue.data.discovery.DiscoveryRepository
 import net.tgnra.morningissue.data.images.CoilDiskOriginals
 import net.tgnra.morningissue.data.images.FileImageStore
 import net.tgnra.morningissue.data.images.ImageFiles
@@ -38,7 +42,9 @@ import net.tgnra.morningissue.edition.EditionPublisher
 import net.tgnra.morningissue.edition.EditionScheduler
 import net.tgnra.morningissue.edition.ReleaseTimes
 import net.tgnra.morningissue.embedding.EmbedderAsset
+import net.tgnra.morningissue.sync.CandidateFetcher
 import net.tgnra.morningissue.sync.FeedDiscovery
+import net.tgnra.morningissue.sync.FeedFetcher
 import net.tgnra.morningissue.sync.FeedSyncer
 import net.tgnra.morningissue.sync.FullTextFetcher
 import net.tgnra.morningissue.sync.OpmlTransfer
@@ -80,6 +86,12 @@ interface AppContainer {
     val feedDiscovery: FeedDiscovery
     val fullTextFetcher: FullTextFetcher
     val opmlTransfer: OpmlTransfer
+
+    /** Find sources: suggestions from the bundled catalogue, and the decisions on them. */
+    val discovery: DiscoveryRepository
+
+    /** Live fetches of the suggested feeds on screen, for discovery's cards. */
+    val candidates: CandidateFetcher
 
     val editionPublisher: EditionPublisher
     val editionScheduler: EditionScheduler
@@ -191,6 +203,20 @@ class DefaultAppContainer(context: Context) : AppContainer {
     override val fullTextFetcher: FullTextFetcher get() = sync.fullTextFetcher
     override val opmlTransfer: OpmlTransfer get() = sync.opmlTransfer
     override val feedHealth: FeedHealthRepository get() = sync.feedHealth
+
+    override val discovery: DiscoveryRepository by lazy {
+        DiscoveryRepository(database, CatalogueStore.of(appContext), feeds, DeckStore.Prefs(appContext), clock, images = images)
+    }
+    override val candidates: CandidateFetcher by lazy {
+        val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
+        CandidateFetcher(
+            fetcher = FeedFetcher(okHttpClient),
+            cacheDir = appContext.cacheDir,
+            clock = clock,
+            isMetered = { connectivity?.isActiveNetworkMetered ?: true },
+            embedder = { embedder.get() },
+        )
+    }
 
     override val editionPublisher: EditionPublisher get() = edition.publisher
     override val editionScheduler: EditionScheduler get() = edition.scheduler

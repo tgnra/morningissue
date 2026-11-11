@@ -21,6 +21,7 @@ import net.tgnra.morningissue.model.CadenceTier
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.EditionPage
+import net.tgnra.morningissue.model.FeedStatus
 import net.tgnra.morningissue.model.ItemKind
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -267,6 +268,87 @@ class RoomEditionPublisherTest {
 
         assertEquals(1, ids.toSet().size)
         assertEquals(2, db.editionDao().count())
+    }
+
+    /** A feed found through discovery, with one post the reader saved [savedAt] and never read. */
+    private suspend fun addSavedDiscoveredPost(title: String, seenAt: Instant, savedAt: Instant = seenAt): Long {
+        val feedId = db.feedDao().insert(
+            FeedEntity(
+                url = "https://found.example/$title.xml",
+                title = title,
+                addedAt = seenAt,
+                status = FeedStatus.DISCOVERED,
+                discoveredAt = seenAt,
+            ),
+        )
+        val post = addPost(feedId, firstSeenAt = seenAt)
+        db.engagementDao().setSaved(post, savedAt)
+        return post
+    }
+
+    @Test
+    fun aLoneSavedDiscoveredPostStillGivesNothingNew() = runTest {
+        addFeed("Subscribed but quiet")
+        addSavedDiscoveredPost("Found", seenAt = minutesBefore(morning, 10))
+
+        // First seen in the window, saved and unread, yet not from a subscription: no paper.
+        assertNull(publisher.ensureCurrentEdition())
+        assertNull(publisher.buildNextEdition())
+        assertEquals(0, db.editionDao().count())
+
+        // Nor once there is an edition to follow.
+        addSlowPosts(4, seenAt = minutesBefore(morning, 5))
+        val first = publisher.ensureCurrentEdition()!!
+        addSavedDiscoveredPost("Found later", seenAt = Instant.parse("2026-11-11T05:00:00Z"))
+        clock.now = Instant.parse("2026-11-11T08:00:00Z")
+        assertEquals(first, publisher.ensureCurrentEdition())
+        assertEquals(1, db.editionDao().count())
+    }
+
+    @Test
+    fun aSavedDiscoveredPostRunsFromYourReadingListAtMostOnceAWeek() = runTest {
+        val older = addSavedDiscoveredPost("Found", seenAt = morning.minus(Duration.ofDays(3)), savedAt = morning.minus(Duration.ofDays(3)))
+        val newer = addSavedDiscoveredPost("Found too", seenAt = morning.minus(Duration.ofDays(1)), savedAt = morning.minus(Duration.ofDays(1)))
+        val posts = addSlowPosts(8, seenAt = minutesBefore(morning, 20))
+
+        val id = publisher.ensureCurrentEdition()!!
+        val kinds = db.editionDao().getItems(id).associate { it.item.articleId to it.item.kind }
+        // The oldest saved one, on a page of its own; the other is not a candidate anywhere.
+        assertEquals(ItemKind.READING_LIST, kinds[older])
+        assertFalse(newer in kinds)
+        assertTrue(posts.all { kinds[it] != ItemKind.READING_LIST })
+        val edition = EditionPages.toEdition(db.editionDao().getById(id)!!, db.editionDao().getItems(id), publisher.nextReleaseAt())
+        val page = edition.pages.filterIsInstance<EditionPage.FromYourReadingList>().single()
+        assertEquals(listOf(older), page.stories.map { it.articleId })
+        assertFalse(page.stories.single().feedSubscribed)
+        assertTrue(page.stories.single().reason!!.contains("don't subscribe"))
+        assertEquals(EditionPage.Back::class, edition.pages.last()::class)
+
+        // The next morning has news but no reading list: one a week at most.
+        addSlowPosts(3, seenAt = Instant.parse("2026-11-11T05:00:00Z"), prefix = "Wed")
+        clock.now = Instant.parse("2026-11-11T07:00:00Z")
+        val wednesday = publisher.ensureCurrentEdition()!!
+        assertTrue(db.editionDao().getItems(wednesday).none { it.item.kind == ItemKind.READING_LIST })
+
+        // A week on, the next saved post (the first has had its turn, read or not).
+        addSlowPosts(3, seenAt = Instant.parse("2026-11-17T05:00:00Z"), prefix = "Next Tue")
+        clock.now = Instant.parse("2026-11-17T07:00:00Z")
+        val week = publisher.ensureCurrentEdition()!!
+        val reading = db.editionDao().getItems(week).filter { it.item.kind == ItemKind.READING_LIST }.map { it.item.articleId }
+        assertEquals(listOf(newer), reading)
+    }
+
+    @Test
+    fun aReadOrSubscribedPostIsNotOnTheReadingList() = runTest {
+        val read = addSavedDiscoveredPost("Read", seenAt = morning.minus(Duration.ofDays(3)))
+        db.engagementDao().markOpened(read, morning.minus(Duration.ofDays(2)))
+        db.engagementDao().markRead(read, morning.minus(Duration.ofDays(2)))
+        val subscribedLater = addSavedDiscoveredPost("Subscribed", seenAt = morning.minus(Duration.ofDays(2)))
+        db.feedDao().subscribeDiscovered(db.articleDao().getById(subscribedLater)!!.feedId, morning.minus(Duration.ofDays(1)))
+        addSlowPosts(6, seenAt = minutesBefore(morning, 20))
+
+        val id = publisher.ensureCurrentEdition()!!
+        assertTrue(db.editionDao().getItems(id).none { it.item.kind == ItemKind.READING_LIST })
     }
 
     @Test

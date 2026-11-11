@@ -11,9 +11,11 @@ import java.time.LocalDate
 import net.tgnra.morningissue.model.ArticleTraits
 import net.tgnra.morningissue.model.CadenceTier
 import net.tgnra.morningissue.model.ContentSource
+import net.tgnra.morningissue.model.DiscoveryVerdict
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.EnclosureKind
+import net.tgnra.morningissue.model.FeedStatus
 import net.tgnra.morningissue.model.HealthFlag
 import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.model.SliderStep
@@ -37,7 +39,15 @@ data class FeedEntity(
     /** HTTP validators from the last successful fetch, for conditional requests. */
     val etag: String? = null,
     val lastModified: String? = null,
+    /** When the reader subscribed: added by address, OPML or discovery, or a discovered feed subscribed. */
     val addedAt: Instant,
+    /**
+     * [FeedStatus.DISCOVERED] for a feed that only holds posts opened or saved from feed
+     * discovery; see [FeedStatus]. Every feed of a version 2 database was a subscription.
+     */
+    @ColumnInfo(defaultValue = "SUBSCRIBED") val status: FeedStatus = FeedStatus.SUBSCRIBED,
+    /** When a [FeedStatus.DISCOVERED] row was created; null for a subscription. */
+    val discoveredAt: Instant? = null,
 )
 
 @Entity(tableName = "tag", indices = [Index(value = ["name"], unique = true)])
@@ -321,4 +331,54 @@ data class StoredImageEntity(
     val width: Int,
     val height: Int,
     val storedAt: Instant,
+)
+
+/**
+ * What the reader decided about one suggested feed (`DiscoveryVerdict`), by its URL key
+ * (`FeedUrls.normalize`). Any row keeps the feed out of suggestions for good; deleting the row
+ * (Undo, or Undo in the Passed list) restores exactly the state before. [centroid] is the
+ * feed's direction in the embedder's space (`StaticEmbedder.toBytes`), so that passed and
+ * dropped feeds can push similar suggestions down; [clusterId] is the catalogue cluster, for
+ * the exploration bandit's per-cluster counts.
+ */
+@Entity(tableName = "discovery_verdict", indices = [Index("decidedAt")])
+class DiscoveryVerdictEntity(
+    @PrimaryKey val urlKey: String,
+    val url: String,
+    val verdict: DiscoveryVerdict,
+    val decidedAt: Instant,
+    val title: String? = null,
+    val clusterId: Int? = null,
+    val centroid: ByteArray? = null,
+)
+
+/**
+ * A candidate feed found on the device rather than in the bundled catalogue: from a
+ * subscribed feed's blogroll, or from links in posts the reader Liked or read. The crawler
+ * that fills it is not built yet (see `todo.md`); the table is in version 3 so that adding it
+ * needs no further migration. [urlKey] is `FeedUrls.normalize(url)`; [foundVia] is the URL key
+ * of the feed (or post) that led to it.
+ */
+@Entity(tableName = "discovery_candidate", indices = [Index("fetchedAt")])
+class DiscoveryCandidateEntity(
+    @PrimaryKey val urlKey: String,
+    val url: String,
+    /** How it was found: `BLOGROLL` or `OUTBOUND_LINK`. */
+    val source: String,
+    val foundVia: String? = null,
+    val foundViaTitle: String? = null,
+    val title: String? = null,
+    val siteUrl: String? = null,
+    val host: String? = null,
+    val description: String? = null,
+    /** Times it was found; several mentions make it a stronger candidate. */
+    @ColumnInfo(defaultValue = "1") val mentions: Int = 1,
+    val foundAt: Instant,
+    /** When the feed was last fetched and [centroid] computed; null until then. */
+    val fetchedAt: Instant? = null,
+    val tier: CadenceTier? = null,
+    val medianIntervalHrs: Double? = null,
+    val fullTextShare: Double? = null,
+    val lastPostAt: Instant? = null,
+    val centroid: ByteArray? = null,
 )

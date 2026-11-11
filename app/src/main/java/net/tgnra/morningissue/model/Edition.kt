@@ -51,6 +51,8 @@ data class EditionStory(
      * (Welcome back); null otherwise.
      */
     val comebackLabel: String? = null,
+    /** False for a From your reading list story, whose feed the reader does not subscribe to. */
+    val feedSubscribed: Boolean = true,
 )
 
 /** Back-page index entries from one source. */
@@ -94,6 +96,12 @@ sealed interface EditionPage {
     ) : EditionPage
 
     data class FromTheArchive(
+        override val number: Int,
+        override val stories: List<EditionStory>,
+    ) : EditionPage
+
+    /** From your reading list: a post saved from a feed the reader does not subscribe to. */
+    data class FromYourReadingList(
         override val number: Int,
         override val stories: List<EditionStory>,
     ) : EditionPage

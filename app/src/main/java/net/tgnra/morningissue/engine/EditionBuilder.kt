@@ -115,6 +115,9 @@ class EditionBuilder(
      *   another feed's copy of one of them is recognised as a duplicate and dropped.
      * @param away the missed editions' stories for the While you were away pull-out, or null
      *   when the reader missed nothing. Never used for an Evening edition.
+     * @param readingList the From your reading list post, or null when none is due. It is not
+     *   a candidate and makes no paper on its own: it gets a page after From the archive only
+     *   when the edition has a front page, and never in an Evening edition.
      */
     fun build(
         candidates: List<Candidate>,
@@ -125,6 +128,7 @@ class EditionBuilder(
         kind: EditionKind = EditionKind.MORNING,
         alreadyRun: List<Candidate> = emptyList(),
         away: AwayPool? = null,
+        readingList: ReadingListPick? = null,
     ): EditionDraft {
         val limits = EditionLimits.of(config, length)
         val layout = Layout()
@@ -159,6 +163,8 @@ class EditionBuilder(
         // 7. Pick From the archive.
         remaining = (remaining + carry.archiveOnly).sortedBy { it.rank }
         if (full) remaining = pickFromTheArchive(remaining, layout)
+        // 7b. From your reading list.
+        if (full && readingList != null) placeReadingList(readingList, releaseAt, layout)
         var leftovers = remaining + carry.retired + faded + finished
         // 8. While you were away, as page 2.
         if (full && away != null) leftovers = insertAwayPage(away, feedsById, releaseAt, limits, layout, leftovers)
@@ -503,6 +509,18 @@ class EditionBuilder(
         val pick = ranked.firstOrNull { it.candidate.isHeldOver && !it.candidate.ranRecently } ?: return ranked
         layout.place(pick, layout.newPage(), 0, ItemKind.ARCHIVE)
         return ranked.without(listOf(pick))
+    }
+
+    /**
+     * Step 7b. One `READING_LIST` page with the saved post of a feed the reader does not
+     * subscribe to, after From the archive. Only in an edition that already has a front page,
+     * and only when the post is not placed elsewhere (it cannot be: it is never a candidate).
+     */
+    private fun placeReadingList(pick: ReadingListPick, releaseAt: Instant, layout: Layout) {
+        if (layout.pages == 0) return
+        if (layout.items.any { it.articleId == pick.candidate.articleId }) return
+        val item = Ranked(pick.candidate, pick.feed, scorer.score(pick.feed, pick.candidate, releaseAt))
+        layout.place(item, layout.newPage(), 0, ItemKind.READING_LIST)
     }
 
     /**

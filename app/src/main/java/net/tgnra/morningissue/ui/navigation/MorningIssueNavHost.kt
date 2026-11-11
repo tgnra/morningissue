@@ -12,6 +12,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import net.tgnra.morningissue.ui.backissues.BackIssuesScreen
+import net.tgnra.morningissue.ui.discover.DiscoverScreen
+import net.tgnra.morningissue.ui.discover.PassedScreen
 import net.tgnra.morningissue.ui.newsstand.NewsstandScreen
 import net.tgnra.morningissue.ui.onboarding.OnboardingScreen
 import net.tgnra.morningissue.ui.paper.PaperScreen
@@ -32,7 +34,7 @@ import net.tgnra.morningissue.ui.theme.MorningIssueTheme
  *            ├─ Back issues ── Paper
  *            ├─ Search ── Reader
  *            ├─ Saved / Liked ── Reader
- *            ├─ Sources ── Source page, Subscriptions desk
+ *            ├─ Sources ── Source page, Subscriptions desk, Find sources ── Reader, Passed
  *            └─ Settings
  * ```
  *
@@ -66,6 +68,7 @@ fun MorningIssueNavHost(
     ) {
         composable<OnboardingRoute> {
             OnboardingScreen(
+                onFindSources = { navController.navigate(DiscoverRoute) },
                 onFinished = {
                     navController.navigate(NewsstandRoute) {
                         popUpTo<OnboardingRoute> { inclusive = true }
@@ -114,8 +117,19 @@ fun MorningIssueNavHost(
             SourcesScreen(
                 onOpenSource = openSource,
                 onOpenSubscriptionsDesk = { navController.navigate(SubscriptionsDeskRoute) },
+                onFindSources = { navController.navigate(DiscoverRoute) },
                 onBack = back,
             )
+        }
+        composable<DiscoverRoute> {
+            DiscoverScreen(
+                onOpenArticle = openReader,
+                onOpenPassed = { navController.navigate(DiscoverPassedRoute) },
+                onBack = back,
+            )
+        }
+        composable<DiscoverPassedRoute> {
+            PassedScreen(onBack = back)
         }
         composable<SourcePageRoute> { entry ->
             SourcePageScreen(

@@ -60,8 +60,8 @@ abstract class FeedHealthDao {
             "COUNT(DISTINCT CASE WHEN g.readAt IS NOT NULL THEN i.articleId END) AS read, " +
             "COUNT(DISTINCT CASE WHEN g.likedAt IS NOT NULL THEN i.articleId END) AS liked " +
             "FROM edition_item i JOIN edition e ON e.id = i.editionId JOIN article a ON a.id = i.articleId " +
-            "LEFT JOIN engagement g ON g.articleId = i.articleId " +
-            "WHERE i.kind != 'INDEX' AND e.releaseAt >= :since AND e.releaseAt <= :now GROUP BY a.feedId",
+            "JOIN feed f ON f.id = a.feedId LEFT JOIN engagement g ON g.articleId = i.articleId " +
+            "WHERE i.kind != 'INDEX' AND e.releaseAt >= :since AND e.releaseAt <= :now AND f.status = 'SUBSCRIBED' GROUP BY a.feedId",
     )
     abstract suspend fun runStatsSince(since: Instant, now: Instant): List<FeedRunStatsRow>
 
@@ -69,7 +69,8 @@ abstract class FeedHealthDao {
     @Query(
         "SELECT a.feedId AS feedId, COUNT(*) AS posts, " +
             "COALESCE(SUM(CASE WHEN g.openedAt IS NOT NULL OR g.readAt IS NOT NULL THEN 1 ELSE 0 END), 0) AS opened " +
-            "FROM article a LEFT JOIN engagement g ON g.articleId = a.id WHERE a.firstSeenAt >= :since GROUP BY a.feedId",
+            "FROM article a JOIN feed f ON f.id = a.feedId LEFT JOIN engagement g ON g.articleId = a.id " +
+            "WHERE a.firstSeenAt >= :since AND f.status = 'SUBSCRIBED' GROUP BY a.feedId",
     )
     abstract suspend fun postStatsSince(since: Instant): List<FeedPostStatsRow>
 
