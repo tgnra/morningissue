@@ -1,16 +1,17 @@
 # Morning Issue for Kobo
 
-A native e-ink reader for Kobo e-readers. You open it from NickelMenu. It syncs editions
-with the Morning Issue app on your phone over the local network, then shows them on the bare
-framebuffer while Nickel (Kobo's own reader) is stopped. The protocol, the files on the
+A native e-ink reader for Kobo e-readers. You open it from NickelMenu. It shows editions
+and saved articles on the bare framebuffer while Nickel (Kobo's own reader) is stopped, and
+syncs with the Morning Issue app on your phone in the background over the Kobo's Wi-Fi. The protocol, the files on the
 device and the launch flow are specified in [`docs/kobo-sync.md`](../docs/kobo-sync.md).
 
 It is one static binary, `morningissue`, built for `armv7-unknown-linux-musleabihf`. It has
-three subcommands:
+four subcommands:
 
-- `sync` fetches from the phone.
-- `read` runs the reader.
+- `read` runs the reader (and its background sync).
+- `sync` fetches from the phone once, from a shell.
 - `check` names the device and fails if this version can't draw on it.
+- `wifi-off` powers the Wi-Fi chip down for `launch.sh` (ntx_io ioctl 208).
 
 ## Install
 
@@ -24,8 +25,8 @@ firmware 4.6 or newer.
 3. Eject the drive. NickelMenu reads its configuration again once the Kobo leaves USB mode.
 4. On the phone, open Morning Issue's Kobo settings and keep the app open on the same Wi-Fi
    network.
-5. On the Kobo, open the main menu and tap **Morning Issue**. The phone asks you to allow
-   the Kobo the first time.
+5. On the Kobo, connect to Wi-Fi in Nickel, then open the main menu and tap
+   **Morning Issue**. The phone asks you to allow the Kobo the first time.
 
 ### Update
 
@@ -40,16 +41,31 @@ change the screen mode.
 
 ## Use
 
-- **Newsstand:** shows the three newest editions, when the last sync ran (or why it failed),
-  **Rotate** and **Exit**. Tap a cover to open it.
-- **Edition:** pages appear in the order the phone printed them. To turn a page, use the page
-  buttons, swipe left or right, tap the outer fifth of the screen, or use **Previous** and
-  **Next**. Tap a story to read it.
-- **Article:** the header shows the feed and author. To turn a page, tap the left or right
-  third of the screen, or swipe. The bottom bar has **Like** and **Save**, and **‹ Edition**
-  goes back.
+- **Home:** the latest edition large in the middle, earlier ones on the shelf below (beside
+  it in landscape). **Exit** is at the top left, **Saved** and **Settings** at the top right.
+  The line at the foot says "Syncing…", when the last sync ran and with which phone,
+  "Offline", or why the last sync failed. Tap a cover to open it.
+- **Sync:** runs in the background as soon as the reader starts, if the Kobo is connected
+  to Wi-Fi. Editions, saved articles and pictures appear as they arrive. The reader only
+  uses the connection Nickel had; it never turns Wi-Fi on. Without one it shows "Offline".
+- **Edition and article pages** fill the screen. Swipe down from the top edge (or tap the top
+  strip) to show the header (back, title) and the footer (position, and in an article
+  **Like**, **Save** and **Aa**). A tap on the page, or 7 seconds, hides them again.
+- **Turning pages:** the page buttons, a swipe left or right, or a tap: the left third of an
+  article goes back and the rest forward; in an edition, the outer fifths turn and a tap on
+  a story opens it.
+- **Aa:** five text sizes (the page is laid out again on the same text), the front light's
+  brightness, and its warmth on models with a natural light.
+- **Saved:** every article saved on the phone, newest first. Articles the phone could not
+  get the full text of say so and show the summary. Unsaving one sends that to the phone; it
+  leaves the list at the next sync.
+- **Settings:** the Wi-Fi state, how to find the phone (automatically, or a typed address
+  on a keypad; the port defaults to 47824), **Sync now**, inverting the page-turn buttons,
+  orientation (follow the sensor, portrait or landscape), and the last sync's result.
+  Settings, the text size and the light levels are kept in `data/settings.json`.
 - **Leaving:** the power button, closing the sleep cover, **Exit**, or 20 minutes without
-  input all leave the reader and restart Nickel, which then sleeps as usual. The reader never
+  input all leave the reader. The light goes back to Nickel's levels, Wi-Fi is turned off
+  the way a boot leaves it, and Nickel restarts and sleeps as usual. The reader never
   suspends the device itself.
 
 Every action can be done by touch alone. Page buttons and the orientation sensor are used
@@ -73,7 +89,8 @@ You can create `.adds/morningissue/config.json` yourself. Every field is optiona
 }
 ```
 
-- `phone` is for networks that drop UDP broadcasts.
+- `phone` is for networks that drop UDP broadcasts. An address typed in Settings is tried
+  before it and before the beacon.
 - `touch` and `display` are escape hatches for a model whose profile turns out to be wrong.
 - `flashEvery` sets how many partial page turns pass before a full refresh.
 - Problems are logged to `.adds/morningissue/data/launch.log`.
@@ -105,14 +122,18 @@ sources and is unverified.
 Known gaps:
 
 - **Orientation:** the sensor is followed only on the Libra 2, where KOReader and Plato
-  agree on its mapping. Elsewhere, use **Rotate** on the newsstand, which also locks the
-  orientation on the Libra 2.
+  agree on its mapping. Elsewhere, choose portrait or landscape in Settings.
 - **Touch:** each model's transform comes from KOReader and Plato and is untested. If taps
   land in the wrong place, set `touch` in `config.json`.
 - **Waiting for refreshes:** the Mark 7 "wait for update complete" ioctl is unreliable on
   some models (Libra 2, Libra H2O, Nia, Clara 2E), so those profiles sleep briefly instead.
-- **Wi-Fi after exit:** the launcher removes the Wi-Fi module the way KOReader does. On MTK
-  models this has not been checked.
+- **Wi-Fi:** when Nickel was connected, the launcher keeps the Wi-Fi module,
+  `wpa_supplicant` and `dhcpcd` running while the reader runs, and stops only `dhcpcd-dbus`.
+  On exit it tears Wi-Fi down as KOReader does (`moal` and `mlan` on NXP chips, the
+  `/dev/wmtWifi` switch on MTK, then the chip's power). Only the Libra 2 path has been
+  run on a device, and not this version of it.
+- **Front light:** see the table below. Only the brightness and warmth files of the
+  Libra 2 family are high confidence; everything else is unverified.
 
 ### Device facts relied on
 
@@ -126,6 +147,10 @@ Known gaps:
 | Input event numbers differ between hardware revisions, so devices are probed by capability | KOReader | high |
 | Stopping and restarting Nickel: which processes to stop, `/tmp/nickel-hardware-status`, Wi-Fi teardown, `-platform kobo -skipFontLoad` | KOReader `koreader.sh` and `nickel.sh` | high (facts only, rewritten) |
 | NickelMenu: a ':' inside a label breaks the config; `cmd_spawn` detaches; `chain_failure` | NickelMenu docs; the user's device | high |
+| Front light, most i.MX Mark 7 models: `/sys/class/backlight/mxc_msp430.0/brightness` 0–100; warmth `/sys/class/leds/aw99703-bl_FL1/color` or `/sys/class/backlight/lm3630a_led/color` (or `tlc5947_bl` on the Forma), 0–10 where 0 is warmest (the Sage's is not inverted) | KOReader `device.lua` frontlight entries, FBInk/NickelMenu notes | high for the Libra 2, medium elsewhere |
+| Front light, older models without sysfs: `/dev/ntx_io` ioctl 241 with 0–100 | KOReader `kobolight.lua` | medium |
+| Nickel's own levels: `[PowerOptions] FrontLightLevel`, `FrontLightState` and `ColorSetting` (1500–6400 K) in `Kobo eReader.conf`; restored on exit since nothing shows Nickel reapplies them | the conf on the Libra 2, KOReader | medium |
+| Wi-Fi: keeping `wpa_supplicant` and `dhcpcd` without Nickel is safe, `dhcpcd-dbus` is Nickel's bridge; teardown `dhcpcd -k`, `wpa_cli terminate`, `rmmod moal mlan`, ntx_io ioctl 208 or `sdio_wifi_pwr`, `/dev/wmtWifi` on MTK | KOReader `koreader.sh`, `enable-wifi.sh`, `disable-wifi.sh` | high (facts only, rewritten) |
 | The system clock is UTC | Kobo firmware behaviour reported by KOReader | medium |
 
 KOReader and Plato (AGPL) and FBInk (GPL) were read for these interface facts only. No code
@@ -162,18 +187,26 @@ cd kobo && cargo test
   - a dbId change wiping state;
   - a changed edition version;
   - image 404s;
-  - an interrupted sync keeping the last good state;
-  - no phone found.
+  - an interrupted sync keeping the editions that arrived;
+  - no phone found;
+  - `/v1/saved` fetched only when its version changes;
+  - pictures asked for at the screen width, three at a time;
+  - a typed address tried before the beacon.
 - `tests/screens.rs` drives the whole reader through the desktop backend with scripted taps,
-  swipes and keys. It covers:
+  swipes and keys, at:
   - 600×800 at 167 dpi;
   - 1072×1448 at 300 dpi;
   - 1264×1680 at 300 dpi in portrait, landscape and inverted;
   - 1404×1872 at 227 dpi.
 
-  It writes every screen, plus a `contact.png` sheet, to `kobo/target/screens/<size>/`.
+  It covers home with one, two and three editions, offline, syncing and after an error;
+  Settings and the keypad; Saved; the reader with its chrome hidden and shown; the Aa
+  popover, with and without warmth; a background sync against the fake phone (a new
+  edition and pictures arriving while reading); no sync attempt offline; orientation; and
+  inverted buttons. It writes every screen, plus a `contact.png` sheet, to
+  `kobo/target/screens/<size>/<run>/`.
 - Unit tests cover ioctl struct sizes, a recorded Libra 2 touch trace, the reading rules,
-  pagination of editions and dates.
+  pagination of editions, code blocks, settings, addresses and dates.
 
 ## Licences
 
