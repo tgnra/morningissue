@@ -120,14 +120,16 @@ An event naming an article or edition the phone no longer has is skipped but sti
 
 The Kobo sends `liked` and `saved` only when the reader changes them on the Kobo. When it does, it records a `readFraction` of how far the reader got before leaving the article, and `read` when that passes the same threshold the app uses. The phone owns `editionsRunUnopened` and `leadCount`, and the Kobo never sends them. A page counts as viewed by the same rule as `ui/paper/PageViews.kt`, so the Kobo only sends a `pageView` for time the page was actually on screen.
 
+The `dbId` check comes before the events are sent because a reinstalled phone reuses Room IDs: events sent first would be merged into whatever articles now have those IDs.
+
 Known v1 limit: events that arrive after the next edition is built have already counted their stories as unopened for that build.
 
 ## Order of a sync (Kobo)
 
 1. Find the phone (beacon, then the last address, then the configured one).
 2. Pair if there is no token, or on `401`.
-3. `POST /v1/events` with everything unsent, so the phone's state is current before export.
-4. `GET /v1/manifest`. On a `dbId` change, wipe and start over.
+3. `GET /v1/manifest` and compare its `dbId` (or the one a pairing in step 2 returned) with the saved one. On a change, wipe and start over. Then `POST /v1/events` with everything unsent, so the phone's state is current before export. Events at or below the manifest's `ackedSeq` are already merged and are deleted without being sent.
+4. If any events were sent, `GET /v1/manifest` again, since merged events change bundle versions.
 5. Fetch each edition whose `version` differs from the stored one, then its images.
 6. Delete local editions that aren't in the manifest, and images nothing refers to.
 7. Write everything to temporary files and rename them into place, so an interrupted sync leaves the last good state.
@@ -141,7 +143,8 @@ morningissue          the binary
 launch.sh             run by NickelMenu
 config.json           optional overrides (phone address, …)
 fonts/                bundled fonts and their licences
-data/state.json       deviceId, token, dbId, last address, next seq, per-edition versions
+data/state.json       deviceId, token, dbId, last address, next seq, per-edition versions,
+                      last sync result, clock offset from the phone's Date header
 data/editions/<id>.json
 data/images/<sha256 of url>.img
 data/events.jsonl     unsent events, one JSON object per line, appended and fsynced
