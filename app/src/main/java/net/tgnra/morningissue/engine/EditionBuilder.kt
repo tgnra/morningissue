@@ -52,6 +52,21 @@ data class EditionLimits(
  * Lays out an edition. Pure: the same candidates, feeds, length and release time always give
  * the same draft. [build] follows the steps of "How an edition is assembled" in
  * `docs/how-it-works.md`.
+ *
+ * **Within-feed ranking.** W ([WithinFeed]) reaches the builder inside every score the
+ * [scorer] gives, so wherever posts compete on their score it has its say: the ranking, which
+ * post of a feed takes that feed's front-page place, Top stories, sections, In brief, the
+ * pick From the archive, and the While you were away pull-out (the best of what was missed is
+ * a ranking like any other). It also counts where a score is held against a threshold
+ * (`heldOverMinScore`, `briefMinScore`, `awayMinScore`): a held-over post of a kind the reader
+ * skips leaves the regular pages a little sooner, which is the point of the threshold. Two
+ * rules deliberately do not look at W:
+ *
+ * - the freshness floor goes by F alone, so no taste for a subject brings back stale news;
+ * - of two feeds' copies of one story, the copy of the feed with the higher affinity is
+ *   kept. W says how a post compares with its own feed's other posts, which says nothing
+ *   about which feed the reader would rather read the story in. (Between feeds of equal
+ *   affinity the better score decides, and W is part of that.)
  */
 class EditionBuilder(
     private val config: RankingConfig = RankingConfig.Default,

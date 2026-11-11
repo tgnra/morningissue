@@ -39,21 +39,32 @@ data class Score(
     val c: Double = 1.0,
     /** How long the feed had been quiet, in days, when this post is a comeback; null otherwise. */
     val quietDays: Long? = null,
+    /** The within-feed weight with the signal behind it; neutral unless a [WithinFeedSource] is set. */
+    val within: WithinFeedWeight = WithinFeedWeight.Neutral,
 ) {
-    val value: Double = a * f * s * p * c
+    /** W, the within-feed multiplier: 1 unless the reader's record tells this feed's posts apart. */
+    val w: Double get() = within.multiplier
+
+    val value: Double = a * f * s * p * c * within.multiplier
 
     val isComeback: Boolean get() = quietDays != null
 }
 
 /**
- * `score = A × F × S × P × C`, as described under "Scoring" in `docs/how-it-works.md`: age is
- * measured at the edition's release time, P counts editions a post ran in unopened, and C is
- * the comeback boost. Every constant comes from [config]; with `halfLifeFloorHours = 4` this
- * reproduces the original live-feed design's worked examples.
+ * `score = A × F × S × P × C × W`, as described under "Scoring" in `docs/how-it-works.md`: age
+ * is measured at the edition's release time, P counts editions a post ran in unopened, C is
+ * the comeback boost and W the within-feed weight ([WithinFeed]). Every constant comes from
+ * [config]; with `halfLifeFloorHours = 4` this reproduces the original live-feed design's
+ * worked examples.
+ *
+ * W is 1 unless a [withinFeedSource] is given, so a scorer built without one scores exactly
+ * as before within-feed ranking. It applies whatever the slider says: it orders a feed's own
+ * posts, and at most ×1.4 on a turned-down feed's small A does not bring that feed back.
  */
 class Scorer(
     private val config: RankingConfig = RankingConfig.Default,
     private val affinitySource: AffinitySource = AffinitySource.Stored,
+    private val withinFeedSource: WithinFeedSource = WithinFeedSource.Neutral,
 ) {
     private val affinityRules = Affinity(config)
 
@@ -76,7 +87,15 @@ class Scorer(
             // The reader turned the feed down: its return is labelled but not pushed forward.
             c = if (quietDays != null && feed.sliderStep >= SliderStep.AUTO) config.comebackBoost else 1.0,
             quietDays = quietDays,
+            within = withinFeed(feed, candidate),
         )
+    }
+
+    /** W from the source, held to the caps whatever the source returns. */
+    private fun withinFeed(feed: FeedProfile, candidate: Candidate): WithinFeedWeight {
+        val weight = withinFeedSource.weight(feed, candidate)
+        val capped = weight.multiplier.coerceIn(config.withinFeedMinWeight, config.withinFeedMaxWeight)
+        return if (capped == weight.multiplier) weight else weight.copy(multiplier = capped)
     }
 
     /**
@@ -124,10 +143,14 @@ class Scorer(
     /**
      * The one-line "Why is this here?" for a scored post. A From the archive pick and a
      * held-over post say so first. Otherwise the dominant factor speaks, each factor's pull put
-     * on a 0..1 scale (affinity above neutral, scarcity above 1 towards its cap): a loved feed,
-     * worded after the user's own slider choice, what they read from the feed, or what they
-     * read from its tag when the affinity is borrowed; or a rare feed, whichever pulls harder.
-     * A post neither explains is there because it is new.
+     * on a 0..1 scale (affinity above neutral, scarcity above 1 towards its cap, W above 1
+     * towards its cap): a loved feed, worded after the user's own slider choice, what they read
+     * from the feed, or what they read from its tag when the affinity is borrowed; or a rare
+     * feed, whichever pulls harder. A post neither explains is there because it is new.
+     *
+     * The within-feed signal speaks when W is at least `withinFeedReasonMinWeight` and pulls
+     * strictly harder than both affinity and scarcity ([withinFeedReason]). A W below 1 never
+     * gives a reason: it is why a post sits lower, not why it is here.
      *
      * @param kind where the post was placed, when known
      */
@@ -145,6 +168,10 @@ class Scorer(
         val affinityPull = ((score.affinity - config.neutralAffinity) / (1.0 - config.neutralAffinity)).coerceIn(0.0, 1.0)
         val scarcityPull = ((score.s - 1.0) / (config.scarcityCap - 1.0)).coerceIn(0.0, 1.0)
         val lovedPull = (config.lovedAffinity - config.neutralAffinity) / (1.0 - config.neutralAffinity)
+        val withinPull = ((score.w - 1.0) / (config.withinFeedMaxWeight - 1.0)).coerceIn(0.0, 1.0)
+        if (score.w >= config.withinFeedReasonMinWeight && withinPull > affinityPull && withinPull > scarcityPull) {
+            withinFeedReason(feed, score.within.signal)?.let { return it }
+        }
         return when {
             affinityPull >= lovedPull && affinityPull >= scarcityPull -> when {
                 feed.sliderStep == SliderStep.FAVOURITE -> "${feed.title} is one of your favourites"
@@ -154,6 +181,35 @@ class Scorer(
             }
             scarcityPull >= RARE_PULL -> "Rare post: ${feed.title} publishes ${describeInterval(score.intervalHours)}"
             else -> "New from ${feed.title} since the last edition"
+        }
+    }
+
+    /**
+     * The line for a within-feed signal that lifted a post, or null when it cannot be said
+     * honestly. A key's line says "usually", so it needs the reader to engage with this
+     * feed's posts carrying the key at least as often as not (`neutralAffinity`, in posts
+     * read): in a feed the reader mostly skips, a category read a little more than the rest
+     * still lifts the post but is not called a habit. The text line names Likes only when a
+     * Liked post is among those the taste was learned from.
+     */
+    private fun withinFeedReason(feed: FeedProfile, signal: WithinFeedSignal?): String? {
+        if (signal == null || signal.effect <= 0.0) return null
+        if (signal.kind == WithinFeedSignalKind.TEXT) {
+            return if (signal.fromLikes) "Similar to posts you have Liked" else "Similar to posts you have read"
+        }
+        if ((signal.rate ?: 0.0) < config.neutralAffinity) return null
+        return when (signal.kind) {
+            WithinFeedSignalKind.CATEGORY -> "You usually read ${feed.title}'s posts about ${signal.label}"
+            WithinFeedSignalKind.LENGTH -> "You usually read ${signal.label} posts from ${feed.title}"
+            WithinFeedSignalKind.ENCLOSURE -> when (signal.label) {
+                "audio" -> "You usually open audio posts from ${feed.title}"
+                "video" -> "You usually open video posts from ${feed.title}"
+                else -> "You usually open posts with attachments from ${feed.title}"
+            }
+            WithinFeedSignalKind.LINK_POST -> "You usually read link posts from ${feed.title}"
+            WithinFeedSignalKind.CODE -> "You usually read posts with code from ${feed.title}"
+            WithinFeedSignalKind.TITLE_PREFIX -> "You usually read \"${signal.label}\" posts from ${feed.title}"
+            WithinFeedSignalKind.TEXT -> null
         }
     }
 

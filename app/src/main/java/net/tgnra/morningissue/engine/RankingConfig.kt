@@ -189,6 +189,48 @@ data class RankingConfig(
     // Evening and Extra editions
     /** In an Extra edition each feed's newest posts are exempt from the age and freshness limits. */
     val extraNewestPerFeed: Int = 5,
+
+    // W: within-feed ranking (engine/WithinFeed.kt). Unproven: every value below is a guess
+    // to be tuned against exported labels, not a measurement.
+    /** W never pulls a post's score below this share of what it was. */
+    val withinFeedMinWeight: Double = 0.7,
+    /** W never lifts a post's score above this multiple. */
+    val withinFeedMaxWeight: Double = 1.4,
+    /**
+     * `ln W = gain × trust × lift`, with `lift` in "posts read above the feed's rate". At 1.0
+     * a fully trusted signal worth a third of a read post more than its feed's average
+     * reaches the upper cap (`ln 1.4 ≈ 0.34`), and the same below reaches the lower one.
+     */
+    val withinFeedGain: Double = 1.0,
+    /**
+     * Pseudo-exposures at the feed's own rate that a (feed, key) starts with; the same as
+     * [affinityPriorStrength], kept apart so the two can be tuned separately.
+     */
+    val withinFeedKeyPriorStrength: Double = 10.0,
+    /**
+     * A feed's keys are trusted by `E / (E + this)`, `E` its decayed exposure: half strength
+     * at a dozen recent labelled posts, two thirds at two dozen, three quarters at three.
+     */
+    val withinFeedFeedPriorPosts: Double = 12.0,
+    /**
+     * The text taste is trusted by `n / (n + this)`, `n` the decayed exposure of all labelled
+     * posts that have a vector: half strength at 200 of them. An edition prints a few dozen
+     * stories, so that is about a week of papers; a handful of labels moves nothing.
+     */
+    val withinFeedTextPriorPosts: Double = 200.0,
+    /**
+     * "Why is this here?" names the within-feed signal only from this W up, and then only
+     * when it pulls harder than the feed's affinity and its scarcity.
+     */
+    val withinFeedReasonMinWeight: Double = 1.15,
+    /**
+     * Length buckets by word count: brief up to [lengthBriefMaxWords] (a note or a link with a
+     * comment), short up to [lengthShortMaxWords] (about two minutes at 230 words a minute),
+     * medium up to [lengthMediumMaxWords] (about six and a half), long above.
+     */
+    val lengthBriefMaxWords: Int = 150,
+    val lengthShortMaxWords: Int = 500,
+    val lengthMediumMaxWords: Int = 1500,
 ) {
     companion object {
         val Default = RankingConfig()
