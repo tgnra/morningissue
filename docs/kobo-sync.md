@@ -53,9 +53,12 @@ The phone stores a hash of the token, never the token itself. Pairing the same `
   "ackedSeq": 41,
   "editions": [
     {"id": 120, "date": "2026-11-11", "kind": "MORNING", "number": 120, "releaseAt": "…", "version": "<opaque>"}
-  ]
+  ],
+  "saved": {"count": 14, "version": "<opaque>"}
 }
 ```
+
+`saved.version` changes whenever `GET /v1/saved` would return something different. A Kobo built before `saved` existed ignores it, and a phone that leaves it out has no saved shelf to offer.
 
 `editions` lists the three most recent editions whose `releaseAt` has passed, newest first. `version` changes whenever the bundle's content would change; a hash of the bundle bytes is fine. `ackedSeq` is the highest event `seq` from this device that the phone has merged, or 0.
 
@@ -88,9 +91,25 @@ The phone stores a hash of the token, never the token itself. Pairing the same `
 - `blocks` is `article_content.blocksJson` as stored, in the `ContentBlocks` JSON format (`model/Content.kt`, discriminator `"t"`: `p`, `h`, `img`, `quote`, `list`, `pre`; inline spans `b`, `i`, `code`, `a`, `s`, `sup`, `sub`). It is `[]` when the article has no stored content; the Kobo then shows `summary`. Kobo readers must ignore block types and fields they don't know. As stored, fields at their default are left out: an empty `spans`, and a null `href`, `alt`, `caption`, `width`, `height`, `citation` or `language` are absent rather than `[]` or `null`. `docs/kobo-sync-fixtures/edition.json` has every block type.
 - `engagement` is the phone's current state, so the Kobo can show what is already read, liked or saved.
 
-### `GET /v1/images?url=<urlencoded>`
+### `GET /v1/saved`
 
-This returns the bytes from the phone's image store for that source URL, with the `Content-Type` that the stored file's first bytes show (usually `image/webp`, or JPEG, PNG, GIF or SVG; `application/octet-stream` for anything else). It returns `404` if the image isn't stored. The Kobo fetches every `img` block URL and every `imageUrl` in a bundle during sync, and skips the ones that 404. The phone never fetches anything from the internet for the Kobo.
+```json
+{
+  "version": "<opaque>",
+  "order": [9001, 8754],
+  "articles": { "9001": { "…": "the same Article object as in an edition bundle" } }
+}
+```
+
+Every article saved on the phone, `order` newest saved first, each in full: the phone makes sure a saved article's text is stored (running the same full-text fetch the reader uses when it isn't) before it counts as ready. An article whose text cannot be got is still listed, with `blocks` empty and its `summary`. An article unsaved on the phone, or on the Kobo, drops out of the list at the next sync.
+
+### `GET /v1/images?url=<urlencoded>&w=<pixels>`
+
+The image for that source URL, prepared for e-ink: decoded on the phone, the first frame of an animation, flattened onto white, converted to 8-bit greyscale, scaled down (never up) to at most `w` pixels wide, and encoded as a greyscale JPEG (`image/jpeg`), or as a greyscale PNG (`image/png`) for line art and images with few tones. The Kobo sends `w` as its screen's short side in pixels; without `w` the phone uses 1264.
+
+The phone takes the source from its image store, and fetches it from the internet when the store doesn't have it, with the same client, limits and timeouts as the reader's image loading. Prepared images are cached on the phone (in the app's cache, evictable, keyed by URL and `w`), so a second Kobo or a retried sync costs nothing. `404` means the image can't be got or decoded; SVG is not rasterised in v1 and gets `404`.
+
+The Kobo fetches every `img` block URL and every `imageUrl` in its editions and saved articles, up to 3 requests at a time, and skips the ones that 404. It shows the article text first and fills in images as they arrive.
 
 ### `POST /v1/events`
 
@@ -136,8 +155,8 @@ Known v1 limit: events that arrive after the next edition is built have already 
 2. Pair if there is no token, or on `401`.
 3. `GET /v1/manifest` and compare its `dbId` (or the one a pairing in step 2 returned) with the saved one. On a change, wipe and start over. Then `POST /v1/events` with everything unsent, in batches of up to 500, oldest first, so the phone's state is current before export. Events at or below the manifest's `ackedSeq` are already merged and are deleted without being sent.
 4. If any events were sent, `GET /v1/manifest` again, since merged events change bundle versions.
-5. Fetch each edition whose `version` differs from the stored one, then its images.
-6. Delete local editions that aren't in the manifest, and images nothing refers to.
+5. Fetch each edition whose `version` differs from the stored one, and `GET /v1/saved` if `saved.version` differs. Save each as it arrives, so the reader can show it straight away, then fetch the images.
+6. Delete local editions that aren't in the manifest, saved articles that aren't in the list, and images nothing refers to.
 7. Write everything to temporary files and rename them into place, so an interrupted sync leaves the last good state.
 
 ## Kobo files
@@ -152,6 +171,7 @@ fonts/                bundled fonts and their licences
 data/state.json       deviceId, token, dbId, last address, next seq, per-edition versions,
                       last sync result, clock offset from the phone's Date header
 data/editions/<id>.json
+data/saved.json       the last GET /v1/saved
 data/images/<sha256 of url>.img
 data/events.jsonl     unsent events, one JSON object per line, appended and fsynced
 data/launch.log       what launch.sh and the binary print, for diagnosing a device
@@ -164,9 +184,8 @@ NickelMenu config: `/mnt/onboard/.adds/nm/morningissue`.
 NickelMenu's main menu has an entry **Morning Issue**, which:
 
 1. Runs `morningissue check` with `cmd_output`. It fails on a Kobo the reader cannot draw on (in v1, the Allwinner-based Elipsa and Sage), and the entry stops there with a toast, leaving Nickel running.
-2. Turns Wi-Fi on through Nickel (`nickel_wifi:autoconnect`), since Wi-Fi is easiest while Nickel is still running.
-3. Runs `launch.sh` with `cmd_spawn`. The script waits up to 20 seconds for an IP address, then runs `morningissue sync`. A failed sync is not fatal: the reader shows the stored editions and "Last synced …".
-4. Stops Nickel and runs `morningissue read`, which draws on the framebuffer and reads touch and page-turn buttons itself.
-5. When the reader exits, restarts Nickel the same way KOReader's launcher does.
+2. Runs `launch.sh` with `cmd_spawn`, which stops Nickel at once and starts `morningissue read`. The reader's home screen appears immediately with what is stored.
+3. The reader uses Nickel's Wi-Fi connection only: if Wi-Fi was connected when the entry was tapped, the launcher leaves the Wi-Fi driver, `wpa_supplicant` and the DHCP client running when it stops Nickel, and the reader syncs in the background (on start, and from **Sync now** in Settings). If there is no connection it shows "Offline" and never tries; it never turns Wi-Fi on itself.
+4. When the reader exits, the launcher tears Wi-Fi down to the state Nickel expects after a boot, and restarts Nickel the same way KOReader's launcher does.
 
-Events recorded while reading are sent on the next launch.
+Events recorded while reading are sent at the next sync, which can be in the same session.
