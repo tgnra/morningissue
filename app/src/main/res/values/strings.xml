@@ -35,6 +35,20 @@
     <string name="refresh_no_new">No new posts since the last check</string>
     <string name="refresh_no_sources">No sources were checked</string>
     <string name="cover_description">Edition No. %1$d, %2$s</string>
+    <string name="edition_number_extra">No. %1$d · Extra</string>
+    <string name="edition_number_evening">No. %1$d · Evening</string>
+    <string name="cover_description_extra">Extra edition No. %1$d, %2$s</string>
+    <string name="cover_description_evening">Evening edition No. %1$d, %2$s</string>
+    <plurals name="extra_offer_title">
+        <item quantity="one">%d new source</item>
+        <item quantity="other">%d new sources</item>
+    </plurals>
+    <string name="extra_offer_detail">They join the next scheduled edition. Or print an Extra edition from them now.</string>
+    <string name="extra_offer_print">Print an Extra edition</string>
+    <string name="extra_offer_dismiss">Not now</string>
+    <string name="extra_printing">Fetching the new sources and setting the Extra edition…</string>
+    <string name="extra_printed">Extra edition printed</string>
+    <string name="extra_nothing_to_print">Nothing recent from the new sources to print. Their next posts join the next edition.</string>
     <string name="cover_lead">Lead story: %1$s</string>
     <string name="cover_open">Open edition</string>
     <string name="fetching_progress">%1$d of %2$d</string>

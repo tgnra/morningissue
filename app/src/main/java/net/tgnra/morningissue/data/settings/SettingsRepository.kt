@@ -1,5 +1,6 @@
 package net.tgnra.morningissue.data.settings
 
+import java.time.Instant
 import java.time.LocalTime
 import kotlinx.coroutines.flow.Flow
 import net.tgnra.morningissue.model.AppSettings
@@ -35,4 +36,7 @@ interface SettingsRepository {
 
     /** True once onboarding has finished; the app then starts on the newsstand. */
     suspend fun setOnboardingDone(done: Boolean)
+
+    /** Records that the offer of an Extra edition was turned down, so it is not made again for the same sources. */
+    suspend fun setExtraOfferDismissedAt(at: Instant) = Unit
 }

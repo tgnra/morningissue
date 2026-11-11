@@ -12,6 +12,8 @@ data class EditionSummary(
     val number: Int,
     val length: EditionLength,
     val releaseAt: Instant,
+    /** Posts first seen after this instant were too late for the edition. */
+    val cutoffAt: Instant,
     val leadHeadline: String?,
     val leadImageUrl: String?,
     val leadSource: String?,

@@ -84,6 +84,7 @@ internal fun EditionCoverRow.toSummary(): EditionSummary = EditionSummary(
     number = edition.number,
     length = edition.length,
     releaseAt = edition.releaseAt,
+    cutoffAt = edition.cutoffAt,
     leadHeadline = leadTitle,
     leadImageUrl = leadImageUrl,
     leadSource = leadFeedTitle,
