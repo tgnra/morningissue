@@ -1,0 +1,115 @@
+# What the discovery catalogue leaves out, read by build_catalogue.py.
+#
+# Sections:
+#   [hosts]           a host, or any subdomain of it, is never in the catalogue
+#   [url-contains]    a feed whose address contains this text is dropped (case-insensitive)
+#   [adult]           words and phrases that mark adult content; matched as whole words,
+#                     case-insensitive, in a feed's title, description and categories, and in
+#                     its posts' titles and categories (see README.md for the thresholds)
+#   [comic]           words and phrases that mark a webcomic, matched the same way
+#
+# Adult content is excluded from the catalogue entirely (decided 2026-11). Feeds whose posts
+# carry <media:rating>adult</media:rating> are dropped whatever their words.
+# Webcomics and YouTube feeds are excluded too (decided 2026-11).
+# To drop one feed by hand, add its host under [hosts] with a comment saying why.
+
+[hosts]
+# YouTube and other video platforms: the paper is text
+youtube.com
+youtu.be
+youtube-nocookie.com
+vimeo.com
+twitch.tv
+# Webcomics
+xkcd.com
+explosm.net
+smbc-comics.com
+phdcomics.com
+penny-arcade.com
+questionablecontent.net
+qwantz.com
+theoatmeal.com
+pbfcomics.com
+poorlydrawnlines.com
+incidentalcomics.com
+gocomics.com
+webtoons.com
+tapas.io
+dinosaurcomics.com
+oglaf.com
+monkeyuser.com
+commitstrip.com
+turnoff.us
+mrlovenstein.com
+existentialcomics.com
+wondermark.com
+dilbert.com
+thenib.com
+# Adult
+onlyfans.com
+pornhub.com
+xvideos.com
+literotica.com
+
+[url-contains]
+/comments/feed
+/comments/default
+comments.rss
+comments.xml
+?feed=comments
+feed=comments-rss
+/feeds/comments/
+
+[adult]
+# Words that also have innocent meanings are left out on purpose, after false positives on
+# real feeds: sexy ("Budgets Are Sexy", a science podcast's tag), naked ("naked eye"), nude (a
+# lipstick shade), xxx (placeholder text), escort, stripper, hookup, kink, 18+.
+porn
+porno
+pornography
+pornographic
+nsfw
+erotic
+erotica
+erotically
+hentai
+fetish
+fetishes
+bdsm
+kinky
+onlyfans
+camgirl
+camgirls
+cam girl
+webcam girls
+nudes
+nudity
+sex blog
+sex toy
+sex toys
+sex-positive
+sex positive
+sexting
+sex work
+sex worker
+sex workers
+milf
+smut
+swinger
+swingers
+adult content
+adults only
+lewd
+r18
+rule34
+
+[comic]
+webcomic
+webcomics
+web comic
+web comics
+comic strip
+comic strips
+daily comic
+new comic
+comic:

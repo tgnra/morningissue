@@ -1,0 +1,4 @@
+# Raw responses from the catalogue build: untrusted, large, and rebuilt on demand.
+/.cache/
+/report.json
+__pycache__/

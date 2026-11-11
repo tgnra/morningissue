@@ -1,0 +1,103 @@
+# Rebuilds the feed-discovery catalogue (app/src/main/assets/discovery/catalogue.db) from its
+# source lists and opens a pull request with the new file. Monthly, and by hand from
+# Actions > Discovery catalogue > Run workflow. The Gradle build never fetches anything: the
+# catalogue only changes through a reviewed pull request like this one.
+#
+# Needs "Allow GitHub Actions to create and approve pull requests" under
+# Settings > Actions > General > Workflow permissions.
+name: Discovery catalogue
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 04:17 UTC on the 3rd of every month (off the hour, as GitHub asks).
+    - cron: "17 4 3 * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: discovery-catalogue
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install numpy and defusedxml
+        run: python -m pip install --disable-pip-version-check numpy defusedxml
+
+      # Raw responses from last month, so unchanged feeds answer 304 Not Modified.
+      - name: Restore the fetch cache
+        uses: actions/cache@v4
+        with:
+          path: tools/discovery/.cache
+          key: discovery-cache-${{ github.run_id }}
+          restore-keys: discovery-cache-
+
+      - name: Test the pipeline
+        run: python -I tools/discovery/tests/test_pipeline.py
+
+      - name: Build the catalogue
+        run: |
+          python -I -u tools/discovery/build_catalogue.py build --report tools/discovery/report.json
+
+      # The catalogue's vectors were made in Python; the app compares them with its own.
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
+
+      - name: Check vector parity with the app's embedder
+        run: ./gradlew testDebugUnitTest --tests 'net.tgnra.morningissue.embedding.CatalogueParityTest'
+
+      - name: Open a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- app/src/main/assets/discovery/catalogue.db; then
+            echo "The catalogue is unchanged."
+            exit 0
+          fi
+          branch="discovery-catalogue/$(date -u +%Y-%m-%d)-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898237+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add app/src/main/assets/discovery/catalogue.db
+          git commit -m "Rebuild the discovery catalogue"
+          git push origin "$branch"
+          python -I - > /tmp/body.md <<'EOF'
+          import json
+          r = json.load(open("tools/discovery/report.json"))
+          print("Monthly rebuild of `app/src/main/assets/discovery/catalogue.db` by `tools/discovery/build_catalogue.py`.\n")
+          print("- Feeds fetched: %d; answered: %d; kept after filters: %d; after deduplication: %d" % (
+              r["fetched"], r["answered_with_body"], r["kept_after_filters"], r["after_dedupe"]))
+          print("- Catalogue: %d feeds in %d clusters; file size %.2f MB" % (r["seed"], len(r["clusters"]), r["asset_bytes"] / 1e6))
+          print("- Dropped: " + ", ".join("%s %d" % kv for kv in r["dropped"].items()))
+          print("\n| Cluster | Seed | Pool |\n| --- | --- | --- |")
+          for c in r["clusters"]:
+              print("| %s | %d | %d |" % (c["label"], c["seed"], c["pool"]))
+          print("\nCheck the cluster labels and spot-check a few feeds before merging.")
+          EOF
+          gh pr create --base "${GITHUB_REF_NAME}" --head "$branch" \
+            --title "Rebuild the discovery catalogue ($(date -u +%Y-%m))" --body-file /tmp/body.md
