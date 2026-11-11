@@ -6,6 +6,7 @@ import android.os.Build
 import android.provider.Settings
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import java.io.File
 import java.time.Clock
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -45,6 +46,8 @@ import net.tgnra.morningissue.edition.EditionScheduler
 import net.tgnra.morningissue.edition.ReleaseTimes
 import net.tgnra.morningissue.embedding.EmbedderAsset
 import net.tgnra.morningissue.kobo.InstallId
+import net.tgnra.morningissue.kobo.KoboImageWidths
+import net.tgnra.morningissue.kobo.KoboImages
 import net.tgnra.morningissue.kobo.KoboSync
 import net.tgnra.morningissue.sync.CandidateFetcher
 import net.tgnra.morningissue.sync.FeedDiscovery
@@ -238,7 +241,16 @@ class DefaultAppContainer(context: Context) : AppContainer {
         KoboSync(
             database = database,
             installId = InstallId(appContext.settingsDataStore),
-            imageFile = imageFiles::fileFor,
+            newImages = {
+                KoboImages(
+                    storeFile = imageFiles::fileFor,
+                    client = { okHttpClient },
+                    cacheDirectory = File(appContext.cacheDir, "kobo-images"),
+                    originals = CoilDiskOriginals { imageLoader.diskCache },
+                )
+            },
+            fullText = fullTextFetcher,
+            widths = KoboImageWidths(appContext.settingsDataStore),
             clock = clock,
             deviceName = {
                 Settings.Global.getString(appContext.contentResolver, Settings.Global.DEVICE_NAME)?.takeIf { it.isNotBlank() } ?: Build.MODEL

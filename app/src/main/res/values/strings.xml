@@ -563,6 +563,7 @@
         <item quantity="one">%1$s synced at %2$s, with %3$,d change from its reader.</item>
         <item quantity="other">%1$s synced at %2$s, with %3$,d changes from its reader.</item>
     </plurals>
+    <string name="kobo_preparing_images">Preparing images %1$,d/%2$,d</string>
     <string name="kobo_paired">Paired Kobos</string>
     <string name="kobo_none_paired">No Kobo is paired yet. The first time a Kobo syncs, it asks here to be allowed.</string>
     <string name="kobo_last_synced">Last synced %1$s</string>

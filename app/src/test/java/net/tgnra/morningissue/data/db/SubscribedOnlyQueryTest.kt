@@ -108,6 +108,7 @@ class SubscribedOnlyQueryTest {
             "FeedDao.emptyDiscoveredIds" to "says DISCOVERED through its own join",
             "ArticleDao.observeSaved" to "the Saved shelf: a post saved from discovery belongs there, with its Subscribe button",
             "ArticleDao.observeLiked" to "the Liked shelf: the same",
+            "ArticleDao.getSaved" to "the Kobo's saved list: the Saved shelf's posts, discovered ones included",
             "ArticleDao.search" to "search finds saved discovered posts; the feed filter lists subscriptions only",
             "ArticleDao.count" to "a count of every post, for storage and the archive",
             "ArticleDao.trimmableContentIds" to "storage trimming applies to every stored post",

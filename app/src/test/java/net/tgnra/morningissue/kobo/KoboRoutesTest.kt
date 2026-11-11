@@ -12,20 +12,29 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
+import kotlinx.serialization.json.jsonArray
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
+import net.tgnra.morningissue.data.images.TestImages
+import net.tgnra.morningissue.model.ContentBlock
+import net.tgnra.morningissue.model.ContentBlocks
+import net.tgnra.morningissue.model.ContentSource
+import net.tgnra.morningissue.model.RichText
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.annotation.GraphicsMode
 
 /** The routes of protocol v1: pairing, the token check, the caps, and each endpoint's answers. */
 @RunWith(AndroidJUnit4::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class KoboRoutesTest {
     private lateinit var db: MorningIssueDatabase
     private lateinit var ids: Seeded
@@ -33,12 +42,16 @@ class KoboRoutesTest {
     private val pairing = Pairing()
     private val activity = mutableListOf<SyncActivity>()
     private val images: File = createTempDirectory("kobo-images").toFile()
+    private val widths = mutableListOf<Pair<String, Int>>()
 
     @Before
     fun setUp() = runTest {
         db = MorningIssueDatabase.inMemory(ApplicationProvider.getApplicationContext())
         ids = KoboTestData.seed(db)
-        routes = KoboRoutes(db, pairing, { "3f0c" }, { url -> File(images, url.hashCode().toString()) }, NOW_CLOCK, activity::add, pairWaitMillis = 5_000)
+        routes = KoboRoutes(
+            db, pairing, { "3f0c" }, KoboImages({ url -> File(images, url.hashCode().toString()) }, { OkHttpClient() }, File(images, "cache")),
+            NOW_CLOCK, activity::add, onImageWidth = { id, w -> widths += id to w }, pairWaitMillis = 5_000,
+        )
     }
 
     @After
@@ -90,7 +103,7 @@ class KoboRoutesTest {
     fun denyIs403AndNoAnswerIs408() = runTest {
         assertEquals(403, pair(allow = false).status)
         assertTrue(db.syncPeerDao().all().isEmpty())
-        val quick = KoboRoutes(db, pairing, { "3f0c" }, { File(images, "x") }, NOW_CLOCK, pairWaitMillis = 50)
+        val quick = KoboRoutes(db, pairing, { "3f0c" }, KoboImages({ File(images, "x") }, { OkHttpClient() }, File(images, "cache")), NOW_CLOCK, pairWaitMillis = 50)
         assertEquals(408, quick.handle(post("/v1/pair", """{"deviceId":"b7e2","name":"Kobo"}""")).status)
         assertNull(pairing.pending.value)
     }
@@ -117,7 +130,7 @@ class KoboRoutesTest {
         db.syncPeerDao().pair("b7e2", "Kobo", PeerTokens.hash("good"), RELEASE)
         for (request in listOf(
             get("/v1/manifest"), get("/v1/manifest", "bad"), get("/v1/editions/${ids.edition}", "bad"),
-            get("/v1/images", "bad", mapOf("url" to "https://x/y.jpg")), post("/v1/events", """{"events":[]}""", "bad"),
+            get("/v1/images", "bad", mapOf("url" to "https://x/y.jpg")), get("/v1/saved", "bad"), post("/v1/events", """{"events":[]}""", "bad"),
         )) {
             assertEquals(request.path, 401, routes.handle(request).status)
         }
@@ -165,18 +178,78 @@ class KoboRoutesTest {
     }
 
     @Test
-    fun imagesComeFromTheStoreWithTheTypeOfTheirBytes() = runTest {
+    fun imagesArePreparedFromTheStoreAndTheWidthIsRecorded() = runTest {
         db.syncPeerDao().pair("b7e2", "Kobo", PeerTokens.hash("good"), RELEASE)
         val url = "https://garden.example/img/frost.jpg"
         assertEquals(404, routes.handle(get("/v1/images", "good", mapOf("url" to url))).status)
         assertEquals(400, routes.handle(get("/v1/images", "good")).status)
-        // A WebP header: the store re-encodes, whatever the address says.
-        val webp = "RIFF\u0000\u0000\u0000\u0000WEBPVP8 ".toByteArray(Charsets.ISO_8859_1) + ByteArray(32)
-        File(images, url.hashCode().toString()).writeBytes(webp)
-        val response = routes.handle(get("/v1/images", "good", mapOf("url" to url)))
+        assertEquals(404, routes.handle(get("/v1/images", "good", mapOf("url" to "https://garden.example/logo.svg"))).status)
+
+        File(images, url.hashCode().toString()).writeBytes(TestImages.png(TestImages.drawing(300, 100)))
+        val response = routes.handle(get("/v1/images", "good", mapOf("url" to url, "w" to "200")))
         assertEquals(200, response.status)
-        assertEquals("image/webp", response.contentType)
-        assertEquals(webp.toList(), response.file!!.readBytes().toList())
+        // A drawing: greyscale PNG, at the width asked for.
+        assertEquals("image/png", response.contentType)
+        assertEquals(200, javax.imageio.ImageIO.read(response.body.inputStream()).width)
+        // Every request tells the width: the default when it gives none.
+        assertEquals("b7e2" to KoboImageConfig.DEFAULT_WIDTH, widths.first())
+        assertEquals("b7e2" to 200, widths.last())
+    }
+
+    @Test
+    fun theSavedListHasEverySavedArticleNewestFirst() = runTest {
+        db.syncPeerDao().pair("b7e2", "Kobo", PeerTokens.hash("good"), RELEASE)
+        db.engagementDao().setSaved(ids.top, RELEASE.plusSeconds(60))
+        db.engagementDao().setSaved(ids.lead, RELEASE.plusSeconds(120))
+
+        val response = routes.handle(get("/v1/saved", "good"))
+        assertEquals(200, response.status)
+        assertEquals("application/json; charset=utf-8", response.contentType)
+        val saved = Json.parseToJsonElement(response.text()).jsonObject
+        assertEquals(listOf("version", "order", "articles"), saved.keys.toList())
+        assertEquals(listOf(ids.lead, ids.top), saved.getValue("order").jsonArray.map { it.jsonPrimitive.long })
+        val lead = saved.getValue("articles").jsonObject.getValue(ids.lead.toString()).jsonObject
+        // The same Article object as in an edition bundle.
+        val inEdition = Json.parseToJsonElement(routes.handle(get("/v1/editions/${ids.edition}", "good")).text())
+            .jsonObject.getValue("articles").jsonObject.getValue(ids.lead.toString())
+        assertEquals(inEdition, lead)
+        assertEquals("2026-11-11T06:32:00Z", lead.getValue("engagement").jsonObject.getValue("savedAt").jsonPrimitive.content)
+        // The manifest's line agrees.
+        val manifest = Json.parseToJsonElement(routes.handle(get("/v1/manifest", "good")).text()).jsonObject.getValue("saved").jsonObject
+        assertEquals(2L, manifest.getValue("count").jsonPrimitive.long)
+        assertEquals(saved.getValue("version"), manifest.getValue("version"))
+        assertEquals(405, routes.handle(post("/v1/saved", "", "good")).status)
+        assertEquals(401, routes.handle(get("/v1/saved", "bad")).status)
+    }
+
+    @Test
+    fun theSavedVersionChangesAsTextArrivesAndWhenTheKoboUnsaves() = runTest {
+        db.syncPeerDao().pair("b7e2", "Kobo", PeerTokens.hash("good"), RELEASE)
+        suspend fun saved() = Json.parseToJsonElement(routes.handle(get("/v1/manifest", "good")).text()).jsonObject.getValue("saved").jsonObject
+        val empty = saved()
+        assertEquals(0L, empty.getValue("count").jsonPrimitive.long)
+        db.engagementDao().setSaved(ids.top, RELEASE.plusSeconds(60))
+        val one = saved()
+        assertNotEquals(empty, one)
+        assertEquals(one, saved())
+
+        // The full-text fetch stores the top story's text: a new version.
+        db.articleDao().storeContent(ids.top, ContentBlocks.encode(listOf(ContentBlock.Paragraph(RichText("Earth them up well.")))), "Earth them up well.", 4, ContentSource.FETCHED, NOW)
+        val withText = saved()
+        assertNotEquals(one.getValue("version"), withText.getValue("version"))
+        val blocks = Json.parseToJsonElement(routes.handle(get("/v1/saved", "good")).text())
+            .jsonObject.getValue("articles").jsonObject.getValue(ids.top.toString()).jsonObject.getValue("blocks").jsonArray
+        assertEquals(1, blocks.size)
+
+        // Unsaved on the Kobo: gone from the list at the next sync.
+        val unsave = """{"events":[{"seq":1,"type":"saved","articleId":${ids.top},"value":false,"at":"2026-11-11T06:50:00Z"}]}"""
+        assertEquals(200, routes.handle(post("/v1/events", unsave, "good")).status)
+        val after = saved()
+        assertEquals(0L, after.getValue("count").jsonPrimitive.long)
+        assertEquals(empty.getValue("version"), after.getValue("version"))
+        val list = Json.parseToJsonElement(routes.handle(get("/v1/saved", "good")).text()).jsonObject
+        assertTrue(list.getValue("order").jsonArray.isEmpty())
+        assertTrue(list.getValue("articles").jsonObject.isEmpty())
     }
 }
 

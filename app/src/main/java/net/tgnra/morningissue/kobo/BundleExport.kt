@@ -8,13 +8,17 @@ import java.time.temporal.ChronoUnit
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import net.tgnra.morningissue.data.db.ArticleRow
 import net.tgnra.morningissue.data.db.ArticleSignalDao
 import net.tgnra.morningissue.data.db.EditionEntity
 import net.tgnra.morningissue.data.db.EditionItemRow
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 
 /**
- * Builds what a Kobo downloads: the manifest and an edition's bundle (`docs/kobo-sync.md`).
+ * Builds what a Kobo downloads: the manifest, an edition's bundle and the saved list (`docs/kobo-sync.md`).
  * Pure; [KoboExporter] reads the database and hands the rows in.
  */
 object BundleExport {
@@ -43,28 +47,7 @@ object BundleExport {
                 items = onPage.map { BundleItem(it.item.articleId, it.item.slot, it.item.kind.name, it.item.section, it.item.reason) },
             )
         }
-        val articles = sorted.associate { entry ->
-            val row = entry.row
-            val article = row.article
-            article.id.toString() to BundleArticle(
-                feedTitle = row.feedTitle,
-                title = article.title,
-                author = article.author,
-                url = article.url,
-                publishedAt = time(article.publishedAt),
-                summary = article.summary,
-                imageUrl = article.imageUrl,
-                wordCount = article.wordCount,
-                blocks = blocks(blocksJson[article.id]),
-                engagement = BundleEngagement(
-                    openedAt = row.openedAt?.let(::time),
-                    readFraction = row.readFraction ?: 0f,
-                    readAt = row.readAt?.let(::time),
-                    savedAt = row.savedAt?.let(::time),
-                    likedAt = row.likedAt?.let(::time),
-                ),
-            )
-        }
+        val articles = sorted.associate { entry -> entry.row.article.id.toString() to article(entry.row, blocksJson[entry.row.article.id]) }
         return EditionBundle(
             id = edition.id,
             date = edition.date.toString(),
@@ -76,6 +59,61 @@ object BundleExport {
             pages = pages,
             articles = articles,
         )
+    }
+
+    /** One article as a Kobo gets it, in an edition or in the saved list: [blocksJson] is its stored body, if any. */
+    fun article(row: ArticleRow, blocksJson: String?): BundleArticle {
+        val article = row.article
+        return BundleArticle(
+            feedTitle = row.feedTitle,
+            title = article.title,
+            author = article.author,
+            url = article.url,
+            publishedAt = time(article.publishedAt),
+            summary = article.summary,
+            imageUrl = article.imageUrl,
+            wordCount = article.wordCount,
+            blocks = blocks(blocksJson),
+            engagement = BundleEngagement(
+                openedAt = row.openedAt?.let(::time),
+                readFraction = row.readFraction ?: 0f,
+                readAt = row.readAt?.let(::time),
+                savedAt = row.savedAt?.let(::time),
+                likedAt = row.likedAt?.let(::time),
+            ),
+        )
+    }
+
+    /**
+     * The saved list: [rows] as the database gives them, newest saved first, with their stored
+     * bodies. Its `version` is the hash of the list encoded with an empty version, so it
+     * changes exactly when the list does.
+     */
+    fun saved(rows: List<ArticleRow>, blocksJson: Map<Long, String>): SavedBundle {
+        val unversioned = SavedBundle(
+            version = "",
+            order = rows.map { it.article.id },
+            articles = rows.associate { it.article.id.toString() to article(it, blocksJson[it.article.id]) },
+        )
+        return unversioned.copy(version = version(KoboProtocol.json.encodeToString(unversioned)))
+    }
+
+    /**
+     * Every image a Kobo fetches for [articles]: each lead `imageUrl` and every `img` block's
+     * `url`, in order of first appearance, without repeats. The Kobo fetches the same list
+     * (`kobo/src/model.rs`), so this is what the phone prepares ahead of it.
+     */
+    fun imageUrls(articles: Collection<BundleArticle>): List<String> {
+        val urls = LinkedHashSet<String>()
+        for (article in articles) {
+            article.imageUrl?.takeIf { it.isNotEmpty() }?.let(urls::add)
+            for (block in (article.blocks as? JsonArray).orEmpty()) {
+                val obj = block as? JsonObject ?: continue
+                if ((obj["t"] as? JsonPrimitive)?.contentOrNull != "img") continue
+                (obj["url"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotEmpty() }?.let(urls::add)
+            }
+        }
+        return urls.toList()
     }
 
     fun encode(bundle: EditionBundle): String = KoboProtocol.json.encodeToString(bundle)
@@ -100,12 +138,35 @@ class KoboExporter(private val database: MorningIssueDatabase, private val clock
     /** The manifest for a device whose merged events reach [ackedSeq]. */
     suspend fun manifest(dbId: String, ackedSeq: Long): Manifest = database.withReadTransaction {
         val editions = database.editionDao().getRecentReleased(clock.instant(), KoboProtocol.EDITIONS_OFFERED)
+        val saved = savedBundle()
         Manifest(
             dbId = dbId,
             ackedSeq = ackedSeq,
             editions = editions.map { BundleExport.manifestEntry(it, BundleExport.encode(bundle(it))) },
+            saved = ManifestSaved(count = saved.order.size, version = saved.version),
         )
     }
+
+    /** `GET /v1/saved`, encoded. */
+    suspend fun saved(): String = KoboProtocol.json.encodeToString(database.withReadTransaction { savedBundle() })
+
+    /** The editions the manifest offers and the saved list, for the pre-warm: every article a Kobo can be sent. */
+    suspend fun offeredArticles(): Offered = database.withReadTransaction {
+        val editions = database.editionDao().getRecentReleased(clock.instant(), KoboProtocol.EDITIONS_OFFERED).map { bundle(it) }
+        Offered(editions.flatMap { it.articles.values }, savedBundle().articles.values.toList())
+    }
+
+    class Offered(val editions: List<BundleArticle>, val saved: List<BundleArticle>)
+
+    private suspend fun savedBundle(): SavedBundle {
+        val rows = database.articleDao().getSaved()
+        return BundleExport.saved(rows, contents(rows.map { it.article.id }))
+    }
+
+    private suspend fun contents(articleIds: List<Long>): Map<Long, String> =
+        articleIds.distinct().chunked(ArticleSignalDao.MAX_IDS)
+            .flatMap { database.archiveDao().contents(it) }
+            .associate { it.articleId to it.blocksJson }
 
     /** The encoded bundle of edition [id], or null when there is none or it is not released yet. */
     suspend fun edition(id: Long): String? = database.withReadTransaction {
@@ -115,9 +176,6 @@ class KoboExporter(private val database: MorningIssueDatabase, private val clock
 
     private suspend fun bundle(edition: EditionEntity): EditionBundle {
         val items = database.editionDao().getItems(edition.id)
-        val blocks = items.map { it.item.articleId }.distinct().chunked(ArticleSignalDao.MAX_IDS)
-            .flatMap { database.archiveDao().contents(it) }
-            .associate { it.articleId to it.blocksJson }
-        return BundleExport.edition(edition, items, blocks)
+        return BundleExport.edition(edition, items, contents(items.map { it.item.articleId }))
     }
 }

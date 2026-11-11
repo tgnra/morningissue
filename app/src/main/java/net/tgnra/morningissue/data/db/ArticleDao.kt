@@ -94,6 +94,10 @@ abstract class ArticleDao {
     @Query("$ROW_SELECT WHERE g.savedAt IS NOT NULL ORDER BY g.savedAt DESC")
     abstract fun observeSaved(): Flow<List<ArticleRow>>
 
+    /** Every saved post, newest saved first, as the Saved shelf orders them; for the Kobo's saved list. */
+    @Query("$ROW_SELECT WHERE g.savedAt IS NOT NULL ORDER BY g.savedAt DESC, a.id DESC")
+    abstract suspend fun getSaved(): List<ArticleRow>
+
     @Query("$ROW_SELECT WHERE g.likedAt IS NOT NULL ORDER BY g.likedAt DESC")
     abstract fun observeLiked(): Flow<List<ArticleRow>>
 

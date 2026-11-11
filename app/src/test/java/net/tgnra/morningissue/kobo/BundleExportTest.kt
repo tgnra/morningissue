@@ -16,7 +16,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
+import net.tgnra.morningissue.data.db.ArticleEntity
+import net.tgnra.morningissue.model.ContentBlock
 import net.tgnra.morningissue.model.ContentBlocks
+import net.tgnra.morningissue.model.RichText
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.data.db.EditionEntity
@@ -130,7 +133,9 @@ class BundleExportTest {
     @Test
     fun theManifestOffersTheThreeNewestReleasedEditionsNewestFirst() = runTest {
         val manifest = Json.parseToJsonElement(KoboProtocol.json.encodeToString(exporter.manifest("3f0c", 41))).jsonObject
-        assertEquals(listOf("v", "dbId", "ackedSeq", "editions"), manifest.keys.toList())
+        assertEquals(listOf("v", "dbId", "ackedSeq", "editions", "saved"), manifest.keys.toList())
+        assertEquals(listOf("count", "version"), manifest.getValue("saved").jsonObject.keys.toList())
+        assertEquals(0L, manifest.getValue("saved").jsonObject.getValue("count").jsonPrimitive.long)
         assertEquals(1L, manifest.getValue("v").jsonPrimitive.long)
         assertEquals(41L, manifest.getValue("ackedSeq").jsonPrimitive.long)
         val editions = manifest.getValue("editions").jsonArray.map { it.jsonObject }
@@ -167,6 +172,33 @@ class BundleExportTest {
     }
 
     @Test
+    fun theImagesAKoboFetchesAreEveryLeadAndBodyImageOnce() = runTest {
+        val bundle = KoboProtocol.json.decodeFromString<EditionBundle>(exporter.edition(ids.edition)!!)
+        // The lead's own picture, then the one in its body; the other stories have none.
+        assertEquals(
+            listOf("https://garden.example/img/lead.jpg", "https://garden.example/img/frost.jpg"),
+            BundleExport.imageUrls(bundle.articles.values),
+        )
+        // Named twice, listed once; blocks that are not a JSON array are passed over.
+        val twice = bundle.articles.values.first { it.imageUrl != null }
+        assertEquals(2, BundleExport.imageUrls(listOf(twice, twice.copy(blocks = JsonPrimitive("x")))).size)
+    }
+
+    @Test
+    fun theSavedListIsVersionedByItsContent() = runTest {
+        db.engagementDao().setSaved(ids.section, RELEASE.plusSeconds(60))
+        val saved = KoboProtocol.json.decodeFromString<SavedBundle>(exporter.saved())
+        assertEquals(listOf(ids.section), saved.order)
+        assertEquals(32, saved.version.length)
+        assertEquals(BundleExport.version(KoboProtocol.json.encodeToString(saved.copy(version = ""))), saved.version)
+        assertEquals(ManifestSaved(1, saved.version), exporter.manifest("3f0c", 0).saved)
+        // Saving changes the edition's bundle too, since it carries the engagement.
+        val offered = exporter.offeredArticles()
+        assertEquals(5, offered.editions.size)
+        assertEquals(1, offered.saved.size)
+    }
+
+    @Test
     fun anUnreleasedOrMissingEditionIsNotExported() = runTest {
         assertNull(exporter.edition(ids.unreleased))
         assertNull(exporter.edition(999_999))
@@ -176,8 +208,14 @@ class BundleExportTest {
     }
 }
 
+private val SHED_BLOCKS = listOf(
+    ContentBlock.Paragraph(RichText("Before the frost, the tools go in.")),
+    ContentBlock.Image(url = "https://garden.example/img/shed-door.jpg", alt = "The shed door", width = 900, height = 1200),
+    ContentBlock.Paragraph(RichText("Oil the blades.")),
+)
+
 /**
- * Writes the sample manifest and edition bundle the Kobo side parses, through the real export
+ * Writes the sample manifest, edition bundle and saved list the Kobo side parses, through the real export
  * path, to `docs/kobo-sync-fixtures/`. The output is deterministic, so a change to the format
  * shows up as a change to the committed files.
  */
@@ -193,14 +231,28 @@ class KoboFixturesTest {
             db.engagementDao().markOpened(ids.lead, RELEASE.plusSeconds(600))
             db.engagementDao().recordReadFraction(ids.lead, 0.5f)
             db.engagementDao().setSaved(ids.top, RELEASE.plusSeconds(900))
+            // A saved article from no edition on offer, with a body and pictures.
+            val feedId = db.articleDao().getById(ids.lead)!!.feedId
+            val shed = db.articleDao().insertNew(
+                ArticleEntity(
+                    feedId = feedId, guid = "shed", url = "https://garden.example/shed", title = "A shed for the winter",
+                    summary = "Tools, dry.", imageUrl = "https://garden.example/img/shed.jpg", author = "M. Fenwick",
+                    publishedAt = RELEASE.minusSeconds(200_000), firstSeenAt = RELEASE.minusSeconds(190_000), wordCount = 610,
+                ),
+                blocksJson = ContentBlocks.encode(SHED_BLOCKS),
+                plainText = ContentBlocks.plainText(SHED_BLOCKS),
+            )!!
+            db.engagementDao().setSaved(shed, RELEASE.plusSeconds(1_200))
             val exporter = KoboExporter(db, NOW_CLOCK)
             val manifest = exporter.manifest("3f0c6f2e-6c55-4f7b-9d1e-0a6f2b9e5c11", 41)
             val bundle = KoboProtocol.json.decodeFromString<EditionBundle>(exporter.edition(ids.edition)!!)
+            val saved = KoboProtocol.json.decodeFromString<SavedBundle>(exporter.saved())
 
             // Tests run in app/; the fixtures live beside the spec.
             val dir = File("../docs/kobo-sync-fixtures").apply { mkdirs() }
             File(dir, "manifest.json").writeText(pretty.encodeToString(manifest) + "\n")
             File(dir, "edition.json").writeText(pretty.encodeToString(bundle) + "\n")
+            File(dir, "saved.json").writeText(pretty.encodeToString(saved) + "\n")
 
             val written = Json.parseToJsonElement(File(dir, "edition.json").readText()).jsonObject
             val types = written.getValue("articles").jsonObject.values
@@ -210,6 +262,8 @@ class KoboFixturesTest {
             val styles = written.toString().let { text -> listOf("b", "i", "code", "a", "s", "sup", "sub").filter { "\"style\":\"$it\"" in text } }
             assertEquals(7, styles.size)
             assertEquals(manifest.editions.first().version, BundleExport.version(BundleExport.encode(bundle)))
+            assertEquals(listOf(shed, ids.top), saved.order)
+            assertEquals(ManifestSaved(2, saved.version), manifest.saved)
         } finally {
             db.close()
         }

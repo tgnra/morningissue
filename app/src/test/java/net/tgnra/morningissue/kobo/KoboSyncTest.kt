@@ -19,6 +19,7 @@ import kotlinx.coroutines.withTimeout
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import net.tgnra.morningissue.sync.NoOpFullTextFetcher
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assume.assumeTrue
@@ -32,7 +33,8 @@ class KoboSyncTest {
     private lateinit var db: MorningIssueDatabase
     private val dir: File = createTempDirectory("kobo-sync").toFile()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val installId = InstallId(PreferenceDataStoreFactory.create(scope = scope) { File(dir, "settings.preferences_pb") })
+    private val settings = PreferenceDataStoreFactory.create(scope = scope) { File(dir, "settings.preferences_pb") }
+    private val installId = InstallId(settings)
 
     @Before
     fun setUp() {
@@ -46,7 +48,10 @@ class KoboSyncTest {
         dir.deleteRecursively()
     }
 
-    private fun sync() = KoboSync(db, installId, { File(dir, "none") }, NOW_CLOCK, deviceName = { "Pixel 9" })
+    private fun sync() = KoboSync(
+        db, installId, { KoboImages({ File(dir, "none") }, { OkHttpClient() }, File(dir, "cache")) }, NoOpFullTextFetcher(),
+        KoboImageWidths(settings), NOW_CLOCK, deviceName = { "Pixel 9" },
+    )
 
     private fun portIsFree(): Boolean = runCatching { ServerSocket(KoboProtocol.HTTP_PORT).close() }.isSuccess
 
