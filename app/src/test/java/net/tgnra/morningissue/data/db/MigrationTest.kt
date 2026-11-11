@@ -124,10 +124,17 @@ class MigrationTest {
             )) {
                 assertEquals(table, rows, db.long("SELECT COUNT(*) FROM $table"))
             }
-            for (table in listOf("article_category", "article_traits", "article_embedding")) {
+            for (table in listOf("article_category", "article_traits", "article_embedding", "stored_image")) {
                 assertEquals(table, 0L, db.long("SELECT COUNT(*) FROM $table"))
             }
             assertEquals(1L, db.long("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'index_article_category_key'"))
+            assertEquals(1L, db.long("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'index_stored_image_articleId'"))
+            // The image store's table takes rows for the posts that were there, and they go with their post.
+            db.execSQL(
+                "INSERT INTO stored_image (url, articleId, fileName, byteSize, originalBytes, width, height, storedAt) " +
+                    "VALUES ('https://blog.example/a.jpg', 1, 'abc', 1000, 4000, 1280, 720, 2000)",
+            )
+            assertEquals(1000L, db.long("SELECT SUM(byteSize) FROM stored_image"))
 
             // Every feed is fetched in full next time; nothing else about it changed.
             assertEquals(0L, db.long("SELECT COUNT(*) FROM feed WHERE etag IS NOT NULL OR lastModified IS NOT NULL"))
@@ -189,7 +196,10 @@ class MigrationTest {
         // The new tables go with their post.
         dao.addCategories(1, listOf(net.tgnra.morningissue.model.ArticleCategories.of("Tech")!!))
         dao.upsertEmbeddings(listOf(ArticleEmbeddingEntity(1, 1, byteArrayOf(1))))
+        db.storedImageDao().upsert(StoredImageEntity("https://blog.example/a.jpg", 1, "abc", 1000, 4000, 1280, 720, java.time.Instant.EPOCH))
+        assertEquals(1000L, db.storedImageDao().totalBytes())
         db.feedDao().delete(1)
+        assertEquals(0, db.storedImageDao().count())
         assertEquals(0, dao.categoryCount())
         assertEquals(0, dao.embeddingCount())
         assertEquals(1, dao.traitsCount())

@@ -105,6 +105,10 @@ internal fun archiveMessage(status: ArchiveStatus, resources: Resources): String
                     StorageBudget.size(freed.bytesFreed, resources.getString(R.string.storage_under_one)),
                 ),
             )
+            if (freed.imagesTrimmed > 0) {
+                append(' ')
+                append(resources.getQuantityString(R.plurals.archive_freed_images, freed.imagesTrimmed, freed.imagesTrimmed))
+            }
         }
     }
     is ArchiveStatus.Imported -> buildString {
@@ -193,6 +197,15 @@ fun StorageSettingsSections(budgetMb: Int) {
                         ),
                         style = type.label,
                         color = colors.ink,
+                    )
+                    Text(
+                        stringResource(
+                            R.string.storage_usage_split,
+                            StorageBudget.size(current.textBytes, stringResource(R.string.storage_under_one)),
+                            StorageBudget.size(current.imageBytes, stringResource(R.string.storage_under_one)),
+                        ),
+                        style = type.label,
+                        color = colors.inkSecondary,
                     )
                     if (current.overBudget) {
                         Text(stringResource(R.string.storage_over_budget), style = type.body, color = colors.inkSecondary)

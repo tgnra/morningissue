@@ -9,25 +9,41 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
+import net.tgnra.morningissue.data.images.ImageStore
+import net.tgnra.morningissue.data.images.ImageTrimReport
 import net.tgnra.morningissue.data.settings.SettingsRepository
 import net.tgnra.morningissue.engine.RankingConfig
 
-/** Stored article text against the budget, in bytes. */
-data class StorageUsage(val usedBytes: Long, val budgetBytes: Long) {
+/** Stored article text and stored images against the budget, in bytes. */
+data class StorageUsage(
+    /** Text and images together. */
+    val usedBytes: Long,
+    val budgetBytes: Long,
+    /** Of [usedBytes], the stored images. The rest is text. */
+    val imageBytes: Long = 0,
+) {
+    val textBytes: Long get() = usedBytes - imageBytes
     val overBudget: Boolean get() = usedBytes > budgetBytes
 }
 
-data class TrimReport(val articlesTrimmed: Int = 0, val bytesFreed: Long = 0)
+/** [bytesFreed] counts text and images together; [articlesTrimmed] is posts that lost their text. */
+data class TrimReport(val articlesTrimmed: Int = 0, val bytesFreed: Long = 0, val imagesTrimmed: Int = 0)
 
 /**
- * The storage budget. It governs stored article text: the bodies in `article_content` and
- * their copy in the search index. Images are not counted; they live in Coil's disk cache,
- * which keeps to its own fixed cap. Implemented by [RoomStorageRepository].
+ * The storage budget. It governs stored article text (the bodies in `article_content` and
+ * their copy in the search index) and the images in the image store (`data/images/`).
+ * Implemented by [RoomStorageRepository].
  *
- * Trimming drops the text of the oldest editions' posts first. It never touches a Liked or
- * saved post, the newest editions, or posts waiting for the next edition, and it never removes
- * a post, a headline, a summary or an edition: a trimmed post opens with its summary and the
- * reader fetches the page again.
+ * Trimming takes images before text, and within each the oldest editions' posts first. An
+ * image can be fetched again for as long as its site keeps it and a post reads without it;
+ * a post's text often cannot be had again once the post has left its feed, and without it
+ * there is nothing to read or search. So every image that may go is gone before the first
+ * body is dropped.
+ *
+ * Trimming never touches a Liked or saved post (text or images), the newest editions, or posts
+ * waiting for the next edition, and it never removes a post, a headline, a summary or an
+ * edition: a trimmed post opens with its summary and the reader fetches the page, and its
+ * pictures, again.
  */
 interface StorageRepository {
     /** Reads every stored body's length, so not for the main thread's every frame; cheap enough per screen. */
@@ -46,17 +62,22 @@ class RoomStorageRepository(
     private val clock: Clock,
     private val config: RankingConfig = RankingConfig.Default,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** The image store, whose files count against the budget; null counts and trims text alone. */
+    private val images: ImageStore? = null,
 ) : StorageRepository {
     private val articleDao = database.articleDao()
     private val editionDao = database.editionDao()
     private val lock = Mutex()
 
     override suspend fun usage(): StorageUsage = withContext(dispatcher) {
-        StorageUsage(used(), settings.settings.first().storageBudgetMb * BYTES_PER_MB)
+        val imageBytes = images?.totalBytes() ?: 0
+        StorageUsage(textUsed() + imageBytes, settings.settings.first().storageBudgetMb * BYTES_PER_MB, imageBytes)
     }
 
     /** Characters, which is bytes for most text and a slight undercount for the rest. */
-    private suspend fun used(): Long = articleDao.contentSize() + articleDao.indexedBodySize()
+    private suspend fun textUsed(): Long = articleDao.contentSize() + articleDao.indexedBodySize()
+
+    private suspend fun used(): Long = textUsed() + (images?.totalBytes() ?: 0)
 
     override suspend fun trimToBudget(): TrimReport = withContext(dispatcher) {
         lock.withLock {
@@ -75,7 +96,9 @@ class RoomStorageRepository(
         // Posts first seen after the latest cutoff are waiting for the next edition.
         val protectFrom = editionDao.getLatestByCutoff()?.cutoffAt
             ?: clock.instant().minus(Duration.ofDays(config.firstEditionWindowDays))
-        var freed = 0L
+        // Images first; see the interface for why.
+        val imageTrim = images?.trim(protectFrom, keepEditionIds, bytesToFree = used - target) ?: ImageTrimReport()
+        var freed = imageTrim.bytesFreed
         var trimmed = 0
         while (used - freed > target) {
             val batch = articleDao.trimCandidates(protectFrom, keepEditionIds, BATCH)
@@ -89,7 +112,7 @@ class RoomStorageRepository(
             articleDao.trimContent(take)
             trimmed += take.size
         }
-        return TrimReport(trimmed, freed)
+        return TrimReport(trimmed, freed, imageTrim.imagesTrimmed)
     }
 
     private companion object {

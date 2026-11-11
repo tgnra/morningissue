@@ -5,6 +5,10 @@ import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
+import net.tgnra.morningissue.data.images.ImageStore
+import net.tgnra.morningissue.data.images.ImageStoreReport
+import net.tgnra.morningissue.data.images.ImageSweepReport
+import net.tgnra.morningissue.data.images.ImageTrimReport
 import net.tgnra.morningissue.sync.FullTextResult
 import net.tgnra.morningissue.sync.SyncReport
 import org.junit.Assert.assertEquals
@@ -49,6 +53,46 @@ class EarlyBuildTest {
         assertEquals(listOf("https://img.example/1.jpg", "https://img.example/3.jpg"), prefetchedImages)
         assertEquals("schedule", steps.last())
         assertTrue(steps.indexOf("images") > steps.indexOf("buildNext"))
+    }
+
+    @Test
+    fun thePicturesOfEveryPrintedStoryGoToTheImageStoreTheOnesOnThePagesFirst() = runTest {
+        val kept = mutableListOf<Long>()
+        val store = object : ImageStore {
+            override suspend fun storeForArticles(articleIds: List<Long>): ImageStoreReport {
+                journal.add("store")
+                kept += articleIds
+                return ImageStoreReport()
+            }
+            override suspend fun totalBytes(): Long = 0
+            override suspend fun trim(protectFrom: Instant, keepEditionIds: List<Long>, bytesToFree: Long) = ImageTrimReport()
+            override suspend fun deleteForFeed(feedId: Long) = Unit
+            override suspend fun sweep() = ImageSweepReport()
+        }
+        val build = EarlyBuild(
+            feedSyncer = FakeSyncer(journal),
+            publisher = publisher,
+            editions = FakeEditions(mapOf(7L to sampleEdition(7))),
+            fullTextFetcher = FakeFullText(journal),
+            images = StoringImagePrefetcher(store),
+            scheduleNext = { journal.add("schedule") },
+            clock = clock,
+        )
+
+        val outcome = build.run()
+
+        assertNull(outcome.error)
+        // Every printed story once: the stories whose pictures the pages show, then the briefs.
+        // The index is not printed.
+        assertEquals(5, kept.size)
+        assertEquals((1..5L).toSet(), kept.toSet())
+        val briefs = sampleEdition(7).pages.filterIsInstance<net.tgnra.morningissue.model.EditionPage.InBrief>().flatMap { it.stories }.map { it.articleId }
+        assertTrue(briefs.isNotEmpty())
+        assertEquals(briefs, kept.takeLast(briefs.size))
+        // After the full text, whose bodies name the pictures, and before the next run is scheduled.
+        val steps = journal.all()
+        assertTrue(steps.indexOf("store") > steps.indexOfLast { it.startsWith("text:") })
+        assertTrue(steps.indexOf("store") < steps.indexOf("schedule"))
     }
 
     @Test

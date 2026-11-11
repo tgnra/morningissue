@@ -119,6 +119,13 @@ fun ReaderScreen(
             is FullTextResult.Unavailable -> FullText.Unavailable
             else -> FullText.Done
         }
+        // An article the reader opens keeps its pictures, wherever it was opened from. On the
+        // app's scope so that leaving the screen does not stop it, and a little later so that
+        // the pictures the screen is loading right now are taken from Coil's cache, not fetched twice.
+        container.appScope.launch {
+            delay(STORE_IMAGES_DELAY_MILLIS)
+            container.images.storeForArticles(listOf(articleId))
+        }
     }
 
     val state = loaded
@@ -256,6 +263,9 @@ private fun Reader(article: ReaderArticle, fullText: FullText, onOpenSource: (Lo
 }
 
 private const val DWELL_TICK_MILLIS = 1000L
+
+/** How long after an article's text is in hand its pictures are put in the image store. */
+private const val STORE_IMAGES_DELAY_MILLIS = 4000L
 
 /** Caps the text column at the layout's measure (about 66 characters); full width on phones. */
 private fun Modifier.measure(max: Dp): Modifier =

@@ -166,3 +166,17 @@ class ArticleSignals(
     val traits: ArticleTraitsEntity?,
     val embedding: ByteArray?,
 )
+
+/** What `ImageStore` needs of a post to find its pictures: the lead image and the stored body. */
+data class ArticleImageSourceRow(
+    val articleId: Long,
+    val imageUrl: String?,
+    val blocksJson: String?,
+)
+
+/** A stored image's file and size; see `StoredImageDao`. */
+data class StoredImageFileRow(
+    val url: String,
+    val fileName: String,
+    val byteSize: Long,
+)

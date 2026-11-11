@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import net.tgnra.morningissue.data.db.FeedEntity
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
+import net.tgnra.morningissue.data.images.ImageStore
 import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.model.AddFeedResult
 import net.tgnra.morningissue.model.Feed
@@ -19,6 +20,8 @@ class RoomFeedRepository(
     private val database: MorningIssueDatabase,
     private val clock: Clock,
     config: RankingConfig = RankingConfig.Default,
+    /** The image store, so that a removed feed's pictures go with it; null in tests that store none. */
+    private val images: ImageStore? = null,
 ) : FeedRepository {
     /** Tags and subscriptions shape affinity (a feed borrows from its tags), so they relearn it. */
     private val learner = AffinityLearner(database, config)
@@ -59,10 +62,15 @@ class RoomFeedRepository(
         AddFeedResult.Added(id)
     }
 
-    override suspend fun removeFeed(feedId: Long) = database.withWriteTransaction {
-        feedDao.delete(feedId)
-        tagDao.deleteUnused()
-        learner.refresh(clock.instant())
+    override suspend fun removeFeed(feedId: Long) {
+        // Files cannot be deleted by a cascade, so the feed's images go first, rows and files
+        // together. If the removal then failed, all that would be lost is pictures that can be fetched again.
+        images?.deleteForFeed(feedId)
+        database.withWriteTransaction {
+            feedDao.delete(feedId)
+            tagDao.deleteUnused()
+            learner.refresh(clock.instant())
+        }
     }
 
     override suspend fun renameFeed(feedId: Long, title: String) {

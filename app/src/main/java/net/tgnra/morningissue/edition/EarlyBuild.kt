@@ -14,6 +14,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import net.tgnra.morningissue.AppContainer
+import net.tgnra.morningissue.data.images.ImageStore
 import net.tgnra.morningissue.data.repository.EditionRepository
 import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.model.EditionPage
@@ -24,9 +25,35 @@ import net.tgnra.morningissue.sync.FullTextResult
 /** Downloads images into the disk cache so an edition reads offline. Never throws except on cancellation. */
 fun interface ImagePrefetcher {
     suspend fun prefetch(urls: List<String>)
+
+    /**
+     * The pictures of an edition's printed stories: [articleIds] in page order, and
+     * [pageImageUrls], the lead images its pages show. A prefetcher that only knows addresses
+     * fetches the page images; [StoringImagePrefetcher] keeps every picture of the stories.
+     */
+    suspend fun prefetchArticles(articleIds: List<Long>, pageImageUrls: List<String>) {
+        if (pageImageUrls.isNotEmpty()) prefetch(pageImageUrls)
+    }
 }
 
-/** Fills the shared Coil loader's disk cache; nothing is kept in memory. */
+/**
+ * Puts the lead image and the body images of each printed story in the image store
+ * (`data/images/`), re-encoded for display, so the edition and its articles read offline and
+ * the pictures count against the storage budget. This is what the early build uses.
+ */
+class StoringImagePrefetcher(private val store: ImageStore) : ImagePrefetcher {
+    /** Addresses alone cannot be stored: an image is kept for a post. */
+    override suspend fun prefetch(urls: List<String>) = Unit
+
+    override suspend fun prefetchArticles(articleIds: List<Long>, pageImageUrls: List<String>) {
+        store.storeForArticles(articleIds)
+    }
+}
+
+/**
+ * Fills the shared Coil loader's disk cache; nothing is kept in memory. No longer used by the
+ * early build, which keeps images in the store ([StoringImagePrefetcher]).
+ */
 class CoilImagePrefetcher(
     private val context: Context,
     private val imageLoader: ImageLoader,
@@ -144,8 +171,10 @@ class EarlyBuild(
             }.awaitAll().count { it is FullTextResult.Stored }
         }
         val withText = outcome.copy(fullTextStored = stored)
-        if (imageUrls.isEmpty()) return withText
-        images.prefetch(imageUrls)
+        // After the text, so that the pictures in fetched bodies are known. The stories whose
+        // pictures the pages show come first; briefs show none until they are opened.
+        val pictured = pages.filter { it !is EditionPage.InBrief }.flatMap { it.stories }.map { it.articleId }
+        images.prefetchArticles((pictured + articleIds).distinct(), imageUrls)
         return withText.copy(imagesRequested = imageUrls.size)
     }
 
@@ -160,7 +189,7 @@ class EarlyBuild(
                 publisher = container.editionPublisher,
                 editions = container.editions,
                 fullTextFetcher = container.fullTextFetcher,
-                images = CoilImagePrefetcher(context.applicationContext, container.imageLoader),
+                images = StoringImagePrefetcher(container.images),
                 scheduleNext = {
                     // Wait for the schedule to be stored before the worker reports back; any
                     // other scheduler only offers the fire-and-forget call.

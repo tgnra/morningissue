@@ -290,3 +290,35 @@ class ArticleEmbeddingEntity(
     val model: Int,
     val vector: ByteArray,
 )
+
+/**
+ * One image kept in the image store (`data/images/`): the file `fileName` in the store's
+ * directory holds the picture at [url], usually re-encoded smaller. The row is the store's
+ * bookkeeping; display looks for the file alone.
+ *
+ * An image belongs to one post, the one it was first stored for, and goes when that post's
+ * feed is removed or its images are trimmed. A picture several posts share is fetched from
+ * the network again for the others.
+ */
+@Entity(
+    tableName = "stored_image",
+    foreignKeys = [
+        ForeignKey(entity = ArticleEntity::class, parentColumns = ["id"], childColumns = ["articleId"], onDelete = ForeignKey.CASCADE),
+    ],
+    indices = [Index("articleId")],
+)
+data class StoredImageEntity(
+    /** The address as the post gives it, which is also what display asks for. */
+    @PrimaryKey val url: String,
+    val articleId: Long,
+    /** Derived from [url] (`ImageFiles.nameFor`), so a file can be found without this row. */
+    val fileName: String,
+    /** Bytes on disk; what the storage budget counts. */
+    val byteSize: Long,
+    /** Bytes downloaded. Equal to [byteSize] when the original was kept as it came. */
+    val originalBytes: Long,
+    /** Pixels of the stored file; 0 for an image stored without being decoded (SVG, animations). */
+    val width: Int,
+    val height: Int,
+    val storedAt: Instant,
+)

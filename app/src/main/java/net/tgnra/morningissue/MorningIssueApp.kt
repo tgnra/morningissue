@@ -39,6 +39,14 @@ class MorningIssueApp : Application(), SingletonImageLoader.Factory {
             } catch (_: Exception) {
                 // Tried again after the next sync.
             }
+            // Image files whose rows went with a removed post, and rows whose files are gone.
+            try {
+                container.images.sweep()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Swept again after the next sync.
+            }
         }
     }
 

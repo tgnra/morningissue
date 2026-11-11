@@ -257,18 +257,19 @@
     <string name="display_standard">Standard</string>
     <string name="display_eink">E-ink</string>
     <string name="settings_storage">Storage</string>
-    <string name="storage_budget">Article text to keep</string>
-    <string name="storage_budget_detail">When this fills, the text of the oldest editions’ articles is dropped first. Liked and saved articles are always kept, and so is every headline and back issue: a trimmed article is fetched again when you open it. Pictures have their own fixed cache and are not counted.</string>
+    <string name="storage_budget">Text and pictures to keep</string>
+    <string name="storage_budget_detail">When this fills, the pictures of the oldest editions’ articles are dropped first, because they can be fetched again, and then those articles’ text. Liked and saved articles always keep both, and every headline and back issue is kept: a trimmed article is fetched again when you open it.</string>
     <string name="storage_less">Less</string>
     <string name="storage_more">More</string>
     <string name="storage_usage">Using %1$s of %2$s</string>
+    <string name="storage_usage_split">%1$s of text, %2$s of pictures</string>
     <string name="storage_under_one">under 1 MB</string>
-    <string name="storage_over_budget">Over the budget. The oldest articles’ text is trimmed after the next sync.</string>
+    <string name="storage_over_budget">Over the budget. The oldest articles’ pictures, then their text, are trimmed after the next sync.</string>
     <string name="storage_trim_now">Trim now</string>
     <string name="storage_trimming">Trimming…</string>
     <string name="settings_archive">Archive</string>
     <string name="archive_export">Export</string>
-    <string name="archive_export_detail">Writes your feeds, every edition and every stored article, with your Likes and saves, to one file wherever you choose. “Export and free up space” then drops the stored text of older articles from this device; importing the file brings it back.</string>
+    <string name="archive_export_detail">Writes your feeds, every edition and every stored article, with your Likes and saves, to one file wherever you choose. Pictures are not in the file. “Export and free up space” then drops the stored text and pictures of older articles from this device; importing the file brings the text back, and pictures are fetched again when they are next shown.</string>
     <string name="archive_export_action">Export</string>
     <string name="archive_export_free_action">Export and free up space</string>
     <string name="archive_import">Import</string>
@@ -289,6 +290,10 @@
     <plurals name="archive_freed">
         <item quantity="one">Freed %2$s by trimming %1$,d article.</item>
         <item quantity="other">Freed %2$s by trimming %1$,d articles.</item>
+    </plurals>
+    <plurals name="archive_freed_images">
+        <item quantity="one">%,d stored picture went too.</item>
+        <item quantity="other">%,d stored pictures went too.</item>
     </plurals>
     <plurals name="archive_imported_posts">
         <item quantity="one">Imported %,d post</item>

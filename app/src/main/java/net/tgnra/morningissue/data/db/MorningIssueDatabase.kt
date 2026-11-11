@@ -22,6 +22,7 @@ import androidx.room3.ColumnTypeConverters
         ArticleCategoryEntity::class,
         ArticleTraitsEntity::class,
         ArticleEmbeddingEntity::class,
+        StoredImageEntity::class,
     ],
     version = 2,
     exportSchema = true,
@@ -36,6 +37,7 @@ abstract class MorningIssueDatabase : RoomDatabase() {
     abstract fun feedHealthDao(): FeedHealthDao
     abstract fun archiveDao(): ArchiveDao
     abstract fun articleSignalDao(): ArticleSignalDao
+    abstract fun storedImageDao(): StoredImageDao
 
     /**
      * Room 3 needs an explicit SQLite driver. This is the platform's own SQLite, the engine

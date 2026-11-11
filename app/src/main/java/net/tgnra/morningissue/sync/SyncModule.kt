@@ -24,10 +24,11 @@ object SyncModule {
         val healthChecker = FeedHealthChecker(core.database, FeedRepairer(fetcher, discovery, core.clock), core.clock)
         // Quiet feeds are fetched less often; after every full sync the health check runs, the
         // new posts get their traits and embeddings (before the trim, which removes the text
-        // they are computed from), then stored text is trimmed to the storage budget.
+        // they are computed from), the image store is swept of files and rows that have lost
+        // their other half, then stored images and text are trimmed to the storage budget.
         val syncer = MaintainedFeedSyncer(
             delegate = DefaultFeedSyncer(core.database, fetcher, core.clock, core.appScope, dueFeeds = healthChecker::dueFeeds),
-            afterSync = listOf({ healthChecker.run() }, { core.signals.run() }, { core.storage.trimToBudget() }),
+            afterSync = listOf({ healthChecker.run() }, { core.signals.run() }, { core.images.sweep() }, { core.storage.trimToBudget() }),
         )
         return SyncComponents(
             feedSyncer = syncer,

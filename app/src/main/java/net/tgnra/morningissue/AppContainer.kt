@@ -11,6 +11,11 @@ import kotlinx.coroutines.SupervisorJob
 import net.tgnra.morningissue.data.archive.ArchiveController
 import net.tgnra.morningissue.data.archive.RoomArchiveTransfer
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
+import net.tgnra.morningissue.data.images.CoilDiskOriginals
+import net.tgnra.morningissue.data.images.FileImageStore
+import net.tgnra.morningissue.data.images.ImageFiles
+import net.tgnra.morningissue.data.images.ImageStore
+import net.tgnra.morningissue.data.images.StoredImageFetcher
 import net.tgnra.morningissue.data.repository.ArticleRepository
 import net.tgnra.morningissue.data.repository.EditionRepository
 import net.tgnra.morningissue.data.repository.FeedHealthRepository
@@ -52,8 +57,11 @@ interface AppContainer {
     /** The Subscriptions desk: flagged feeds and their fixes. */
     val feedHealth: FeedHealthRepository
 
-    /** The storage budget: usage and trimming of stored article text. */
+    /** The storage budget: usage and trimming of stored article text and stored images. */
     val storage: StorageRepository
+
+    /** Images kept in the app's files for display, re-encoded to fit; see [ImageStore]. */
+    val images: ImageStore
 
     /** Archive export and import to a file the reader picks. */
     val archive: ArchiveController
@@ -91,8 +99,10 @@ class CoreComponents(
     val database: MorningIssueDatabase,
     /** Shared client; call `newBuilder()` for per-use timeouts or interceptors. */
     val okHttpClient: OkHttpClient,
-    /** Coil loader backed by [okHttpClient]; its disk cache is what edition prefetch fills. */
+    /** Coil loader backed by [okHttpClient]; it reads [images] first and the network after. */
     val imageLoader: ImageLoader,
+    /** The image store; swept after every full sync. */
+    val images: ImageStore,
     val settings: SettingsRepository,
     val feeds: FeedRepository,
     val articles: ArticleRepository,
@@ -117,16 +127,26 @@ class DefaultAppContainer(context: Context) : AppContainer {
             .build()
     }
 
+    private val imageFiles: ImageFiles by lazy { ImageFiles.of(appContext) }
+
     override val imageLoader: ImageLoader by lazy {
         ImageLoader.Builder(appContext)
-            .components { add(OkHttpNetworkFetcherFactory(callFactory = { okHttpClient })) }
+            .components {
+                // In this order: a stored image answers before the network is asked.
+                add(StoredImageFetcher.Factory(imageFiles))
+                add(OkHttpNetworkFetcherFactory(callFactory = { okHttpClient }))
+            }
             .build()
     }
 
+    override val images: ImageStore by lazy {
+        FileImageStore(database, imageFiles, { okHttpClient }, clock, CoilDiskOriginals { imageLoader.diskCache })
+    }
+
     override val settings: SettingsRepository by lazy { DataStoreSettingsRepository(appContext.settingsDataStore) }
-    override val feeds: FeedRepository by lazy { RoomFeedRepository(database, clock) }
+    override val feeds: FeedRepository by lazy { RoomFeedRepository(database, clock, images = images) }
     override val articles: ArticleRepository by lazy { RoomArticleRepository(database, clock) }
-    override val storage: StorageRepository by lazy { RoomStorageRepository(database, settings, clock) }
+    override val storage: StorageRepository by lazy { RoomStorageRepository(database, settings, clock, images = images) }
     override val archive: ArchiveController by lazy {
         ArchiveController(appScope, appContext.contentResolver, RoomArchiveTransfer(database, clock), storage)
     }
@@ -144,6 +164,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
             database = database,
             okHttpClient = okHttpClient,
             imageLoader = imageLoader,
+            images = images,
             settings = settings,
             feeds = feeds,
             articles = articles,
