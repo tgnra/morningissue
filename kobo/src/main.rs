@@ -12,6 +12,7 @@ use morningissue::net;
 use morningissue::profile;
 use morningissue::store::Store;
 use morningissue::sync;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -29,6 +30,10 @@ fn version_file() -> PathBuf {
 /// Nickel's settings, where it keeps its own light levels.
 const NICKEL_CONF: &str = "/mnt/onboard/.kobo/Kobo/Kobo eReader.conf";
 
+/// The exit code after a panic on the reader's main thread; `launch.sh` logs it as a crash
+/// and brings Nickel back.
+const EXIT_PANIC: u8 = 70;
+
 fn wifi_power_off() -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
     const CM_WIFI_CTRL: libc::c_ulong = 208;
@@ -38,6 +43,27 @@ fn wifi_power_off() -> std::io::Result<()> {
         return Err(std::io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Logs every panic, on any thread, as one line on stderr (which `launch.sh` sends to
+/// `data/launch.log`): the thread, the source location and the message. The same line goes
+/// to `data/panic.txt`, which the launcher quotes when the reader ends abnormally.
+fn log_panics(home: &Path) {
+    let panic_file = home.join("data").join("panic.txt");
+    panic::set_hook(Box::new(move |info| {
+        let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "(no message)".to_string()
+        };
+        let place = info.location().map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column())).unwrap_or_else(|| "an unknown place".into());
+        let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
+        let line = format!("panicked in thread '{thread}' at {place}: {msg}");
+        eprintln!("read: {line}");
+        let _ = std::fs::write(&panic_file, format!("{line}\n"));
+    }));
 }
 
 fn main() -> ExitCode {
@@ -82,49 +108,18 @@ fn main() -> ExitCode {
             }
         }
         "read" => {
-            let p = profile::detect(&version_file());
-            eprintln!("read: {} (product {}), {}", p.name, p.id, if p.verified { "verified" } else { "unverified profile" });
-            let fb = match Framebuffer::open(p.clone(), &config) {
-                Ok(fb) => fb,
-                Err(e) => {
-                    eprintln!("read: cannot use the screen: {e}");
-                    return ExitCode::from(3);
-                }
-            };
-            let base = morningissue::device::Display::base_size(&fb);
-            let rotation = fb.canonical;
-            let input = match EvdevInput::open(&p, &config, base) {
-                Ok(i) => i,
-                Err(e) => {
-                    eprintln!("read: no input: {e}");
-                    return ExitCode::from(3);
-                }
-            };
-            let store = Store::new(&home);
-            let light: Box<dyn Light> = match KoboLight::open(&p.light, Path::new(NICKEL_CONF)) {
-                Some(l) => Box::new(l),
-                None => Box::new(NoLight),
-            };
-            let opts = app::Options { rotation, follow_sensor: p.follow_sensor, light, network: Box::new(net::probe), sync_on_start: true, hit_probe: None };
-            let mut app = match App::new(Box::new(fb), Box::new(input), Box::new(SystemClock::new()), store, config, &home.join("fonts"), opts) {
-                Ok(a) => a,
-                Err(e) => {
-                    eprintln!("read: {e}");
-                    return ExitCode::from(2);
-                }
-            };
-            match app.run() {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(e) => {
-                    eprintln!("read: {e}");
-                    let _ = app.finish();
-                    ExitCode::from(2)
+            log_panics(&home);
+            match panic::catch_unwind(AssertUnwindSafe(|| read(&home, config))) {
+                Ok(code) => code,
+                Err(_) => {
+                    eprintln!("read: crashed before the reader was up");
+                    ExitCode::from(EXIT_PANIC)
                 }
             }
         }
         "wifi-off" => {
             // Cuts the Wi-Fi chip's power the way Nickel does (ntx_io ioctl 208 with 0), for
-            // launch.sh, which cannot call ioctl itself. Used after the modules are unloaded.
+            // wifi-off.sh, which cannot call ioctl itself. Used after the modules are unloaded.
             match wifi_power_off() {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
@@ -136,6 +131,58 @@ fn main() -> ExitCode {
         _ => {
             eprintln!("usage: morningissue sync | read | check | wifi-off");
             ExitCode::from(64)
+        }
+    }
+}
+
+/// `morningissue read`. A panic while the reader runs is caught here, after the panic hook
+/// has logged it, so the session's events and Nickel's light levels are still put right
+/// before the process ends with [`EXIT_PANIC`].
+fn read(home: &Path, config: Config) -> ExitCode {
+    let p = profile::detect(&version_file());
+    eprintln!("read: {} (product {}), {}", p.name, p.id, if p.verified { "verified" } else { "unverified profile" });
+    let fb = match Framebuffer::open(p.clone(), &config) {
+        Ok(fb) => fb,
+        Err(e) => {
+            eprintln!("read: cannot use the screen: {e}");
+            return ExitCode::from(3);
+        }
+    };
+    let base = morningissue::device::Display::base_size(&fb);
+    let rotation = fb.canonical;
+    let input = match EvdevInput::open(&p, &config, base) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("read: no input: {e}");
+            return ExitCode::from(3);
+        }
+    };
+    let store = Store::new(home);
+    let light: Box<dyn Light> = match KoboLight::open(&p.light, Path::new(NICKEL_CONF)) {
+        Some(l) => Box::new(l),
+        None => Box::new(NoLight),
+    };
+    let opts = app::Options { rotation, follow_sensor: p.follow_sensor, light, network: Box::new(net::probe), sync_on_start: true, hit_probe: None };
+    let mut app = match App::new(Box::new(fb), Box::new(input), Box::new(SystemClock::new()), store, config, &home.join("fonts"), opts) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("read: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    match panic::catch_unwind(AssertUnwindSafe(|| app.run())) {
+        Ok(Ok(())) => ExitCode::SUCCESS,
+        Ok(Err(e)) => {
+            eprintln!("read: {e}");
+            let _ = app.finish();
+            ExitCode::from(2)
+        }
+        Err(_) => {
+            eprintln!("read: the reader crashed; saving what it can and handing back to Nickel");
+            if panic::catch_unwind(AssertUnwindSafe(|| app.finish())).is_err() {
+                eprintln!("read: could not save the session after the crash");
+            }
+            ExitCode::from(EXIT_PANIC)
         }
     }
 }

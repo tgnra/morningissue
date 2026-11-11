@@ -917,8 +917,19 @@ impl App {
             let _ = ptx.send(SyncMsg::Progress(p));
         }));
         let home = self.store.home.clone();
-        std::thread::spawn(move || {
-            let r = sync::sync(&Store::new(home), &opts);
+        let spawned = std::thread::Builder::new().name("sync".into()).spawn(move || {
+            // A panic in a sync is logged by the panic hook and ends that sync only; the
+            // reader goes on with what is stored.
+            let store = Store::new(&home);
+            let r = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sync::sync(&store, &opts))) {
+                Ok(r) => r,
+                Err(_) => {
+                    eprintln!("sync: crashed; the reader goes on with what it has");
+                    let _ = std::fs::remove_file(store.home.join("data").join("panic.txt"));
+                    let _ = tx.send(SyncMsg::Done);
+                    return;
+                }
+            };
             match &r {
                 Ok(r) => eprintln!(
                     "synced with {}: {} events sent, editions fetched {:?}, removed {:?}, saved list {}, {} images fetched, {} not on the phone",
@@ -934,6 +945,10 @@ impl App {
             }
             let _ = tx.send(SyncMsg::Done);
         });
+        if let Err(e) = spawned {
+            eprintln!("sync: cannot start: {e}");
+            return;
+        }
         self.sync = Some(rx);
         self.syncs_started += 1;
         self.sync_show = SyncShow::default();

@@ -21,7 +21,9 @@ libc = "0.2"
 opt-level = "s"
 lto = true
 codegen-units = 1
-panic = "abort"
+# Unwinding, so a panic on the sync thread ends that sync only, and a panic on the main
+# thread still saves the session and restores the light before the reader exits.
+panic = "unwind"
 strip = true
 
 # Font rasterising and image decoding are slow unoptimised; keep tests quick.
