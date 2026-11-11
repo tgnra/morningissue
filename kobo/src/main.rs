@@ -158,6 +158,11 @@ fn read(home: &Path, config: Config) -> ExitCode {
         }
     };
     let store = Store::new(home);
+    match store.apply_pending_reset() {
+        Ok(true) => eprintln!("read: reset done; starting fresh"),
+        Ok(false) => {}
+        Err(e) => eprintln!("read: reset failed: {e}"),
+    }
     let light: Box<dyn Light> = match KoboLight::open(&p.light, Path::new(NICKEL_CONF)) {
         Some(l) => Box::new(l),
         None => Box::new(NoLight),

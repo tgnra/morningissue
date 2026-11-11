@@ -102,6 +102,43 @@ impl Store {
         self.images_dir().join(format!("{}.img", image_key(url)))
     }
 
+    /// Written by Settings > Reset; the next `read` erases the data before anything loads it.
+    pub fn reset_marker_path(&self) -> PathBuf {
+        self.data().join("reset-pending")
+    }
+
+    /// Asks for a reset at the next start. The reset is not done in place because the
+    /// background sync may still be writing; the reader exits straight after this.
+    pub fn request_reset(&self) -> io::Result<()> {
+        fs::create_dir_all(self.data())?;
+        write_synced(&self.reset_marker_path(), b"reset\n")
+    }
+
+    /// If a reset was asked for, erases everything in the data directory but the logs
+    /// (`launch.log*`, `panic.txt`): the pairing and device ID, editions, saved articles,
+    /// pictures, unsent events and settings. Returns whether it did.
+    pub fn apply_pending_reset(&self) -> io::Result<bool> {
+        if !self.reset_marker_path().exists() {
+            return Ok(false);
+        }
+        for entry in fs::read_dir(self.data())? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with("launch.log") || name == "panic.txt" || name == "reset-pending" {
+                continue;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                fs::remove_dir_all(&path)?;
+            } else {
+                fs::remove_file(&path)?;
+            }
+        }
+        // The marker goes last, so a reset cut short is finished at the next start.
+        fs::remove_file(self.reset_marker_path())?;
+        Ok(true)
+    }
+
     pub fn ensure_dirs(&self) -> io::Result<()> {
         fs::create_dir_all(self.editions_dir())?;
         fs::create_dir_all(self.images_dir())?;
@@ -355,6 +392,28 @@ mod tests {
 
     fn ev(seq: i64) -> Event {
         Event { seq, kind: "opened".into(), article_id: Some(1), edition_id: None, page: None, value: None, ms: None, at: "2026-11-11T06:30:00Z".into() }
+    }
+
+    #[test]
+    fn a_requested_reset_erases_everything_but_the_logs() {
+        let store = Store::new(temp_home("reset"));
+        let device = store.load_state().unwrap().device_id;
+        store.ensure_dirs().unwrap();
+        store.append_event(&ev(1)).unwrap();
+        fs::write(store.edition_path(7), b"{}").unwrap();
+        fs::write(store.settings_path(), b"{}").unwrap();
+        fs::write(store.data().join("launch.log"), b"kept").unwrap();
+        // Nothing happens until a reset is asked for.
+        assert!(!store.apply_pending_reset().unwrap());
+        assert!(store.edition_path(7).exists());
+
+        store.request_reset().unwrap();
+        assert!(store.apply_pending_reset().unwrap());
+        let left: Vec<String> = fs::read_dir(store.data()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(left, ["launch.log"]);
+        // A fresh install: a new device ID, so the phone pairs it as new.
+        assert_ne!(store.load_state().unwrap().device_id, device);
+        assert!(!store.apply_pending_reset().unwrap());
     }
 
     #[test]

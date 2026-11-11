@@ -133,6 +133,11 @@ pub enum Action {
     /// Opens the keypad for a typed phone address.
     PhoneTyped,
     InvertButtons,
+    /// Settings > Reset: shows the confirmation.
+    Reset,
+    ResetCancel,
+    /// Erases everything on the next start and exits now.
+    ResetConfirm,
     SetOrientation(crate::settings::Orientation),
     /// A key of the address keypad.
     KeyChar(char),

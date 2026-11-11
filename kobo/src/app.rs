@@ -184,6 +184,8 @@ pub struct App {
     wifi_off_done: bool,
     /// The connection was lost to sleep, so "Offline" says why.
     offline_since_sleep: bool,
+    /// Settings > Reset was tapped and awaits Erase everything or Cancel.
+    reset_armed: bool,
     /// Touches before this (monotonic ms) are dropped: they were made while waking.
     ignore_touches_until: u64,
     network: Box<dyn Fn() -> NetStatus>,
@@ -259,6 +261,7 @@ impl App {
             light_off: false,
             wifi_off_done: false,
             offline_since_sleep: false,
+            reset_armed: false,
             ignore_touches_until: 0,
             network: opts.network,
             net,
@@ -494,6 +497,7 @@ impl App {
                     invert_buttons: self.settings.invert_buttons,
                     orientation: self.orientation(),
                     sensor: self.follow_sensor,
+                    reset_armed: self.reset_armed,
                 };
                 ui::draw_settings(&ctx, &mut canvas, &view)
             }
@@ -809,6 +813,7 @@ impl App {
                 self.push(View::Saved { screens, pos: 0 })?;
             }
             Action::OpenSettings => {
+                self.reset_armed = false;
                 self.net = (self.network)();
                 self.push(View::Settings)?;
             }
@@ -914,6 +919,15 @@ impl App {
                         self.show(Show::Update)?;
                     }
                 }
+            }
+            Action::Reset | Action::ResetCancel => {
+                self.reset_armed = a == Action::Reset;
+                self.show(Show::Touch)?;
+            }
+            Action::ResetConfirm => {
+                self.store.request_reset()?;
+                eprintln!("reset: erasing everything at the next start; exiting");
+                return Ok(true);
             }
             Action::Exit => return Ok(true),
         }

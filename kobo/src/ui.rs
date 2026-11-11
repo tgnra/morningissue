@@ -558,6 +558,8 @@ pub struct SettingsView<'s> {
     pub orientation: Orientation,
     /// The model's sensor is mapped, so it turns the page upside down within the choice.
     pub sensor: bool,
+    /// Reset was tapped: show what it erases, with Erase everything and Cancel.
+    pub reset_armed: bool,
 }
 
 fn section(ctx: &Ctx, canvas: &mut Canvas, x: i32, y: &mut f32, w: i32, label: &str) {
@@ -685,11 +687,34 @@ pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
         button(ctx, canvas, r, label, o == s.orientation, true);
         hits.push((target(ctx, r), Action::SetOrientation(o)));
     }
+    y += bh as f32 + m.pt(6.0);
     if s.sensor {
-        y += bh as f32 + m.pt(6.0);
         let note = "The page turns upside down to match how you hold the Kobo.";
         let n = ctx.para(&text::plain(note, ctx.ty.caption.color(MUTED)), w as f32, Align::Left, 1.35, None);
         n.draw(ctx.fonts, canvas, x as f32, y);
+        y += n.height();
+    }
+    rule(ctx, canvas, x, &mut y, w);
+
+    section(ctx, canvas, x, &mut y, w, "RESET");
+    if s.reset_armed {
+        let warn = "Forgets the phone and deletes everything on this Kobo, then closes.";
+        let n = ctx.para(&text::plain(warn, ctx.ty.caption.color(BLACK)), w as f32, Align::Left, 1.35, None);
+        n.draw(ctx.fonts, canvas, x as f32, y);
+        y += n.height() + m.pt(6.0);
+        let ew = button_w(ctx, "Erase everything").max(m.inch(1.2) as i32);
+        let er = Rect::new(x, y as i32, ew, bh);
+        button(ctx, canvas, er, "Erase everything", true, true);
+        hits.push((target(ctx, er), Action::ResetConfirm));
+        let cw = button_w(ctx, "Cancel").max(m.inch(1.0) as i32);
+        let cr = Rect::new(x + ew + gap * 2, y as i32, cw, bh);
+        button(ctx, canvas, cr, "Cancel", false, true);
+        hits.push((target(ctx, cr), Action::ResetCancel));
+    } else {
+        let rw = button_w(ctx, "Reset Morning Issue").max(m.inch(1.2) as i32);
+        let rr = Rect::new(x, y as i32, rw, bh);
+        button(ctx, canvas, rr, "Reset Morning Issue", false, true);
+        hits.push((target(ctx, rr), Action::Reset));
     }
     hits
 }
