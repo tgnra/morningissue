@@ -48,7 +48,10 @@ sealed interface PrintState {
             }
     }
 
-    /** Ended [at] with [result]. Kept until the next run so the stand can say what happened. */
+    /**
+     * Ended [at] with [result]. Kept so the stand can say what happened, until the next run
+     * starts or the reader closes the notice ([EditionPrinter.dismissResult]).
+     */
     data class Finished(val result: PrintResult, val at: Instant) : PrintState
 }
 
@@ -101,6 +104,16 @@ class EditionPrinter(
             _state.value = PrintState.Finished(result, clock.instant())
         }
         return true
+    }
+
+    /**
+     * The reader closed the notice of the last result: it is forgotten, and nothing is said
+     * again until a later run produces a new one. Held here, not in the screen, so the notice
+     * stays closed through a rotation or a visit to another screen. Does nothing while a run
+     * is under way.
+     */
+    fun dismissResult() {
+        _state.update { if (it is PrintState.Finished) PrintState.Idle else it }
     }
 
     /** Stories finish on several threads, so a count that arrives late must not move the progress back. */

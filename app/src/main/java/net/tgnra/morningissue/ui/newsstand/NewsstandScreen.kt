@@ -2,6 +2,8 @@ package net.tgnra.morningissue.ui.newsstand
 
 import android.text.format.DateFormat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -17,12 +19,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -41,6 +46,8 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -73,7 +80,7 @@ import net.tgnra.morningissue.model.EditionSummary
 import net.tgnra.morningissue.sync.SyncStatus
 import net.tgnra.morningissue.ui.LocalAppContainer
 import net.tgnra.morningissue.ui.components.LocalPagedScroller
-import net.tgnra.morningissue.ui.components.NoticeLine
+import net.tgnra.morningissue.ui.components.boxOutlineColor
 import net.tgnra.morningissue.ui.components.PaperButton
 import net.tgnra.morningissue.ui.components.PaperIcons
 import net.tgnra.morningissue.ui.components.SectionLabel
@@ -260,13 +267,23 @@ fun NewsstandScreen(
                 ) {
                     StandHeader()
                     if (printing == null) {
-                        // A Print now result outranks an older Extra edition notice.
-                        val message = printMessage?.let { stringResource(it) } ?: notice
-                        if (message != null) {
-                            NoticeLine(
-                                text = message,
+                        // A Print now result outranks an older Extra edition notice. Closing
+                        // one forgets that result: the printer's is held by the printer and the
+                        // Extra's is saved with the screen, so neither comes back on rotation
+                        // or on returning to the stand, only when there is a new result.
+                        val extraNotice = notice
+                        if (printMessage != null) {
+                            ResultNotice(
+                                text = stringResource(printMessage),
+                                onDismiss = { container.editionPrinter.dismissResult() },
                                 modifier = Modifier.padding(horizontal = spec.pageMargin).padding(top = 8.dp),
-                                isError = printMessage != null && printFailed,
+                                isError = printFailed,
+                            )
+                        } else if (extraNotice != null) {
+                            ResultNotice(
+                                text = extraNotice,
+                                onDismiss = { notice = null },
+                                modifier = Modifier.padding(horizontal = spec.pageMargin).padding(top = 8.dp),
                             )
                         }
                     }
@@ -371,6 +388,42 @@ internal fun printProgress(stage: BuildStage, sync: SyncStatus): Float = when (s
     is BuildStage.FetchingImages -> 0.95f
 }
 
+/**
+ * A result said once under the header (an edition printed from stored posts, nothing new to
+ * print, an error, an Extra edition printed), boxed like `NoticeLine`, with a close button at
+ * its end. The button is a 48 dp square with its own description; it has no animation, so it
+ * is the same in E-ink mode. [onDismiss] must forget the result, not just hide it.
+ */
+@Composable
+private fun ResultNotice(text: String, onDismiss: () -> Unit, modifier: Modifier = Modifier, isError: Boolean = false) {
+    val colors = MorningIssueTheme.colors
+    val ink = if (isError) colors.accent else colors.ink
+    Row(
+        modifier
+            .fillMaxWidth()
+            .border(1.dp, if (isError) colors.accent else boxOutlineColor)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            style = MorningIssueTheme.typography.label,
+            color = ink,
+            modifier = Modifier.weight(1f).padding(start = 12.dp, top = 10.dp, bottom = 10.dp),
+        )
+        val dismiss = stringResource(R.string.notice_dismiss)
+        Box(
+            Modifier
+                .size(48.dp)
+                .clickable(onClickLabel = dismiss, role = Role.Button, onClick = onDismiss)
+                .semantics { contentDescription = dismiss },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Close, contentDescription = null, tint = ink, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
 @Composable
 private fun StandHeader() {
     val colors = MorningIssueTheme.colors
@@ -389,7 +442,9 @@ private fun StandHeader() {
 /**
  * Said above the cover when a reset has passed without a new edition because the feeds had
  * nothing new. Set like a notice in the paper itself, between rules, not like an error: there
- * is nothing wrong. The link under it looks again: it runs Print now, which fetches every
+ * is nothing wrong. It has no close button, unlike a result notice: it is not news of something
+ * that happened but the standing reason the cover is an old one, and it goes when the next
+ * edition comes. The link under it looks again: it runs Print now, which fetches every
  * source and prints today's edition if anything has arrived since.
  */
 @Composable

@@ -428,6 +428,10 @@ How a run ends:
 | No feed could be reached and nothing stored was printable | The placeholder stays, with "Your sources could not be reached, and nothing new is stored to print. Try again when you are connected." and the button reading "Try again" |
 | The build threw | The placeholder stays, with "The edition could not be printed. Try again." and "Try again" |
 
+Each of these notices has a close button (an X: a 48 dp target with its own description, unanimated, so the same in E-ink mode). Closing one forgets the result, in the app-wide printer, so it does not come back on rotation or on returning to the stand; only a later run's result is said. Without it the notice goes at the next release time. The Extra edition's results ("Extra edition printed", "Extra edition reprinted", "Nothing recent from the new sources to print…") have the same button. Closing an error also turns "Try again" back into "Print now"; the placeholder itself stays.
+
+Not dismissible, on purpose: the "No new edition today" notice, which is the standing reason the cover is an old one and goes with the next edition; the offer of an Extra edition, whose "Not now" is its dismissal; and the placeholder. The Subscriptions desk notice is on the paper's back page, not the newsstand, and is unchanged.
+
 A fetch of text or pictures that fails does not undo the edition: it counts as printed, and a story without its text is fetched when it is opened.
 
 The run belongs to the app, not the screen: `EditionPrinter` is held by the app container and works in the app's scope, so it carries on through a rotation, another screen or the app going to the background, and the stand shows where it has got to when it comes back. It cannot be started twice; a second request while one is running does nothing. If the process is killed mid-run the edition, once stored, is on the stand at the next launch; before that the placeholder is back.

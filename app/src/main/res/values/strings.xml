@@ -35,6 +35,7 @@
     <string name="newsstand_unprinted_today">Today’s edition has not been printed.</string>
     <string name="newsstand_unprinted_evening">This evening’s edition has not been printed.</string>
     <string name="newsstand_unprinted_date">The edition of %1$s has not been printed.</string>
+    <string name="notice_dismiss">Close this notice</string>
     <string name="print_now">Print now</string>
     <string name="print_try_again">Try again</string>
     <string name="print_stage_syncing">Fetching your sources…</string>

@@ -181,6 +181,46 @@ class EditionPrinterTest {
     }
 
     @Test
+    fun aClosedNoticeIsForgottenUntilThereIsANewResult() = scope.runTest {
+        sync = { throw IOException("no network") }
+        val printer = printer()
+        printer.printNow()
+        advanceUntilIdle()
+        assertEquals(PrintState.Finished(PrintResult.PrintedFromStored, now), printer.state.value)
+
+        printer.dismissResult()
+        assertEquals("nothing to say after a rotation or on coming back", PrintState.Idle, printer.state.value)
+        printer.dismissResult()
+        assertEquals(PrintState.Idle, printer.state.value)
+
+        // A later run produces a new result, and that one is said.
+        somethingToPrint = false
+        editions.released = emptyList()
+        clock.now = now.plusSeconds(600)
+        printer.printNow()
+        advanceUntilIdle()
+        assertEquals(PrintState.Finished(PrintResult.Unreachable, now.plusSeconds(600)), printer.state.value)
+    }
+
+    @Test
+    fun closingANoticeDoesNothingWhileARunIsUnderWay() = scope.runTest {
+        val gate = CompletableDeferred<Unit>()
+        sync = {
+            gate.await()
+            SyncReport(feedsChecked = 3)
+        }
+        val printer = printer()
+        printer.printNow()
+
+        printer.dismissResult()
+
+        assertEquals(PrintState.Printing(BuildStage.Syncing), printer.state.value)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(PrintState.Finished(PrintResult.Printed, now), printer.state.value)
+    }
+
+    @Test
     fun aBuildThatThrowsIsAFailureAndRecordsNothing() = scope.runTest {
         buildFailure = IllegalStateException("disk full")
         val printer = printer()

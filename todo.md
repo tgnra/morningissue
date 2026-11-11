@@ -125,7 +125,7 @@ Built; see "When an edition failed to build" in `docs/how-it-works.md`. Not seen
 - [ ] Settings does not say when a changed time takes effect ("from tomorrow's edition"). The schedule knows; the screen does not show it.
 - [ ] A release time changed while the early build is running is not handled specially.
 - [ ] Onboarding's first edition is still built by onboarding itself, without the full-text and picture prefetch and without recording "nothing new". If its sync found nothing recent, the stand shows the placeholder rather than the "nothing recent" empty state until Print now has been pressed once.
-- [ ] A Print now result notice stays on the stand until the next release time or the end of the process; it cannot be dismissed.
+- [x] Result notices on the newsstand (Print now's and the Extra edition's) have a close button; a closed notice stays closed until there is a new result.
 - [ ] Print now's result says only whether the sources could be reached at all, not how many failed.
 
 ### Benchmark
