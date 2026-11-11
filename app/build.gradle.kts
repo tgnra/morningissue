@@ -96,6 +96,9 @@ android {
             all {
                 // Robolectric's Android 16 (API 36) runtime reaches into this JDK-internal package.
                 it.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
+                // `-PsimulationReport` (or `-PsimulationReport=<dir>`) makes the ranking simulation
+                // write a report per persona, by default to build/reports/simulation/.
+                project.findProperty("simulationReport")?.let { dir -> it.systemProperty("morningissue.simulation.report", dir) }
             }
         }
     }

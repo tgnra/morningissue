@@ -1,0 +1,1530 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:mi="https://morningissue.invalid/fixture">
+<channel>
+<title>Accidental Tech Podcast</title>
+<link>https://atp.fm/</link>
+<item>
+<title>716: Take the Null</title>
+<link>https://atp.fm/716</link>
+<pubDate>Thu, 05 Nov 2026 21:50:32 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/ovrfd2tfegrrx1vc/atp716.mp3" type="audio/mpeg" length="134083658"/>
+<mi:words>323</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Siri AI foibles
+
+<ul>
+<li><a href="https://www.thehighline.org/">The High Line</a></li>
+</ul></li>
+<li>🗣️ <a href="https://atp.fm/store">ATP Holiday Store</a> is here! 🗣️</li>
+<li>Follow-up:
+
+<ul>
+<li><a href="https://apps.apple.com/us/app/fineliner/id6820516041">Fineliner</a>
+
+<ul>
+<li>Fineliner 🤝🏻 ATP <a href="https://en.wikipedia.org/wiki/Graffiti_(Palm_OS)">Graffiti</a> <a href="https://cottonbureau.com/p/7UF3DK/shirt/atp-graffiti">shirt</a> (via <a href="https://social.lol/@njf/117525771077883489">Nick Foster</a>)
+
+<ul>
+<li><a href="https://www.icloud.com/iclouddrive/0dcrskX4StRuzIdyFz35fRtsA?sa=true">Download for use in Fineliner</a> (in Fineliner’s settings, Font, Import Profile; note that this will overwrite your icons and avatar, too)</li>
+<li><a href="https://en.wikipedia.org/wiki/Palm_V#Vx">Palm Vx</a></li>
+<li><a href="https://cloudpilot-emu.github.io/">PalmOS emulator</a></li>
+</ul></li>
+<li>Why <code>Overcast Radio LLC</code>?</li>
+</ul></li>
+<li>MacBook PROLED
+
+<ul>
+<li>Allison points out some dimensional errors on our part</li>
+<li>You can completely turn off the touch screen (via <a href="https://mastodon.social/@_inside/117554126793587024">Gui Rambo</a>)</li>
+<li>Pinch-to-zoom</li>
+<li><a href="https://mastodon.social/@_inside/117558442850691542">Glowing Apple logo implementation software details</a></li>
+<li>Avoiding keyboard marks with a <a href="https://www.aliexpress.us/item/3256808001900321.html">microfiber keyboard dust cover</a> (via Keith Huss)</li>
+<li>Rounded corners (via <a href="https://tech.lgbt/@jnadeau/117521195951482554">Jeff</a>)
+
+<ul>
+<li><a href="https://media.tech.lgbt/media_attachments/files/117/521/121/574/110/307/original/bb354681409aa880.mp4">Video</a></li>
+</ul></li>
+<li><a href="https://reimar-servas.de/writing/2026-07-07/the-law-of-the-instrument/">Reimar Servas show us why rounded corners are bad</a> (via <a href="https://unsung.aresluna.org/this-also-introduces-new-questions/">Marcin Wichary</a>)</li>
+</ul></li>
+<li>iPhone Duo
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=uF9sz3BEWhA&amp;t=1m15s">iPhone Duo will welcome you</a>… sometimes? (YouTube timestamp link to 1m15s)</li>
+<li> …</li></ul></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>715: Diner Lobster</title>
+<link>https://atp.fm/715</link>
+<pubDate>Thu, 29 Oct 2026 16:15:18 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/sjrmwni1vvnfemex/atp715.mp3" type="audio/mpeg" length="153352238"/>
+<mi:words>134</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Marco has a new toy
+
+<ul>
+<li><a href="https://iphonestockchecker.com/">Stock checker</a></li>
+</ul></li>
+<li>🗣️ <a href="https://atp.fm/store">ATP Holiday Store</a> is here! 🗣️</li>
+<li>🗣️ New <a href="https://atp.fm/join">ATP Member</a>’s Special: <a href="https://atp.fm/atp-insider-time-management">ATP Insider: Time Management</a> is here! 🗣️</li>
+<li><a href="https://www.apple.com/iphone-duo">iPhone Duo</a> first impressions
+
+<ul>
+<li><a href="https://mastodon.social/@stephenrobles/117502280150643367">Stephen Robles</a>’s <a href="https://shortcut.bot/3UMAHH5">shortcut</a></li>
+</ul></li>
+<li>New Apple announcements
+
+<ul>
+<li>Monday: <a href="https://www.apple.com/newsroom/2026/10/apple-gives-ipad-mini-its-biggest-update-ever/">iPad Mini</a></li>
+<li>Tuesday: <a href="https://www.apple.com/newsroom/2026/10/apple-unveils-new-imac-with-m6/">M6 iMac</a></li>
+<li>Tuesday: <a href="https://www.apple.com/newsroom/2026/10/apple-introduces-the-new-14-inch-macbook-pro-with-m6/">M6 MacBook Pro</a></li>
+<li>Wednesday: <a href="https://www.apple.com/newsroom/2026/10/apple-unveils-groundbreaking-macbook-pro-with-proled-xdr-display/">OLED MacBook Pro</a>
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=hnZI5uUSdEo">Launch video</a></li>
+<li><a href="https://www.youtube.com/watch?v=WzuIZLoHqqA">Advertisement</a></li>
+<li>🚨 <a href="https://www.theverge.com/tech/1020549/macbook-studio-touchscreen-hands-on">THE LID LIGHT IS BACK!</a> 🚨</li>
+<li><a href="https://www.wired.com/story/the-inside-story-of-why-apple-finally-brought-a-touch-display-to-the-mac/">Stephen Levy at Wired</a></li>
+<li><a href="https://developer.apple.com/videos/play/tech-talks/111456/">Design for Touch on Mac</a></li>
+</ul></li>
+<li>Mac Studio with 512 GB RAM</li>
+</ul></li>
+<li>Post-show: Marco’s new app, <a href="https://apps.apple.com/us/app/fineliner/id6820516041">Fineliner</a>
+
+<ul>
+<li><a href="https://parakeet.co/">Parakeet</a></li>
+</ul></li>
+<li><a href="https://atp.fm/join">Members-only</a> ATP Overtime: Is Apple re-entering the server market??
+
+<ul>
+<li><a href="https://www.macworld.com/article/3237195/apple-may-revive-xserve-for-the-ai-market.html">Macworld: Apple may revive Xserve for the AI market</a></li>
+<li><a href="https://www.theinformation.com/articles/apple-considers-return-server-market-talked-nvidia-use-network-tech">The Information</a></li>
+<li><a href="https://x.com/markgurman/status/2100252758859489391">Gurman responds on Twitter</a></li>
+</ul></li>
+</ul>
+
+<p>Sponsored by:</p>
+
+<ul>
+<li><a href="https://granola.ai/ATP">Granola</a>: The AI notepad for back-to-back meetings</li>
+</ul>
+
+<p><a href="https://atp.fm/join">Become a member</a>for ATP Overtime, ad-free episodes, member specials, and our …</p>]]></description>
+</item>
+<item>
+<title>714: Get the Bigger Pizza</title>
+<link>https://atp.fm/714</link>
+<pubDate>Fri, 23 Oct 2026 18:32:47 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/ymjvn2o4renjcwxz/atp714.mp3" type="audio/mpeg" length="139878953"/>
+<mi:words>278</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: 
+
+<ul>
+<li><a href="https://johnsofbleecker.com/">John’s of Bleecker</a></li>
+<li><a href="https://cdn.atp.fm/images/20261022-marco-and-casey-johns-of-bleecker.jpeg">Marco and Casey at John’s</a></li>
+</ul></li>
+<li>🗣️ <a href="https://atp.fm/store">ATP Holiday Store</a> is here! 🗣️</li>
+<li>Follow-up:
+
+<ul>
+<li>HomeView
+
+<ul>
+<li><a href="https://www.bloomberg.com/news/newsletters/2026-10-18/apple-homeview-with-robotic-arm-new-mac-ipad-mini-nov-6-release-iphone-duo">When was the HomeView hardware created?</a></li>
+<li>Is it expensive? (via Paul Heering)
+
+<ul>
+<li><a href="https://link.amazon/B0fgEXqOl">Amazon Echo Show 5</a>: $99</li>
+<li><a href="https://link.amazon/B0aXNt5TH">Amazon Echo Show 8</a>: $199</li>
+<li><a href="https://link.amazon/B0e1VVPSx">Amazon Echo Show 11</a>: $249</li>
+<li><a href="https://link.amazon/B0gpNfhfE">Amazon Echo Show 15</a>: $349</li>
+</ul></li>
+<li>Wall-mount &amp; regular HomeView pricing
+
+<ul>
+<li>Is it to prevent cheapskates? (via <a href="https://mas.to/@mvk/117443092141553227">mvk</a>)</li>
+<li>Is it to prevent add-on dinguses (via <a href="https://appdot.net/@bennomatic/117448105760135984">Ben O’Matic</a>)</li>
+</ul></li>
+<li><a href="https://mastodon.social/@janwedek/117444628829738342">Knock-offs coming soon?</a></li>
+<li>Turns out, <a href="https://hachyderm.io/@jimmylittle/117451323665820075">Jimmy</a> is <em>that</em> guy. 😏</li>
+<li><a href="https://mastodon.social/@lo_fye/117451230093340217">Phone screen vs. Duo screen</a></li>
+<li>Will Marco be adding CarPlay support? (via <a href="https://mastodon.social/@rickplayswarr/117456919940552543">Rick Allen</a>)</li>
+</ul></li>
+<li>Apple TV
+
+<ul>
+<li>Price history
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=drsuHb_BYZo&amp;t=10m14s">March, 2015: Apple lowers the price from $99 → $69</a> (timestamp link to 10m14s)</li>
+<li><a href="https://glog.glennf.com/blog/2026/10/17/apple-tv-price-history/">Glenn Fleishman’s chart</a></li>
+</ul></li>
+<li><a href="https://mastodon.social/@JasonEccles/117449909129018776">Microphones and HomePods</a></li>
+<li><a href="https://en.wikipedia.org/wiki/AV1">AV1</a>(via Michael Barnes …</li></ul></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>713: I Have Medium Hopes</title>
+<link>https://atp.fm/713</link>
+<pubDate>Thu, 15 Oct 2026 19:24:37 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/czlnqljwtkwxcdrw/atp713.mp3" type="audio/mpeg" length="129603900"/>
+<mi:words>129</mi:words>
+<description><![CDATA[<ul>
+<li>Apple’s New Home-Related Products
+
+<ul>
+<li><a href="https://www.apple.com/apple-homeview/">HomeView</a>
+
+<ul>
+<li><a href="https://www.apple.com/newsroom/2026/10/meet-apple-homeview-a-new-way-to-enjoy-entertainment-and-manage-the-home/">Newsroom</a></li>
+<li><a href="https://en.wikipedia.org/wiki/IMac_G4">iMac G4</a></li>
+<li><a href="https://www.youtube.com/watch?v=hkrYiZ_g9tw">Intro video</a></li>
+<li><a href="https://www.youtube.com/watch?v=QeQAXuQpGEA">TV commercial</a></li>
+<li><a href="https://www.se.com/ww/en/about-us/newsroom/news/press-releases/Schneider-Electric-and-Apple-introduce-new-Smart-Thermostat-for-Apple-Home-Collection-and-Power-Mount-for-Apple-HomeView-6ace265b43c902c2d70a3335/">Schneider press release</a></li>
+<li><a href="https://www.wired.com/story/apple-homeview-smart-display/">Wired’s review</a></li>
+<li><a href="https://developer.apple.com/videos/play/wwdc2026/212/">WWDC 2026: Rev Up Your CarPlay App</a></li>
+<li><a href="https://developer.apple.com/support/terms/apple-developer-program-license-agreement/#ADPLA6.4">Developer agreement</a></li>
+<li><a href="https://www.macrumors.com/2026/10/13/rip-homeos/">“HomeView” &amp; “homeOS”</a></li>
+</ul></li>
+<li><a href="https://www.apple.com/apple-tv-4k/">Apple TV 4K gen 4</a>
+
+<ul>
+<li><a href="https://en.wikipedia.org/wiki/Nvidia_Shield_TV">Nvidia Shield TV</a></li>
+<li><a href="https://www.apple.com/newsroom/2026/10/apple-unveils-the-new-apple-tv-4k/">Newsroom</a></li>
+<li><a href="https://www.youtube.com/watch?v=bNdmGYamiWM">Intro video</a></li>
+<li><a href="https://buyersguide.macrumors.com/#Apple_TV">MacRumors Buyer’s Guide</a></li>
+<li><a href="https://www.apple.com/shop/product/mlfc4am/a/siri-remote">New Siri Remote</a>
+
+<ul>
+<li><a href="https://www.theverge.com/gadgets/1011069/apple-tv-remote-find-my">Precision finding requirements</a></li>
+</ul></li>
+</ul></li>
+<li><a href="https://www.apple.com/homepod-mini/">HomePod mini 2</a>
+
+<ul>
+<li><a href="https://www.apple.com/newsroom/2026/10/apple-announces-the-next-generation-of-homepod-mini/">Newsroom</a></li>
+<li><a href="https://www.youtube.com/watch?v=xLL4UnrLNWs">Intro video</a></li>
+</ul></li>
+<li><a href="https://www.apple.com/home/accessories/">Home collection</a>
+
+<ul>
+<li><a href="https://www.apple.com/newsroom/2026/10/introducing-apple-home-collection-a-new-lineup-of-smart-home-accessories/">Newsroom</a></li>
+<li><a href="https://www.macrumors.com/2026/10/13/apple-home-collection/">MacRumors</a></li>
+<li>(See also the Schneider press release above)</li>
+</ul></li>
+</ul></li>
+<li>Post-show: Casey got a <a href="https://store.ui.com/us/en/products/utr-lr">UTR-LR</a>
+
+<ul>
+<li><a href="https://store.ui.com/us/en/category/wifi-special-devices/collections/unifi-travel-router/products/utr">UTR</a></li>
+<li><a href="https://store.ui.com/us/en/products/usw-flex-mini">Flex Mini</a></li>
+</ul></li>
+<li><a href="https://atp.fm/join">Members-only</a> ATP Overtime: Regarding <a href="https://nonfunctional.substack.com/p/passkeys-are-a-trap-do-not-use-them">Passkeys are a Trap</a>…
+
+<ul>
+<li><a href="https://hachyderm.io/@rmondello/117428258722253709">Ricky Mondello’s response</a></li>
+<li><a href="https://scotthelme.co.uk/passkeys-are-not-a-trap/">Scott Helme’s response</a></li>
+</ul></li>
+</ul>
+
+<p>Sponsored by:</p>
+
+<ul>
+<li><a href="https://tailscale.com/accidentaltech">Tailscale</a>: A secure network that just works</li>
+<li><a href="https://factormeals.com/atp50off">Factor</a>: Healthy Eating, Made Easy</li>
+<li><a href="https://quince.com/atp">Quince</a>: Elevated essentials and staples that last</li>
+</ul>
+
+<p><a href="https://atp.fm/join">Become a member</a> for ATP Overtime, ad-free episodes, member specials, and our early-release, unedited “bootleg” feed!</p>
+]]></description>
+</item>
+<item>
+<title>712: Mildly Technologically Traumatized</title>
+<link>https://atp.fm/712</link>
+<pubDate>Thu, 08 Oct 2026 18:50:12 GMT</pubDate>
+<enclosure url="https://traffic.libsyn.com/atpfm/atp712.mp3" type="audio/mpeg" length="132189020"/>
+<mi:words>258</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Marco tries a <a href="https://waymo.com/">Waymo</a></li>
+<li>Follow-up:
+
+<ul>
+<li>Casey’s <a href="https://www.bmwusa.com/my-bmw-app.html">MyBMW</a> foibles
+
+<ul>
+<li><a href="https://imazing.com/">iMazing</a></li>
+<li><a href="https://approov.io">Approov</a>
+
+<ul>
+<li><a href="https://approov.io/customer/bmw/">BMW case study</a></li>
+</ul></li>
+<li>Screen sharing</li>
+<li><a href="https://en.wikipedia.org/wiki/On-board_diagnostics#OBD-II">OBD-II</a></li>
+<li>Home Assistant + Pushover + Shortcuts? (via <a href="https://mastodon.tz.is/@khaost/117378952428064081">Khaos Tian</a>)</li>
+<li><a href="https://www.amazon.com/GL-iNet-GL-RMQ1-Pocket-Remote-Laptop/dp/B0H6ZL5VVM/?tag=marcoorg-20">GL.iNet Comet Q</a></li>
+<li><a href="https://pikvm.org/">PiKVM</a></li>
+<li><a href="https://lexontech.org/claude-writes-code-i-author-the-apps">Lex Friedman: <em>Claude writes code; I author the apps</em></a></li>
+</ul></li>
+<li><a href="https://www.youtube.com/watch?v=KvLWuK2TU-w">AirPower desk video</a> was by HTX Studio
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=oVpqNDeM_Ic">…who previously interviewed Tim Cook!</a> (via Elijah Yap)</li>
+<li><a href="https://weibo.com/tv/show/1034:4693377279787112">Original video</a> (via <a href="https://mstdn.social/@Adeiko/117389077003870126">Adeiko</a>)</li>
+</ul></li>
+<li>Ubiquiti home Wi-Fi vs. Eero
+
+<ul>
+<li><a href="https://atp.fm/710">Previously on ATP Overtime</a></li>
+<li><a href="https://mastodon.social/@rolandlebrun/117336421103910300">A positive anecdote</a></li>
+<li><a href="https://mastodon.social/@milescederman/117346815060761111">A negative anecdote</a></li>
+</ul></li>
+<li>FiOS <a href="https://en.wikipedia.org/wiki/CableCARD">CableCARD</a> discontinuation
+
+<ul>
+<li><a href="https://relay.fm/rd/295">RecDiffs #295: If I Adjust for Europe</a></li>
+</ul></li>
+<li><a href="https://mastodon.social/@siracusa/117213364710322535">TiVo’s desperation</a></li>
+<li><a href="https://mastodon.social/@siracusa/117371422820166077">One-AirPod vs. two-AirPod audio settings</a>
+
+<ul>
+<li><code>Settings</code> → <code>Accessibility</code> → <code>AirPods</code> → <em>your AirPods</em></li>
+</ul></li>
+<li>M6/A20 Pro details
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=t8bxkCKNiuA">High Yield &amp; SemiAnalysis video on A20 Pro</a>
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=t8bxkCKNiuA&amp;t=577s">Timestamp link to cores discussion @ 9m37s</a></li>
+</ul></li>
+<li><a href="https://www.youtube.com/watch?v=uA7WLmlg1kM">High Yield &amp; SemiAnalysis video on the M6 vs. M5</a>
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=uA7WLmlg1kM&amp;t=489s">Timestamp link …</a></li></ul></li></ul></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>711: Hot Dog on an Actuator</title>
+<link>https://atp.fm/711</link>
+<pubDate>Thu, 01 Oct 2026 13:37:11 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/s3ppazy4c2tecgq0/atp711.mp3" type="audio/mpeg" length="114771422"/>
+<mi:words>247</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Marco has M6 performance numbers</li>
+<li>🗣️ It’s <a href="https://stjude.org/atp">St. Jude</a> time! 🗣️
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=y4PRZ4WanVI">Podcastathon</a> on <a href="https://everytimezone.com/?t=6abef400,960">Friday October 2 @ noon eastern</a></li>
+<li><a href="https://themarcooffset.com/">The Marco Offset™</a></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li><a href="https://link.amazon/B0bnhUnfh">John’s mouse pad</a> (via Andy)
+
+<ul>
+<li><a href="https://reimar-servas.de/writing/2026-07-07/the-law-of-the-instrument/">Rounded corners are, bad, maybe?</a></li>
+<li><a href="https://www.youtube.com/shorts/yAabREkiUEs">AirPower… desk?</a> 🤨</li>
+</ul></li>
+<li>John’s weird AirPods 5 issues</li>
+<li>Finding Intel apps in macOS
+
+<ul>
+<li><code>System Settings</code> → <code>General</code> → <code>About</code> → <code>Intel-based Apps</code></li>
+<li><a href="https://support.apple.com/en-us/102527">Learn more…</a></li>
+</ul></li>
+<li><a href="https://browser.geekbench.com/metal-benchmarks">M5 Ultra Mac Studio GPU scores</a></li>
+<li><a href="https://www.macrumors.com/2026/09/22/new-mac-mini-ssd-cant-be-removed/">New Mac mini storage caveats</a></li>
+<li><a href="https://www.youtube.com/watch?v=JcQHz43MF7U&amp;t=8m50s">𝓍OS 27 Screen Time woes</a> (Timestamp link to 8m50s)</li>
+<li>iOS 27 vs. <a href="https://pi-hole.net/">Pi-hole</a>
+
+<ul>
+<li><a href="https://mstdn.social/@dazfuller/117307714035903073">dazfuller</a></li>
+<li><a href="https://mastodon.social/@Aaronvegh/117315035283785272">Aaron Vegh</a></li>
+</ul></li>
+<li>GM vs. CarPlay
+
+<ul>
+<li><a href="https://caseyliss.com/2026/9/21/sure-just-keep-being-obstinate-im-sure-thats-fine">Casey’s blog post</a></li>
+<li><a href="https://www.caseyliss.com/2026/9/25/im-still-right-but-im-also-wrong">Casey’s mea culpa</a></li>
+<li><a href="https://www.macrumors.com/2026/09/21/gm-stance-on-apple-carplay/">Wait, just kidding</a></li>
+</ul></li>
+</ul></li>
+<li>Apple Watch is listening…
+
+<ul>
+<li><a href="https://mastodon.social/@steveriggins/117248277016803863">Steve Riggins</a></li>
+<li>What about “Hey, Siri”?</li>
+<li><a href="https://pxlnv.com/linklog/live-rewind-audio-intelligence/">Nick Heer</a></li>
+<li><a href="https://www.youtube.com/watch?v=pOX1l1edBME">MKBHD</a></li>
+</ul></li>
+<li>Ask ATP:
+
+<ul>
+<li>What’s the highest mileage we’ve ever gotten to in a car? (via Elliot)
+
+<ul>
+<li><a href="https://en.wikipedia.org/wiki/Saturn_S-Series#First_generation_(1991)">Saturn SL2</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Nissan_300ZX#Z32">Nissan 300ZX</a></li>
+<li><a href="https://www.autotrader.com/cars-for-sale/vehicle/782380647">Nissan …</a></li></ul></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>710: That New Mouse Pad Feeling</title>
+<link>https://atp.fm/710</link>
+<pubDate>Thu, 24 Sep 2026 17:13:33 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/mupxmwzqadfzlu12/atp710.mp3" type="audio/mpeg" length="128176680"/>
+<mi:words>207</mi:words>
+<description><![CDATA[<ul>
+<li>🗣️ It’s <a href="https://stjude.org/atp">St. Jude</a> time! 🗣️
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=y4PRZ4WanVI">Podcastathon</a> on <a href="https://everytimezone.com/?t=6abef400,960">Friday October 2 @ noon eastern</a></li>
+<li><a href="https://themarcooffset.com/">The Marco Offset™</a></li>
+<li><a href="https://www.spaghettimonster.org">Flying Spaghetti Monster</a></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li>New treats
+
+<ul>
+<li>John
+
+<ul>
+<li>iPhone 18 Pro
+
+<ul>
+<li><a href="https://bullstrap.co/products/the-original-case-black-edition">John’s case</a></li>
+</ul></li>
+<li>AirPods 5 with Wireless Charging Case
+
+<ul>
+<li><a href="https://en.wikipedia.org/wiki/IP_code#Code_breakdown">IP57</a>
+
+<ul>
+<li>Dust protected</li>
+<li>Immersion, up to 1m, for 30 minutes</li>
+</ul></li>
+<li>Oddities</li>
+<li>Volume control</li>
+</ul></li>
+</ul></li>
+<li>Marco
+
+<ul>
+<li>Apple Watch S12 Ceramic
+
+<ul>
+<li><a href="https://ohai.social/@umpalumpa/117296289999179896">Apple Watch S12 bezels are <em>bigger</em> than S10</a>?</li>
+</ul></li>
+<li>Mac mini</li>
+</ul></li>
+<li>Casey: Apple Watch S12 Aluminum</li>
+</ul></li>
+<li>How <em>should</em> Apple have handled iPhone Duo dev tools? (via Oscar Echeverri)</li>
+<li>Photos libraries on external drives (via Larry Fieman)</li>
+<li><a href="https://www.macrumors.com/2026/09/18/m5-ultra-and-m6-chip-gpu-benchmarks/">Preliminary M5 Ultra <strong>GPU</strong> Geekbench scores</a>
+
+<ul>
+<li><a href="https://cdn.atp.fm/images/20260920-m5-ultra-gpu-geekbench.png">Chart</a></li>
+</ul></li>
+<li>Apple watch “Readiness Score” <a href="https://erictopol.substack.com/p/the-big-holes-in-wearable-heart-rate">seem to be mostly bunk</a>? (via <a href="https://mastodon.social/@MGKatz036/117298293892661222">Michael Katz</a>)</li>
+</ul></li>
+<li>iPhone Duo dev tools released
+
+<ul>
+<li><a href="https://mastodon.social/@Aaronvegh/117293482132691971">Aaron Vegh’s video</a></li>
+</ul></li>
+<li>Post-show: Marco’s Mac mini update
+
+<ul>
+<li><a href="https://www.ui.com/switching/wan">Ubiquiti WAN Switch</a></li>
+<li><a href="https://www.amazon.com/dp/B0H6ZL5VVM?tag=marcoorg-20">GL.iNet Comet Q</a> and <a href="https://www.amazon.com/dp/B0FDQJ1V7J/?tag=marcoorg-20"> …</a></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>709: Steel-Cable Insurance</title>
+<link>https://atp.fm/709</link>
+<pubDate>Thu, 17 Sep 2026 21:26:09 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/svdeou1mmfjhwknm/atp709.mp3" type="audio/mpeg" length="123083911"/>
+<mi:words>334</mi:words>
+<description><![CDATA[<ul>
+<li>🗣️ New <a href="https://atp.fm/join">ATP Member’s</a> Special: <a href="https://atp.fm/atp-insider-show-q-a">ATP Insider: Show Q&amp;A</a></li>
+<li>🗣️ It’s <a href="https://stjude.org/atp">St. Jude</a> time! 🗣️
+
+<ul>
+<li><a href="https://themarcooffset.com/">The Marco Offset™</a></li>
+</ul></li>
+<li><a href="https://fxrant.blogspot.com/2026/09/apple-event-film-2018-vs-james-bond.html">Todd Vaziri on James Bond homages in the event video</a>
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=8qm8NANO_ow">Comparison video</a></li>
+<li><a href="https://fxrant.blogspot.com/2018/09/apple-event-film-2018-vs-mission.html">Previously, in 2018</a></li>
+</ul></li>
+<li><a href="https://www.instagram.com/p/DdMvcGNGVZI/">Making of</a> (via <a href="https://mastodon.social/@techzha/117261922485112302">Techzha</a>)</li>
+<li>Preliminary <a href="https://www.geekbench.com/">Geekbench</a> scores
+
+<ul>
+<li>A20 Pro (iPhones 18 Pro)
+
+<ul>
+<li><a href="https://browser.geekbench.com/v6/cpu/19143028">CPU</a></li>
+<li><a href="https://browser.geekbench.com/v6/compute/6873610">GPU</a></li>
+</ul></li>
+<li>M6
+
+<ul>
+<li><a href="https://browser.geekbench.com/v7/cpu/354109">CPU</a></li>
+<li><a href="https://browser.geekbench.com/v6/compute/6886687">GPU</a></li>
+</ul></li>
+<li>M5 Ultra
+
+<ul>
+<li><a href="https://browser.geekbench.com/v7/cpu/354092">CPU</a></li>
+</ul></li>
+</ul></li>
+<li><a href="https://www.macrumors.com/2026/09/12/iphone-18-pro-max-us-model-difference/">iPhone 18 Pro Max &amp; Apple C2</a></li>
+<li>Solar phone charging? 🤔 (via <a href="https://iosdev.space/@flanker/117252108702198590">flanker</a>)
+
+<ul>
+<li><a href="https://engineered.network/pragmatic/episode-38-watch-this-time-and-space/">Pragmatic #38: Watch This Time and Space</a></li>
+</ul></li>
+<li>Aperture blades on iPhone 18 Pro / Pro Max camera
+
+<ul>
+<li><a href="https://youtube.com/watch?v=ohqxP8EEumo">MKBHD’s review</a></li>
+<li><a href="https://www.youtube.com/watch?v=XYH9RPdRfGs">PetaPixel’s Review</a></li>
+<li><a href="https://www.slrlounge.com/diffraction-aperture-and-starburst-effects/">Explaining starbursts</a></li>
+<li><a href="https://www.reddit.com/r/photography/comments/647rup/starburst_effect_with_9_straight_and_7_rounded/">Straight vs. rounded examples</a></li>
+<li><a href="https://www.dpreview.com/forums/threads/do-round-aperture-blades-create-starbursts.4288404/">Debate on DPReview forums</a></li>
+</ul></li>
+<li><a href="https://www.youtube.com/watch?v=ohqxP8EEumo&amp;t=13m34s">iPhones 18 Pro Face ID</a> (YouTube timestamp link to 13m34s)</li>
+<li>iPhone Duo
+
+<ul>
+<li>How will <a href="https://support.apple.com/en-us/120421">iPhone Mirroring</a> work?</li>
+<li>No Action Button 💔</li>
+<li><a href="https://cdn.atp.fm/images/20260916-iphone-duo-split-keyboard.jpg">The Duo <em>does</em> have a split keyboard</a></li>
+<li><em>An aside about …</em></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>708: Primary, Tertiary, and Third Cousin</title>
+<link>https://atp.fm/708</link>
+<pubDate>Thu, 10 Sep 2026 18:04:00 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/r2p5m1f2suhhrwv5/atp708.mp3" type="audio/mpeg" length="176807614"/>
+<mi:words>96</mi:words>
+<description><![CDATA[<ul>
+<li>🗣️ It’s <a href="https://stjude.org/atp">St. Jude</a> time! 🗣️
+
+<ul>
+<li><a href="https://themarcooffset.com/">The Marco Offset™</a></li>
+</ul></li>
+<li><a href="https://www.youtube.com/watch?v=39BalPDuTo0">September 2026 event</a>
+
+<ul>
+<li><a href="https://www.macrumors.com/2026/09/09/iphone-18-pro-iphone-duo-new-c2-modem/">MacRumors on the cellular chips</a></li>
+<li><a href="https://deepmind.google/models/synthid/">SynthID Standard</a></li>
+<li><a href="https://www.apple.com/privacy/docs/Audio_Intelligence_Privacy_Overview_Sep_2026.pdf">Apple Audio Intelligence Privacy Overview</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Surface_Duo">Surface Duo</a></li>
+<li><a href="https://en.wikipedia.org/wiki/PowerBook_Duo">PowerBook Duo</a></li>
+<li><a href="https://mastodon.design/@rafa/117242722357944561">Rafa’s toot about layouts</a></li>
+<li><a href="https://developer.apple.com/iphone-duo/">Apple Developer Videos</a></li>
+</ul></li>
+<li>Post-show: Jetty update</li>
+<li><a href="https://atp.fm/join">Members-only</a> ATP Overtime: <a href="https://www.apple.com/newsroom/2026/08/apple-announces-changes-for-apps-in-the-european-union/">Apple’s new business terms in the EU</a>
+
+<ul>
+<li><a href="https://stratechery.com/2026/apple-settles-with-e-u-u-s-app-store-fees-att-rules-in-germany/">Ben Thompson’s breakdown</a></li>
+<li><a href="https://daringfireball.net/2026/08/apple_eu_business_terms_conceding_little">Gruber’s take</a></li>
+<li><a href="https://www.independent.ie/business/apple-will-change-its-app-store-rules-to-end-its-dispute-with-the-eu/a/160196535.html">Adrian Weckler at Irish Independent</a></li>
+</ul></li>
+</ul>
+
+<p>Sponsored by:</p>
+
+<ul>
+<li><a href="https://elevenlabs.io/atp">ElevenLabs</a>: AI Customer Support Agents</li>
+<li><a href="https://factormeals.com/atp50off">Factor</a>: Healthy Eating, Made Easy</li>
+<li><a href="https://quince.com/atp">Quince</a>: Elevated essentials and staples that last</li>
+</ul>
+
+<p><a href="https://atp.fm/join">Become a member</a> for ATP Overtime, ad-free episodes, member specials, and our early-release, unedited “bootleg” feed!</p>
+]]></description>
+</item>
+<item>
+<title>707: Haunting the Campus Like a Ghost</title>
+<link>https://atp.fm/707</link>
+<pubDate>Thu, 03 Sep 2026 15:43:50 GMT</pubDate>
+<enclosure url="https://traffic.libsyn.com/atpfm/atp707.mp3" type="audio/mpeg" length="120770476"/>
+<mi:words>197</mi:words>
+<description><![CDATA[<ul>
+<li>🗣️ It’s <a href="https://stjude.org/atp">St. Jude</a> time! 🗣️
+
+<ul>
+<li><a href="https://themarcooffset.com/">The Marco Offset™</a></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=SpVOhPps6x4">Luz fooled <em>me</em>, Jerry!</a>
+
+<ul>
+<li><a href="https://hachyderm.io/@dluz/117156963371155238">Extremely convincing fake</a> by Daniel Luz</li>
+<li><a href="https://hachyderm.io/@dluz/117174619556944296">Mea culpa</a></li>
+</ul></li>
+<li><a href="https://www.macrumors.com/2026/08/31/apple-edits-mac-studio-press-release/">Apple fooled us all</a></li>
+<li>Siri blobs fix
+
+<ul>
+<li><code>System Settings</code> → <code>Screen Time</code> → <code>Content &amp; Privacy</code> → <code>Content &amp; Privacy</code> (turn the switch on) → <code>Siri</code> → <code>Writing Assistance</code> (turn the switch off)</li>
+</ul></li>
+<li>John is happy with new Macs timetable</li>
+<li>Are photo libraries on external disks supported?
+
+<ul>
+<li><a href="https://support.apple.com/en-us/108345">Knowledge base</a></li>
+<li><a href="https://irisphotos.app">Iris</a></li>
+</ul></li>
+<li><a href="https://tv.apple.com/us/sporting-event/boston-red-sox-at-new-york-yankees/umc.cse.3a1vg5b2haabl4irg2b8zj8cj?playableId=tvs.sbd.4000%3A823504_COND">Yankees / Sox in Apple Vision Pro</a>
+
+<ul>
+<li><a href="https://dithering.passport.online/member/episode/vision-pro-baseball">Dithering</a></li>
+</ul></li>
+<li>Motivations for <a href="https://tnzr.org/sme/">SME</a> adoption (via <a href="https://ioc.exchange/@shac/117173765879904682">shac ron</a>)</li>
+</ul></li>
+<li>✅ Tim Cook exit interview
+
+<ul>
+<li><a href="https://atp.fm/688">AT 688: A Company Man</a> at <a href="https://overcast.fm/+ABQnv7jV4P8/01:08:29">1h8m29s</a> (Overcast timestamp link)</li>
+</ul></li>
+<li><a href="https://www.bloomberg.com/news/articles/2026-08-31/apple-s-phil-schiller-steps-down-from-running-app-store-and-product-events">Phil takes another step toward the door</a>
+
+<ul>
+<li><a href="https://www.theverge.com/tech/986869/apple-phil-schiller-stepping-down">Emma Roth at The Verge</a></li>
+<li><a href="https://atp.fm/317">Phil on ATP #317: We’re Customers Too</a></li>
+</ul></li>
+<li>iPhone 17 / 17 Pro / 17 …</li></ul>]]></description>
+</item>
+<item>
+<title>706: No One Is Getting a Good Deal Tonight</title>
+<link>https://atp.fm/706</link>
+<pubDate>Thu, 27 Aug 2026 19:13:42 GMT</pubDate>
+<enclosure url="https://traffic.libsyn.com/atpfm/atp706.mp3" type="audio/mpeg" length="151835740"/>
+<mi:words>310</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Marco’s <a href="https://en.wikipedia.org/wiki/Casement_window">casement windows</a>
+
+<ul>
+<li><a href="https://cdn.atp.fm/images/20260827-art-clips.jpg?v1">Screen clips</a></li>
+<li><a href="https://cdn.atp.fm/images/20260826-marco-screen-clips-installed.jpeg">Screen clips, installed</a> (white prototypes for visibility)</li>
+<li><a href="https://us.store.bambulab.com/products/tpu-for-ams">TPU for AMS</a></li>
+</ul></li>
+<li>🗣️ New <a href="https://atp.fm/join">Member’s</a> Special: <a href="https://atp.fm/atp-movie-club-nausica-of-the-valley-of-the-wind">ATP Movie Club: Nausicaä of the Valley of the Wind</a></li>
+<li>Follow-up:
+
+<ul>
+<li>macOS 27 UI tweaks
+
+<ul>
+<li><a href="https://mastodon.social/@marioguzman/117112155575075681">Redesigned stoplights in β6</a>
+
+<ul>
+<li><a href="https://files.mastodon.social/media_attachments/files/117/112/189/067/102/518/original/c9e65ba7d8b3bb15.mp4">Video</a></li>
+<li><a href="https://cdn.atp.fm/images/20260822-macos-27-b6-window-widgets.png">Stoplights</a></li>
+<li><a href="https://tech.lgbt/@jnadeau/117112840412648939">Stretchy buttons</a>
+
+<ul>
+<li><a href="https://media.tech.lgbt/media_attachments/files/117/112/816/021/096/472/original/022be5d7698d1ef8.mp4">Video</a></li>
+</ul></li>
+<li><a href="https://en.wikipedia.org/wiki/Porsche_911_(996)">Porsche 911, 996 generation</a>
+
+<ul>
+<li><a href="https://www.jalopnik.com/in-defense-of-the-fried-egg-porsches-best-headlights-1846160096/">In defense of the fried egg Porsches</a></li>
+</ul></li>
+<li><a href="https://mastodon.social/@twostraws/117164329685617194">Turning off the Siri logo</a></li>
+</ul></li>
+<li><a href="https://cdn.atp.fm/images/20260822-macos-27-beta-6-preview-icon.png">macOS 27 got the new Preview icon</a></li>
+</ul></li>
+<li>LLM determinism when <code>temperature = 0</code>
+
+<ul>
+<li><a href="https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/">Write-up by Horace He</a></li>
+<li><a href="https://en.wikipedia.org/wiki/IEEE_754">IEEE standard for Floating-Point Arithmetic</a></li>
+</ul></li>
+<li><a href="https://www.macrumors.com/2026/08/20/ios-27-shared-albums-eat-into-icloud-storage/">𝓍OS 27 Photos Shared Album gotchas</a>
+
+<ul>
+<li><a href="https://mastodon.social/@agiletortoise/117106350911112137">See also</a></li>
+</ul></li>
+<li><a href="https://www.youtube.com/watch?v=mRT_YVdAgB0">Other people’s phones</a>
+
+<ul>
+<li><a href="https://mastodon.social/@stephenrobles/117156218950058479">Not sped up! All 1×!</a></li>
+<li><code>i</code> vs. <code>I</code></li>
+</ul></li>
+</ul></li>
+<li><a href="https://nr.apple.com/Dm6U5J5cY4">Apple iPhone event announced</a></li>
+<li>New <a href="https://www.apple.com/newsroom/2026/08/apple-unveils-a-more-powerful-mac-mini-featuring-the-all-new-m6-and-m5-pro/">Mac mini</a> and <a href="https://www.apple.com/newsroom/2026/08/apple-introduces-new-mac-studio-with-m5-max-and-m5-ultra/">Mac Studio</a>
+
+<ul>
+<li><a href="https://bsky.app/profile/highyield.bsky.social/post/3mtvxz6pnvs2c">Core size comparison</a></li>
+<li><a href="https://en.wikipedia.org/wiki/AArch64#ARMv8.7-A_and_ARMv9.2-A">SME</a> replaces <a href="https://en.wikipedia.org/wiki/Advanced_Matrix_Extensions">AMX</a> in the M6
+
+<ul>
+<li><a href="https://github.com/tzakharko/m4-sme-exploration">Exploratory Github Repo</a></li>
+<li><a href="https://github.com/corsix/amx">AMX instruction set</a></li>
+<li><a href="https://developer.arm.com/community/arm-community-blogs/b/architectures-and-processors-blog/posts/arm-scalable-matrix-extension-introduction">SME Introduction</a></li>
+<li><a href="https://tnzr.org/sme/">Hello SME</a></li>
+<li> …</li></ul></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>705: Relentless in a Gentle Way</title>
+<link>https://atp.fm/705</link>
+<pubDate>Thu, 20 Aug 2026 20:45:50 GMT</pubDate>
+<enclosure url="https://traffic.libsyn.com/atpfm/atp705.mp3" type="audio/mpeg" length="144362604"/>
+<mi:words>216</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Marco may have to dance with <a href="https://www.home-assistant.io">the devil</a>
+
+<ul>
+<li><a href="https://daikincomfort.com">Daikin</a>
+
+<ul>
+<li><a href="https://www.home-assistant.io/integrations/daikin/">Home Assistant integration</a></li>
+</ul></li>
+<li><a href="https://www.home-assistant.io/green/">Home Assistant Green</a></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li>The OpenAI doughnut
+
+<ul>
+<li>What if it’s an eye? (via Elijah Yap)</li>
+<li>Or perhaps <a href="https://en.wikipedia.org/wiki/Red_blood_cell">red blood cell</a> shaped? (via Chris Lawrence)
+
+<ul>
+<li><a href="https://en.wikipedia.org/wiki/Biconcave_disc">Biconcave disc</a></li>
+</ul></li>
+</ul></li>
+<li>Time Capsule was to solve the laptop-backup problem</li>
+<li>Multiple Apple IDs with the same number (via Adam Wunn)</li>
+<li>RAMageddon
+
+<ul>
+<li><a href="https://www.macrumors.com/2026/08/12/iphone-18-pro-lower-oled-display-cost-report/">Apple gets lower display prices</a></li>
+<li><a href="https://9to5mac.com/2026/08/06/apple-raises-trade-in-values-for-most-iphone-ipad-mac-and-apple-watch-models/">Apple raises trade-in values</a></li>
+</ul></li>
+</ul></li>
+<li>🎉 <a href="https://marco.org/2026/08/14/unforgetful">Unforgetful is out!</a> 🎉
+
+<ul>
+<li><a href="https://www.mcsweeneys.net/articles/e-mail-addresses-that-would-be-really-annoying-to-give-out-over-the-phone">E-Mail Addresses That Would be Really Annoying to Give Out Over the Phone</a></li>
+<li><a href="https://github.com/marcoarment/Blackbird/tree/fable">Skybridge</a></li>
+<li><a href="https://relay.fm/mpu/861">Mac Power Users #861: Stephen Builds a New Task App</a>
+
+<ul>
+<li><a href="https://en.wikipedia.org/wiki/Kanban">Kanban</a></li>
+</ul></li>
+<li><a href="https://marco.org/2016/05/02/quitter">Quitter</a></li>
+<li><a href="https://overcast.fm/forecast">Forecast</a></li>
+</ul></li>
+<li><a href="https://support.claude.com/en/articles/16266773-how-claude-marks-ai-generated-content">AI watermarking</a>
+
+<ul>
+<li><a href="https://en.wikipedia.org/wiki/Steganography">Steganography</a></li>
+<li><a href="https://www.anthropic.com/news/claude-text-watermark">How Claude’s text watermark works</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Pseudorandom_number_generator">Pseudorandom number generator</a></li>
+<li><a href="https://declaude.org/watermarking/">A wonderful visual guide</a></li>
+<li>Some <a href="https://www.3blue1brown.com/">3Blue1Brown</a> homework
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=LPZh9BOjkQs">LLMs explained briefly</a>
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=LPZh9BOjkQs&amp;t=6m6s">Next-word prediction probabilities</a></li>
+</ul></li>
+<li><a href="https://www.youtube.com/watch?v=wjZofJX0v4M">Transformers, the tech behind LLMs</a>
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=wjZofJX0v4M&amp;t=23m55s">Temperature gives …</a></li></ul></li></ul></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>704: Past the Ternus Horizon</title>
+<link>https://atp.fm/704</link>
+<pubDate>Thu, 13 Aug 2026 22:03:56 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/vvhmq1d3luzmazdr/atp704.mp3" type="audio/mpeg" length="123392048"/>
+<mi:words>356</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Marco has a rose and thorn
+
+<ul>
+<li><a href="https://www.casetawireless.com/us/en/products/dimmers-switches/original-smart-fan-speed-control-switch">Lutron Caséta Fan Control</a></li>
+<li><a href="https://fanimation.com/motor-type/ac-motor/">Fanimation</a></li>
+<li><a href="https://www.youtube.com/watch?v=_KWdCqpXB7A&amp;pp=ygUadGVjaG5vbG9neSBjb25uZWN0aW9ucyBmYW4%3D">Technology Connections video</a></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li>Marco’s favorite feedback (about <a href="https://theenthusiast.net/">Myke</a>) was from <a href="https://relay.fm/analog/10">Analog(ue)</a> 😬
+
+<ul>
+<li><a href="https://tailscale.com/blog/sqlite-wal-reset-bug">SQLite bug write-up</a></li>
+<li><a href="https://github.com/marcoarment/Blackbird">Blackbird</a></li>
+</ul></li>
+<li>Post-show <a href="https://neutral.fm/">Neutral</a>
+
+<ul>
+<li>Professional negotiators / “headhunters” are very much a thing
+
+<ul>
+<li><a href="https://caredge.com/">CarEdge</a> (via John Siracusa)</li>
+<li><a href="https://delivrd.com/">Delivrd</a> (via Roger Coxon)
+
+<ul>
+<li><a href="https://www.wsj.com/business/autos/tomi-mikula-youtube-car-buying-negotiations-4a4c3d63?mod=Searchresults&amp;pos=2&amp;page=1">Wall Street Journal</a> (<a href="https://apple.news/Awzlxg6NnRMijqRx_-cQAUw">News+ link</a>)</li>
+</ul></li>
+<li><a href="https://www.thecarchick.com/">The Car Chick</a> (via Juan Boyce)
+
+<ul>
+<li><em>The #1 trusted automotive expert for women and smart men</em></li>
+</ul></li>
+<li><a href="https://yourcarbuyingadvocate.com">Your Car Buying Advocate</a> (via Ian McCullough)</li>
+<li>Two options from Colin Macdonald
+
+<ul>
+<li><a href="https://automatchconsulting.com/">Automatch Consulting</a></li>
+<li><a href="https://insightautoconsulting.com/">Insight Auto Consulting</a></li>
+</ul></li>
+</ul></li>
+<li>Casey makes some discoveries over the last week
+
+<ul>
+<li>Justification from the midwest dealer</li>
+<li>Ventilated seats</li>
+<li><a href="https://www.bmwblog.com/2024/12/10/bmw-laser-headlights-history-why-disappearing/">Laser headlights</a></li>
+</ul></li>
+<li>Marco takes a spin as well</li>
+</ul></li>
+<li>John’s passwords pro-tip</li>
+<li><a href="https://learn.chatgpt.com/docs/features/codex-micro">Codex Micro</a> (via <a href="https://bsky.app/profile/stchris.bsky.social/post/3mraqzucx2c2q">St. Chris</a>)
+
+<ul>
+<li><a href="https://worklouder.cc/creator-micro-2">Icon keys</a></li>
+</ul></li>
+<li>John and Casey weep for a while …</li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>703: Part of a Healthy Breakfast</title>
+<link>https://atp.fm/703</link>
+<pubDate>Thu, 06 Aug 2026 22:02:11 GMT</pubDate>
+<enclosure url="https://traffic.libsyn.com/atpfm/atp703.mp3" type="audio/mpeg" length="146513628"/>
+<mi:words>230</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: The Overcast “kicking machine”
+
+<ul>
+<li><a href="https://www.adamwunn.com/mac-musings/2026/7/22/dear-casey-a-walk-down-filemaker-memory-lane">Adam Wunn’s blog post</a></li>
+<li>Previously in <a href="https://atp.fm/324">ATP #324: Automatic Kicking Machine</a></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li><a href="https://www.reddit.com/r/overcast/comments/1veca38/testflight_build_1169_transcript_search_and/">Marco gives John the gift of transcript search in build #1169</a> [<em>The system works! — Ed.</em>]
+
+<ul>
+<li><a href="https://www.reddit.com/r/overcast/comments/1vgn3yd/testflight_build_1172_smart_complete_replay/">Build #1172 includes <s>Siracusa</s> Replay Mode</a></li>
+</ul></li>
+<li>Be wary of Sonos + <a href="https://pi-hole.net/">Pi-hole</a> or other ad blockers (via Will Smidlein)</li>
+<li><a href="https://help.ui.com/hc/en-us/articles/30297446527767-An-Overview-of-High-Availability-in-UniFi">Ubiquiti High Availability</a>
+
+<ul>
+<li><a href="https://store.ui.com/us/en/products/usp-rps">Redundant Power Supply <code>USP-RPS</code></a></li>
+<li><a href="https://techspecs.ui.com/unifi/accessories/unifi-smartpower-cable?subcategory=accessories-poe-power#marketing-images">SmartPower Cable <code>USP-Cable</code></a></li>
+</ul></li>
+<li>“Odd” RAM amounts (via <a href="https://mstdn.social/@joelion/116984028726137622">Joe Lion</a>)</li>
+<li>Multiple Apple accounts (via TJ Usiyan)</li>
+<li><a href="https://www.theverge.com/tech/973621/sony-playstation-ending-discs-pushing-forward">Some science about Sony’s axe of PlayStation discs</a></li>
+</ul></li>
+<li><a href="https://www.shirt-pocket.com/blog/supererduperer">SuperDuper 4</a>
+
+<ul>
+<li><a href="https://www.shirt-pocket.com/blog/native_apple_silicon_big_sur_monterey">Previously in the SuperDuper blog…</a></li>
+</ul></li>
+<li><a href="https://www.apple.com/newsroom/2026/07/apple-upgrade-launches-in-the-united-states/">Apple Upgrade Program</a>
+
+<ul>
+<li><a href="https://www.macstories.net/news/apple-upgrade-trades-ownership-for-lower-monthly-payments/">John Voorhees at MacStories</a></li>
+<li><a href="https://www.theverge.com/tech/972583/apple-upgrade-program-deal">The Verge with example numbers</a></li>
+<li><a href="https://9to5mac.com/2026/07/30/apple-upgrade-vs-iphone-upgrade-program-here-are-the-key-differences/">Apple Upgrade vs. iPhone Upgrade</a></li>
+<li><a href="https://www.theverge.com/tech/972063/apple-upgrade-program-no-restricted-mode">“Restricted Mode” isn’t about this</a></li>
+<li><a href="https://www.macrumors.com/2026/07/29/is-apple-upgrade-program-worth-it/">Is it worth it? Joe Rossignol answers</a></li>
+</ul></li>
+<li><a href="https://9to5mac.com/2026/02/16/macos-26-4-brings-battery-charge-limit-to-the-mac-and-shortcuts/">macOS 26.4 adds Battery Charge Limit</a></li>
+<li>Ask ATP: 
+
+<ul>
+<li>What …</li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>702: Isolate the Evil</title>
+<link>https://atp.fm/702</link>
+<pubDate>Mon, 27 Jul 2026 19:28:45 GMT</pubDate>
+<enclosure url="https://traffic.libsyn.com/atpfm/atp702.mp3" type="audio/mpeg" length="144739785"/>
+<mi:words>257</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Three old men talk about the Tickety Tocks</li>
+<li>Follow-up:
+
+<ul>
+<li>Adam Wunn <a href="https://www.adamwunn.com/mac-musings/2026/7/22/dear-casey-a-walk-down-filemaker-memory-lane">published his email as a blog post</a></li>
+<li>Sharing files in <code>Screen Sharing.app</code> (via Ingmar Wittkau)</li>
+<li>Video game preservation (via Jason Griffey)</li>
+<li>Supplying power to Marco’s army of Mac minis
+
+<ul>
+<li><a href="https://help.ui.com/hc/en-us/articles/19581768432535-Shadow-Mode-High-Availability-on-UniFi-Cloud-Gateways">Ubiquiti “Shadow Mode High Availability”</a></li>
+</ul></li>
+<li>An update on <code>Passwords.app</code> “doing the hard thing”
+
+<ul>
+<li><a href="https://sixcolors.com/post/2026/07/first-look-macos-golden-gate-public-beta/">macOS</a></li>
+<li><a href="https://sixcolors.com/post/2026/07/first-look-ios-27-public-beta/">iOS</a></li>
+</ul></li>
+<li><a href="https://mastodon.social/@stroughtonsmith/116737826472531199">More clipboard changes in macOS 27</a>
+
+<ul>
+<li><a href="https://files.mastodon.social/media_attachments/files/116/737/824/492/107/889/original/d83f244d05daf98b.mp4">Video in question</a></li>
+</ul></li>
+<li><a href="https://www.macrumors.com/2026/07/15/apple-looking-to-acquire-ai-chip-companies/">Apple is reportedly looking to acquire AI chip companies</a>
+
+<ul>
+<li><a href="https://en.wikipedia.org/wiki/P.A._Semi">P. A. Semi</a></li>
+</ul></li>
+<li><a href="https://www.apple.com/newsroom/2026/07/apple-to-increase-spend-with-broadcom-to-produce-billions-more-us-chips/">Apple is <em>actually</em> spending money on Broadcom</a>
+
+<ul>
+<li><a href="https://www.macrumors.com/2026/07/06/apple-and-broadcom-extend-deal/">Hartley Charlton at MacRumors</a></li>
+</ul></li>
+<li><a href="https://www.theverge.com/transportation/955738/slate-auto-truck-ev-price-availability">Slate Truck price &amp; availability announced</a>
+
+<ul>
+<li><a href="https://atp.fm/641">Previously on ATP</a></li>
+</ul></li>
+</ul></li>
+<li><a href="https://www.apple.com/newsroom/2026/07/apple-maps-to-power-navigation-experience-for-ford-uev-platform/">Apple 🤝 Ford</a>
+
+<ul>
+<li><a href="https://caseyliss.com/2026/7/2/carplay-is-additive-you-dolts">CarPlay is Additive</a></li>
+</ul></li>
+<li><a href="https://adactio.com/journal/22609">Safari on 𝑥OS 27</a>
+
+<ul>
+<li><a href="https://developer.apple.com/videos/play/wwdc2026/204/">WWDC 2026 #204: What’s new in WebKit for Safari 27</a></li>
+<li><a href="https://cdn.atp.fm/images/20260615-webkit-wwdc-2026-session-204.png">Pie chart</a></li>
+<li><a href="https://infrequently.org/2026/07/abject-praise/">A contrary take</a></li>
+<li><a href="https://webkit.org/blog/18136/introducing-the-safari-mcp-server-for-web-developers/">Safari MCP server</a>
+
+<ul>
+<li><a href="https://www.macstories.net/linked/safaris-new-mcp-server-is-great-for-agents/">Federico’s take</a></li>
+</ul></li>
+</ul></li>
+<li>Ask ATP: 
+
+<ul>
+<li>How …</li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>701: I Improved My Town</title>
+<link>https://atp.fm/701</link>
+<pubDate>Thu, 23 Jul 2026 21:43:44 GMT</pubDate>
+<enclosure url="https://traffic.libsyn.com/atpfm/atp701.mp3" type="audio/mpeg" length="125985726"/>
+<mi:words>221</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Marco’s Mac mini catastrophe
+
+<ul>
+<li><a href="https://www.macminivault.com/">CyberLynk / Mac Mini Vault</a></li>
+<li><a href="https://www.amazon.com/dp/B0B5LZK8HJ?tag=marcoorg-20">The dead ATS</a></li>
+<li><a href="https://www.eaton.com/us/en-us/skuPage.PDUMH20HVATNET.html">The proposed replacement</a></li>
+</ul></li>
+<li>🗣️ New <a href="https://atp.fm/join">Member’s</a> Special: <a href="https://atp.fm/atp-tier-list-emoji">ATP Tier List: Emoji</a></li>
+<li>Follow-up:
+
+<ul>
+<li>Member’s Special video trimming / John’s Vibe Coded App
+
+<ul>
+<li><a href="https://losslesscut.app/">LosslessCut</a></li>
+</ul></li>
+<li>Casey has leveled-up his Sonos experience
+
+<ul>
+<li><a href="https://atp.fm/693">Previously on ATP</a></li>
+<li><a href="https://www.reddit.com/r/sonos/comments/1tp60fi/new_sonos_app_update_now_available/">Version <code>85.01</code> announcement post</a></li>
+<li><a href="https://www.reddit.com/r/sonos/comments/1u8hxm2/your_sonosnet_toggle_questions_answered/">FAQ post</a></li>
+</ul></li>
+<li><a href="https://parakeet.co/blog/the-shape-of-apps/">Louie Mantia makes the case for Squircle</a></li>
+<li>Sony 💔 💿 
+
+<ul>
+<li>A nefarious motivation for Sony ceasing to sell games on disc (via Glen Jarvis)</li>
+<li><a href="https://www.theverge.com/entertainment/966726/cd-sales-vinyl-physical-media-luminate">CD sales are going up</a></li>
+</ul></li>
+<li>Price increase corner: <a href="https://9to5mac.com/2026/07/17/apple-raises-prices-for-apple-music-and-apple-one-subscriptions/">Apple Music edition</a>
+
+<ul>
+<li><a href="https://mastodon.social/@BasicAppleGuy/116941503656197773">Chart by BasicAppleGuy</a></li>
+<li><a href="https://www.bloomberg.com/news/articles/2026-07-15/apple-boosts-applecare-monthly-prices-by-50-cents-in-latest-increase">AppleCare+ too</a></li>
+</ul></li>
+<li><a href="https://www.claris.com/filemaker/">FileMaker</a>
+
+<ul>
+<li>In defense…
+
+<ul>
+<li><a href="https://en.wikipedia.org/wiki/Common_Vulnerabilities_and_Exposures">CVE</a></li>
+<li><a href="https://monday.com">Monday.com</a></li>
+</ul></li>
+<li>Marco got Robert Thompson off FileMaker after 18 years
+
+<ul>
+<li><a href="https://scratch.mit.edu">Scratch</a></li>
+</ul></li>
+<li>And a special thanks to Adam Wunn 🙌🏻</li>
+</ul></li>
+</ul></li>
+<li><a href="https://www.bloomberg.com/news/newsletters/2026-07-19/why-apple-s-openai-lawsuit-doesn-t-mention-jony-ive-ai-recording-at-genius-bar-mrrv4mix">Gurman on post-Mac Pro plans</a></li>
+<li><a href="https://www.macrumors.com/2026/07/15/eu-drops-battery-removal-requirement/">EU drops battery removal requirement for Apple Watch &amp; AirPods</a>
+
+<ul>
+<li><a href="https://environment.ec.europa.eu/news/commission-adds-exemptions-portable-battery-removal-rules-2026-07-14_en">Six additional …</a></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>700: A Wet Dishrag Full of Lies</title>
+<link>https://atp.fm/700</link>
+<pubDate>Thu, 16 Jul 2026 18:18:02 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/vv9utuxur3plunbg/atp700.mp3" type="audio/mpeg" length="111797868"/>
+<mi:words>203</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Anniversary Corner!
+
+<ul>
+<li><a href="https://catatp.fm/">catatp</a> (see also <a href="https://catatp.fm/statistics/">Statistics</a>)</li>
+<li><a href="https://cdn.atp.fm/images/20260715-catatp-visualization-episode-699.png">Bootleg visualization</a></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li>Public beta check-in</li>
+<li>Casey’s iMessage notification issue</li>
+<li><a href="https://blog.cloudflare.com/workers-cache">Cache in front of CloudFlare Workers!</a></li>
+<li>Apple keeps futzing with rendering of <code>.icon</code> files</li>
+<li>Mac-assed Mac Apps
+
+<ul>
+<li><a href="https://mastodon.social/@stroughtonsmith/116891289436268662">Steve Troughton-Smith on ChatGPT</a>
+
+<ul>
+<li><a href="https://daringfireball.net/linked/2026/07/04/from-the-archive-electron-decline-of-native-apps">Gruber #1</a></li>
+<li><a href="https://daringfireball.net/linked/2026/07/06/allen-pike-chatgpt">Gruber #2</a></li>
+</ul></li>
+<li><a href="https://mastodon.social/@ccgus/116891511328402300">Gus Mueller</a></li>
+<li><a href="https://daringfireball.net/linked/2026/07/09/todays-the-day-openai-fucked-up-the-chatgpt-mac-app">Gruber</a></li>
+</ul></li>
+<li>Globe key on Apple’s extended keyboards (via <a href="https://mastodon.social/@pilif/116900512307331808">Philip Hofstetter</a>)
+
+<ul>
+<li><a href="https://gist.github.com/pilif/7feb86e0ce6a891f327a2d5bfa6bf5ef"><code>LaunchAgent</code></a>
+
+<ul>
+<li><code>~/Library/LaunchAgents</code></li>
+</ul></li>
+<li><a href="https://en.wikipedia.org/wiki/Magic_Keyboard_(Mac)#mwbA">Casey’s former keyboard</a>
+
+<ul>
+<li>Tina’s keyboard: <code>MMMR3LL/A</code></li>
+</ul></li>
+</ul></li>
+<li>Shouldn’t the <a href="https://www.apple.com/studio-display/">Studio Display</a> get a price bump? (via <a href="https://mastodon.social/@yertle/116871622388607868">Brian Nehring</a>)</li>
+<li>Regarding skipping M6 Pro/Max/Ultra (via Anonymous)</li>
+<li><a href="https://www.bloomberg.com/news/newsletters/2026-07-12/apple-s-chip-plans-m6-m7-pro-m7-max-m7-ultra-m8-details-touch-macbook-pro">Gurman on M𝓍 Ultra servers</a></li>
+</ul></li>
+<li>Follow-out to <a href="https://relay.fm/upgrade/627">Upgrade #627</a>: What <s>was</s> is <a href="https://www.claris.com/filemaker">FileMaker</a>
+
+<ul>
+<li><a href="https://www.claris.com/filemaker/agentic-development/">Agentic development</a></li>
+</ul></li>
+<li><a href="https://github.com/samschott/maestral#archived">Goodbye, Maestral</a> 🫡
+
+<ul>
+<li><a href="https://daringfireball.net/linked/2026/07/06/maestral-retired">Gruber</a></li>
+</ul></li>
+<li><a href="https://sixcolors.com/link/2026/07/apple-sues-openai-alleging-trade-secret-theft/">Apple Sues OpenAI</a>
+
+<ul>
+<li><a href="https://www.courtlistener.com/docket/73602437/apple-inc-v-liu/">Apple Inc. vs. Liu</a></li>
+<li><a href="https://9to5mac.com/2026/07/10/apple-sues-openai-trade-secret-theft/">Chance Miller’s summary</a></li>
+<li><a href="https://www.theverge.com/tech/964843/apple-openai-lawsuit-wildest-claims">The Verge</a></li>
+<li><a href="https://daringfireball.net/linked/2026/07/10/apple-sues-openai">Gruber</a></li>
+<li><a href="https://dithering.passport.online/member/episode/apple-sues-open-ai">Dithering</a></li>
+<li><a href="https://xcancel.com/drewpusateri/status/2075708238650089981">OpenAI’s response</a> and <a href="https://www.bloomberg.com/news/articles/2026-07-14/openai-says-it-s-not-aware-of-any-evidence-that-apple-lawsuit-has-merit">part 2</a></li>
+</ul></li>
+<li>Post-show: Casey vacation results: nerd edition
+
+<ul>
+<li><a href="https://store.ui.com/us/en/products/utr">Unifi Travel Router</a></li>
+<li> …</li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>699: Not the Correct Squircle</title>
+<link>https://atp.fm/699</link>
+<pubDate>Tue, 07 Jul 2026 00:41:14 GMT</pubDate>
+<enclosure url="https://traffic.libsyn.com/atpfm/atp699.mp3" type="audio/mpeg" length="136507484"/>
+<mi:words>277</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Casey’s oops
+
+<ul>
+<li><a href="https://www.apple.com/shop/product/mxka3am/a/magic-trackpad-usb%E2%80%91c-black-multi-touch-surface">Magic TrackPad</a></li>
+<li><a href="https://www.apple.com/shop/product/mxk83ll/a/magic-keyboard-with-touch-id-and-numeric-keypad-for-mac-models-with-apple-silicon-usb-c-us-english-black-keys">Magic Keyboard</a></li>
+<li><a href="https://marco.org/2013/08/30/sculpt-ergonomic-keyboard-review">Marco’s Sculpt Ergonomic Keyboard</a></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li>Casey <em>may have</em> fixed his notification problem!</li>
+<li><a href="https://github.com/bartreardon/skills/blob/main/mac-arsed-mac-app/SKILL.md">Mac-“Arsed” Mac App skill</a> (via <a href="https://aus.social/@bartreardon/116832908060831749">Bart Reardon</a>)</li>
+<li>RAMAgeddon
+
+<ul>
+<li>Feel free to <a href="https://stjude.org/atp">donate to St. Jude</a> any of the money you may have saved by buying early! (via Jonathan)</li>
+<li>Will Apple rethink unified memory given these prices? (via <a href="https://mas.to/@ShutterAperture/116830757416308296">ShutterAperture</a>)</li>
+<li><a href="https://www.theverge.com/games/953945/valve-steam-machine-memory-component-crisis">Steam Machine difficulties</a>
+
+<ul>
+<li><a href="https://youtu.be/66QzlDewigE?si=jE0g4xZlPa7uqjFp&amp;t=768">Interview on YouTube</a> (Timestamp link to 12m48s)</li>
+</ul></li>
+<li>Collusion! <a href="https://www.tomshardware.com/tech-industry/samsung-sk-hynix-and-micron-sued-over-alleged-dram-price-fixing-amid-record-memory-costs">Well, maybe</a>.</li>
+<li>Would a gold Mac mini be cheaper than a spec with tons of RAM? <a href="https://piaille.fr/@awax/116843516938059972">Awax did math</a></li>
+</ul></li>
+<li><s>We’re</s> <a href="https://www.theverge.com/ai-artificial-intelligence/958964/anthropic-claude-fable-5-is-back">Fable is so back, baby</a>
+
+<ul>
+<li><a href="https://arstechnica.com/tech-policy/2026/07/after-spooking-trump-into-safety-testing-anthropic-ai-models-get-global-release/">More at Ars Technica</a></li>
+</ul></li>
+<li>Siri AI
+
+<ul>
+<li><a href="https://9to5mac.com/2026/06/24/ios-27-beta-2-apple-tells-siri-ai-to-clearly-refuse-requests-to-summarize-urls/">No web browsing for you</a>!</li>
+<li><a href="https://www.macrumors.com/2026/06/24/apple-killed-siri-ai-waitlist-workaround/">Apple removed the waitlist workaround in macOS β2</a></li>
+<li>Determining what model is used (via Gui Rambo)</li>
+</ul></li>
+</ul></li>
+<li>Revamped icons by <a href="https://parakeet.co/">Parakeet</a>
+
+<ul>
+<li><a href="https://cdn.atp.fm/images/20260702-design-services-price-list.png">Design services …</a></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>698: And Do What?</title>
+<link>https://atp.fm/698</link>
+<pubDate>Tue, 30 Jun 2026 23:23:52 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/zngtqmlzz3vid3he/atp698.mp3" type="audio/mpeg" length="128481410"/>
+<mi:words>257</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Who’s bored?</li>
+<li>🗣️ New <a href="https://atp.fm/join">Member</a>’s Special: <a href="https://atp.fm/atp-dev-mac-assed-mac-apps">ATP Dev: Mac-assed Mac Apps</a></li>
+<li>Follow-up:
+
+<ul>
+<li><a href="https://www.nugs.net/">Nugs</a> and <a href="https://www.sonos.com/">Sonos</a></li>
+<li>As the prophecy foretold… ☹️</li>
+<li><a href="https://www.theverge.com/ai-artificial-intelligence/958458/anthropic-mythos-5-is-back-trump-negotiations">Mythos is back, but Fable isn’t</a></li>
+<li>Rumors about Siri AI indexing</li>
+<li>Corrections about 8TB SSDs (via Aaron Raimist)</li>
+<li>Price increases abound! ☹️
+
+<ul>
+<li>On the Apple TV price hike (via Chris Carley)</li>
+<li><a href="https://www.theverge.com/news/837022/valve-steam-machine-price-release-date">Steam Machine</a> (<a href="https://www.theverge.com/games/952004/valve-steam-machine-price-not-subsidizing">More</a>)</li>
+<li><a href="https://www.theverge.com/games/957042/xbox-price-increase-memory-shortage">Xbox</a></li>
+<li><a href="https://www.wsj.com/tech/apple-raises-prices-on-macs-ipads-by-200-or-more-on-some-models-a7463f99">Micron points fingers at Apple</a> (<a href="https://apple.news/AT4sknlKFR8CX_0eGiGa9Xw">News+ Link</a>)
+
+<ul>
+<li><a href="https://mastodon.social/@stroughtonsmith/116816789322800422">Steve Troughton-Smith’s take</a>
+
+<ul>
+<li><a href="https://archive.ph/20130204111620/http://www.theverge.com/2012/6/5/3062611/palm-webos-hp-inside-story-pre-postmortem#selection-4443.330-4443.587">Previously, in Palm Pilots</a></li>
+</ul></li>
+</ul></li>
+</ul></li>
+<li><a href="https://9to5mac.com/2026/06/26/apple-asks-trump-admin-to-approve-chinese-ram-after-product-price-increases/">Apple asks Trump to save their 🥓</a>
+
+<ul>
+<li><a href="https://www.ft.com/content/d72a25e2-7bde-4aa9-bd8d-0c4f3d6cb2cb?syn-25a6b1a6=1">Financial Times</a></li>
+</ul></li>
+</ul></li>
+<li><a href="https://www.bloomberg.com/news/articles/2026-06-25/apple-to-skip-high-end-m6-mac-chips-to-launch-m7-pro-m7-max-m7-ultra-instead">No M6 Pro/Max/Ultra‽</a>
+
+<ul>
+<li><a href="https://www.bloomberg.com/news/articles/2026-06-26/apple-s-touchscreen-macbook-to-use-m5-pro-max-chips-m7-pro-max-models-in-2027?embedded-checkout=true">Touchscreen MacBook Pro</a></li>
+</ul></li>
+<li><a href="https://xcancel.com/jukan05/status/2054564780732498342">Intel to fabricate the M7‽</a>
+
+<ul>
+<li><a href="https://www.spglobal.com/ratings/pt/regulatory/article/-/view/type/HTML/id/3100752">GFHK</a>?</li>
+<li><a href="https://bontechlabs.com/news/apple-is-reportedly-using-intels-foundry-for-the-m7/">More reporting</a></li>
+</ul></li>
+<li>New Siri
+
+<ul>
+<li><a href="https://cdn.atp.fm/images/20260612-siri-golden-gate-beta-1.png">Iconography</a>
+
+<ul>
+<li><a href="https://hachyderm.io/@bradellis/116716287252573406">Attraction Theory: The SiriAI Proposition</a></li>
+<li><a href="https://www.goldennumber.net/wp-content/uploads/pepsi-arnell-021109.pdf">Pepsi logo redesign brand manual from 2008</a> (via <a href="https://www.reddit.com/r/Design/comments/hspqgd/pepsi_logo_redesign_brand_manual_from_2008_is_the/"><code>budsNhops</code> on Reddit</a>)</li>
+</ul></li>
+<li><a href="https://www.youtube.com/watch?v=uQ3lL68hNK4">Joanna Stern’s review</a></li>
+<li><a href="https://mastodon.social/@_inside/116753604083322191">Gui Rambo’s experiment</a></li>
+<li><a href="https://zeppelin.flights/@dmoren/116731841663356544">Dan Moren</a></li>
+<li>John tries to …</li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>697: The Chart Is Terrifying</title>
+<link>https://atp.fm/697</link>
+<pubDate>Fri, 26 Jun 2026 22:04:14 GMT</pubDate>
+<enclosure url="https://traffic.libsyn.com/atpfm/atp697.mp3" type="audio/mpeg" length="121297217"/>
+<mi:words>318</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: 
+
+<ul>
+<li>Casey has some <em>fantastic</em> news about <a href="https://nugs.net/">nugs.net</a> for Marco</li>
+<li>Marco’s trip report
+
+<ul>
+<li><a href="https://www.gucciosteria.com/en/florence">Gucci Osteria</a></li>
+</ul></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li>John guested on a preview of <a href="https://designed.fm/"><em>Designed in California</em></a>, published as part of <a href="https://relay.fm/upgrade/624">Upgrade #624</a> (also <a href="https://www.youtube.com/watch?v=pwyWm3EbTFg&amp;t=56m24s">on YouTube</a>)</li>
+<li><a href="https://www.itecheverything.com/post/how-to-enable-apple-intelligence-on-an-external-drive-macos-tahoe-and-newer">Apple Intelligence 🤝 external boot disks</a> (via Doug Weinfield)</li>
+<li>Spotlight indexing in 𝑥OS 27
+
+<ul>
+<li><a href="https://mastodon.social/@steveriggins/116752581348000964">Steve Riggins notes it takes a while</a></li>
+<li><a href="https://lgbtqia.space/@AncTreat5358/116752996295760909">Alex concurs</a></li>
+</ul></li>
+<li>Apple’s AI Tech Talk 
+
+<ul>
+<li>What will Siri be capable of? (via <a href="https://mastodon.social/@ritchey_de/116766301190078253">Jochen Marschall</a>)</li>
+<li><a href="https://www.youtube.com/shorts/2Tf-Q3rnqNw">Bootleg video</a> (via <a href="https://mastodon.social/@sayrer/116753495351307342">sayrer</a>)</li>
+</ul></li>
+<li>Is Spatial Reframing in 𝑥OS 27 geographically-aware? (via Kevin Buterbaugh)</li>
+<li>Tesla 🤝 CarPlay?
+
+<ul>
+<li><a href="https://www.notateslaapp.com/news/4278/could-this-new-apple-feature-finally-bring-carplay-to-tesla">New CarPlay features</a> (via Alec Hurdle)
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=ykwG0I8UGjg&amp;t=771s">WWDC session on YouTube</a></li>
+</ul></li>
+</ul></li>
+<li><a href="https://www.scientificamerican.com/article/how-the-new-fda-approved-ingredient-bemotrizinol-enhances-sunscreen-protection/">The US has approved a new sunscreen ingredient!</a>
+
+<ul>
+<li>Marco’s favorite: <a href="https://www.amazon.co.jp/-/en/Skin-Aqua-Super-Moisture-Pump/dp/B0BSFK1RRP?th=1">Rohto Skin Aqua Super Moisture UV Gel</a></li>
+</ul></li>
+<li>Tracking <a href="https://www.apple.com/environment/">Apple’s environmental progress</a>
+
+<ul>
+<li><a href="https://tostracker.app/entity/apple-inc/environment">TOSTracker</a> (via <a href="https://esq.social/@andrew/116178492413160630">Andrew Leahey</a>)</li>
+<li>Direct product comparisons
+
+<ul>
+<li> …</li></ul></li></ul></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>696: It Seems Petty, But I Endorse It</title>
+<link>https://atp.fm/696</link>
+<pubDate>Mon, 15 Jun 2026 20:34:11 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/vwlmwxbankg5wedu/atp696.mp3" type="audio/mpeg" length="115730292"/>
+<mi:words>315</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: 
+
+<ul>
+<li>We are <em>not</em> dangerously capable</li>
+<li>We convince ourselves not to pivot to video</li>
+<li>Accidental <a href="https://neutral.fm">Neutral</a>: The <a href="https://rivian.com/r2">Rivian R2</a>
+
+<ul>
+<li>FYI, Marco: Casey has officially called dibs on the <a href="https://rivian.com/r3">R3X</a> 😈</li>
+</ul></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=XUvZFX5jAGc">It’s Road Trip</a> (via Jason Paul)</li>
+<li>Indexing for the new Spotlight</li>
+<li><a href="https://www.macrumors.com/2026/06/08/apple-passwords-can-now-automatically-fix-passwords-with-agentic-ai/`">Passwords app does the hard thing</a></li>
+<li>macOS 27
+
+<ul>
+<li>“Golden Gate” was the codename for macOS Big Sur… <a href="https://en.wikipedia.org/wiki/List_of_Apple_codenames">and eWorld 1.1</a>
+
+<ul>
+<li><a href="https://en.wikipedia.org/wiki/Microsoft_Bob">Microsoft Bob</a></li>
+</ul></li>
+<li>You can use Touch ID for Administrator access</li>
+<li>There’s a way to skip the Siri waitlist (via <a href="https://mastodon.social/@stroughtonsmith/116726127969076093">Steve Troughton-Smith</a>)
+
+<ul>
+<li><code>sudo defaults write "/Library/Preferences/FeatureFlags/Domain/GenerativeModels.plist" "EnhancedSiriWaitlist" -dict-add Enabled -bool NO</code></li>
+</ul></li>
+<li><a href="https://mastodon.social/@stroughtonsmith/116716136620549862">ST-S points out</a> the change in <a href="https://developer.apple.com/documentation/bundleresources/information-property-list/uidesignrequirescompatibility">Apple’s documentation</a></li>
+<li>The Liquid Glass slider is <a href="https://cdn.atp.fm/images/20260609-golden-gate-liquid-glass-onboarding.png">part of Golden Gate onboarding</a></li>
+<li><a href="https://www.threads.com/@sammy.sido/post/DZWMxlQCfE0/yall-better-shut-up-seriously-is-this-what-you-really-want-to-see-window-corner/">Corner radius ∆s, illustrated</a></li>
+<li><a href="https://mastodon.online/@9to5Mac/116720272181745902">Mickey hands are back</a></li>
+<li><a href="https://www.threads.com/@thebasicappleguy/post/DZVq813Eq14"><em>They can’t leave well enough alone</em>, Finder icon edition</a></li>
+<li><a href="https://basicappleguy.com/basicappleblog/macos-golden-gate-icon-comparison"> …</a></li></ul></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>695: The Crystal Pepsi of Aqua</title>
+<link>https://atp.fm/695</link>
+<pubDate>Tue, 09 Jun 2026 03:34:25 GMT</pubDate>
+<enclosure url="https://traffic.libsyn.com/atpfm/atp695.mp3" type="audio/mpeg" length="164339005"/>
+<mi:words>127</mi:words>
+<description><![CDATA[<ul>
+<li><a href="https://developer.apple.com/wwdc">WWDC 2026</a>
+
+<ul>
+<li><a href="https://www.apple.com/apple-events/">Watch the Keynote</a> (alternatively, <a href="https://www.youtube.com/watch?v=hF8swzNR1-o&amp;t=4618s&amp;pp=ygUMYXBwbGUgZXZlbnRz">on YouTube</a>)</li>
+<li><a href="https://furbo.org/2026/04/29/spotlight-not-right/">Craig Hockenberry on Spotlight</a></li>
+<li><a href="https://cdn.atp.fm/images/20260608-wwdc-2026-word-wall.png">Word wall</a></li>
+<li><a href="https://me.dm/@rdrhyne/116715737547009892">Rob Rhyne’s toot</a></li>
+<li><a href="https://cdn.atp.fm/images/20260608-weird-holes.png">Weird holes</a></li>
+<li><a href="https://changedetection.io">Change Detection</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Well-known_URI"><code>.well-known</code></a></li>
+<li><a href="https://www.apple.com/newsroom/2026/06/due-to-dma-siri-ai-delayed-in-eu-for-ios-27-and-ipados-27/">Dear EU, 🖕. Love, Apple</a></li>
+</ul></li>
+<li>Post-show: Casey’s unexpected afternoon
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=hx-JzOCNBbM">Music Video</a>
+
+<ul>
+<li><a href="https://mastodon.social/@chockenberry/116716039038354935">Craig’s toot</a></li>
+</ul></li>
+<li><a href="https://x.com/tim_cook/status/2063973568787226897">Tim’s <em>Good Morning</em> video</a> [Alternatively, <a href="https://xcancel.com/tim_cook/status/2063973568787226897">on Xcancel</a>]</li>
+<li><a href="https://developer.apple.com/documentation/Technotes/tn3212-adopting-gesture-recognizers-for-sidecar-touch-support">TN3212: Adopting gesture recognizers for Sidecar touch support</a> (via <a href="https://mastodon.social/@vpsteinmann/116716073770290351">Vince</a>)</li>
+<li><a href="https://hachyderm.io/@samhenrigold/116716181831884178">Sam Henri Gold</a></li>
+</ul></li>
+<li><a href="https://atp.fm/join">Members-only</a> ATP Overtime: The foldable iPhone takes shape
+
+<ul>
+<li><a href="https://www.macrumors.com/2026/06/01/first-confirmed-iphone-ultra-color-leaked/">White foldable phone</a></li>
+<li><a href="https://www.macrumors.com/2026/06/07/best-look-yet-at-foldable-iphone-design-revealed/">More details</a>
+
+<ul>
+<li><a href="https://x.com/SonnyDickson/status/2063490633696976975?s=20">Sonny Dickson’s images</a> [Alternatively, <a href="https://xcancel.com/SonnyDickson/status/2063490633696976975?s=20">on Xcancel</a>]</li>
+</ul></li>
+<li><a href="https://www.macrumors.com/2026/05/27/ases-for-foldable-iphone-surface-online/">Case leaks</a></li>
+</ul></li>
+</ul>
+
+<p>Sponsored by:</p>
+
+<ul>
+<li><a href="https://squarespace.com/atp">Squarespace</a>: Save 10% off your first purchase of a website or domain using code <strong>atp</strong>.</li>
+<li><a href="https://claude.ai/atp">Claude</a>: Ready to tackle bigger problems? Get started with Claude today.</li>
+</ul>
+
+<p><a href="https://atp.fm/join">Become a member</a> for ATP Overtime, ad-free episodes, member specials, and our early-release, unedited “bootleg” feed!</p>
+]]></description>
+</item>
+<item>
+<title>694: Potential and Homework</title>
+<link>https://atp.fm/694</link>
+<pubDate>Thu, 04 Jun 2026 21:58:36 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/ztvvmgnyyu1irhut/atp694.mp3" type="audio/mpeg" length="134449477"/>
+<mi:words>236</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: 
+
+<ul>
+<li>🏳️‍⚧️🏳️‍🌈 Happy <a href="https://en.wikipedia.org/wiki/Pride_Month">Pride</a>! 🏳️‍🌈🏳️‍⚧️</li>
+<li>John and dynamic DNS
+
+<ul>
+<li>Former &amp; future sponsor <a href="https://tailscale.com/atp">Tailscale</a> (but seriously, I’m obsessed —CL)
+
+<ul>
+<li><a href="https://tailscale.com/docs/features/tailscale-funnel">Tailscale Funnel</a></li>
+</ul></li>
+<li><a href="https://account.dyn.com">DynDns.org</a></li>
+<li><a href="https://noip.com">no-ip.org</a></li>
+</ul></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li><a href="https://www.ferrari.com/en-EN/auto/ferrari-luce">Ferrari Luce</a>
+
+<ul>
+<li><a href="https://files.mastodon.social/media_attachments/files/116/656/966/879/808/510/original/46cd328ee62ad954.mp4">John’s remembered video clip of sandwiching the body</a> (extracted by <a href="https://mastodon.social/@ravigupta/116656967184827583">RG</a>)</li>
+<li><a href="https://hypercritical.co/2026/05/29/ev-stupidity-checklist">John’s EV Stupidity Checklist</a>
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=HSW5xDh8dS0">Wassym Bensaid, Chief Software Officer at Rivian, being a dummy</a></li>
+</ul></li>
+</ul></li>
+<li><a href="https://bambulab.com/">Bambu</a>’s battle with its users
+
+<ul>
+<li>They were already in hot water (via <a href="https://mastodon.social/@steveriggins/116656199827321519">Steve Riggins</a>)</li>
+<li><a href="https://mastodon.social/@j_s_j/116656260488362030">Jose</a> agrees</li>
+</ul></li>
+<li>Faking alarm reminders (via <a href="https://hachyderm.io/@bensmith/116662256502165341">Ben Smith</a>)</li>
+<li>Moving files between volumes
+
+<ul>
+<li><a href="https://mastodon.social/@stevenodb/116662804007095600">Steven Op de beeck demonstrates this with a tiny file</a> and <a href="https://mastodon.social/@stevenodb/116662897451070904">a large file</a></li>
+</ul></li>
+<li>Computer UI designer for <a href="https://callsheetapp.com/movie/152601"><em>Her</em></a> (via <a href="https://mastodon.world/@peterpuleio/116630020348735038">Peter Puleio</a>)
+
+<ul>
+<li><a href="https://atp.fm/atp-movie-club-her">Previously on ATP</a></li>
+</ul></li>
+</ul></li>
+<li><a href="https://developer.apple.com/wwdc">WWDC 2026</a>
+
+<ul>
+<li><a href="https://developer.apple.com/news/?id=q7tgn1rr">All systems glow</a></li>
+<li><a href="https://developer.apple.com/wwdc26/wallpaper/">Wallpaper</a></li>
+<li><a href="https://www.bloomberg.com/news/features/2026-05-28/apple-ios-27-photos-screenshots-revamped-siri-pro-camera-app-new-ai-features">Gurman prediction</a>
+
+<ul>
+<li><a href="https://www.macrumors.com/2026/06/02/ios-27-siri-features/">More at MacRumors</a></li>
+</ul></li>
+<li><a href="https://www.bloomberg.com/news/newsletters/2026-05-10/apple-plans-macos-27-design-changes-latest-on-ios-27-visionos-safari-wwdc-26-mozuaz9m">macOS 27, Vision Pro, and Ternus [oh my!]</a></li>
+<li>Hardware that has …</li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>693: Negative Bonus Points</title>
+<link>https://atp.fm/693</link>
+<pubDate>Fri, 29 May 2026 20:43:29 GMT</pubDate>
+<enclosure url="https://traffic.libsyn.com/atpfm/atp693.mp3" type="audio/mpeg" length="117768685"/>
+<mi:words>279</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: Marco has something to commend
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=zZpzDb-MHOY&amp;t=64s">Ubiquiti marketing video</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Spanning_Tree_Protocol">Spanning Tree Protocol</a></li>
+<li><a href="https://support.sonos.com/en-us/article/choose-between-a-wireless-and-wired-sonos-setup">Sonos &amp; Networking Documentation</a></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li>Formula 1 on Apple TV</li>
+<li>The case for alarm reminders (via <a href="https://infosec.exchange/@ender3/116618593415823945">Matthew Cave</a>)</li>
+<li>SVG <em>can</em> do animations — and way more! (via <a href="https://hachyderm.io/@vitor/116629871896515848">Vítor</a>)
+
+<ul>
+<li><a href="https://www.youtube.com/watch?v=4laPOtTRteI">SVG can do THAT‽</a></li>
+</ul></li>
+<li>Yes, you can use AI for <a href="https://ffmpeg.org/"><code>ffmpeg</code></a>, but have you tried <a href="https://losslesscut.app/">Lossless Cut</a>?</li>
+<li><a href="https://developer.apple.com/sf-symbols/">SF Symbols</a> in Marco’s Reminder app (via <a href="https://mastodon.social/@clarko/116618451715272866">Clarko</a>)</li>
+<li>How can we bemoan <a href="https://www.electronjs.org/">Electron</a> and cheer <a href="https://developer.apple.com/documentation/webkit/webkit-for-swiftui"><code>WebView</code></a>s? (via Julian Gamble)</li>
+<li>If Finder moves are no good, are <a href="https://en.wikipedia.org/wiki/Mv_(Unix)"><code>mv</code></a>s the same?</li>
+<li><a href="https://en.wikipedia.org/wiki/Microsoft_Drive_Optimizer">Defrag</a> lives on …in <a href="https://en.wikipedia.org/wiki/Apple_File_System">APFS</a>
+
+<ul>
+<li><code>diskutil apfs defragment [disk] enable</code>
+
+<ul>
+<li><code>[disk]</code> is something along the lines of <code>diske3</code> or <code>disk3s1</code>, that you get via <code>diskutil list</code></li>
+</ul></li>
+<li><a href="https://mjtsai.com/blog/2019/10/28/enabling-defragmentation-on-apfs-hard-drives/">MJ Tsai</a></li>
+</ul></li>
+<li>AI Sentiment
+
+<ul>
+<li>AI levels… down?… your worst coworker …</li></ul></li></ul></li></ul>]]></description>
+</item>
+<item>
+<title>692: A Thinking Hitch</title>
+<link>https://atp.fm/692</link>
+<pubDate>Thu, 21 May 2026 21:51:57 GMT</pubDate>
+<enclosure url="https://atp.fm/audio/z2eydlm0aejxtnbm/atp692.mp3" type="audio/mpeg" length="121752086"/>
+<mi:words>357</mi:words>
+<description><![CDATA[<ul>
+<li>Pre-show: 
+
+<ul>
+<li>🗣️ New <a href="https://atp.fm/join">ATP Member</a>’s Special: <a href="https://atp.fm/atp-movie-club-her">ATP Movie Club: Her</a></li>
+<li>Immersive Inlet: <a href="https://tv.apple.com/us/movie/real-madrid-the-weight-of-greatness/umc.cmc.59n2yrotl8j6izhn13cj15kz9">Real Madrid: The Weight of Greatness</a></li>
+</ul></li>
+<li>Follow-up:
+
+<ul>
+<li>Cut/copy/paste in Finder</li>
+<li>Terminal
+
+<ul>
+<li>John’s Terminal.app state restoration woes
+
+<ul>
+<li><a href="https://en.wikipedia.org/wiki/Tcsh"><code>tcsh</code></a></li>
+<li><a href="https://cdn.atp.fm/images/20260515-johns-terminal-settings-window.png">John’s Terminal settings <code>Window</code> tab</a></li>
+<li><a href="https://cdn.atp.fm/images/20260515-johns-terminal-settings-tab.png">John’s Terminal settings <code>Tab</code> tab</a></li>
+<li><a href="https://cdn.atp.fm/images/20260515-johns-terminal-settings-tooltip.png">Escape sequence extended tooltip</a></li>
+<li><a href="https://cdn.atp.fm/images/20260515-johns-terminal-cshrc.png"><code>.cshrc</code></a></li>
+</ul></li>
+<li>Terminal apps for macOS with text-based config files</li>
+<li>Fancy shell prompts like <a href="https://starship.rs/">Starship</a>
+
+<ul>
+<li><a href="https://en.wikipedia.org/wiki/KornShell">KornShell</a></li>
+</ul></li>
+<li>Some other terminal resources
+
+<ul>
+<li><a href="https://lfg.popovicu.com/about/">The Linux Field Guide</a> by Uros Popovic (via <a href="https://hachyderm.io/@deach/116588984623741402">Derek</a>)
+
+<ul>
+<li><a href="https://lfg.popovicu.com/series/the-shell-as-a-language/terminal-tty-and-shell/">The terminal, the TTY, and the shell</a></li>
+</ul></li>
+<li><a href="https://wizardzines.com/zines/terminal/">The Secret Rules of the Terminal</a> by Julia Evans
+
+<ul>
+<li><a href="https://wizardzines.com/">Wizard Zines</a></li>
+</ul></li>
+</ul></li>
+</ul></li>
+<li>Ignoring <code>node_modules</code> and the like
+
+<ul>
+<li>In Dropbox
+
+<ul>
+<li><a href="https://help.dropbox.com/sync/how-to-prevent-files-from-syncing">Dropbox documentation</a> (via <a href="https://copland.social/@hunter/116573251299476653">Hunter Hillegas</a>)</li>
+<li>…or use <code>xattr</code>s
+
+<ul>
+<li><a href="https://help.dropbox.com/sync/ignored-files#mac2">Dropbox documentation on ignoring files</a></li>
+<li><a href="https://medium.com/@bozzified/dropbox-ignore-solving-ignoring-node-modules-and-other-folders-from-syncing-on-a-mac-ae5fa44543e8">Automator example from Boz Bundalo</a></li>
+</ul></li>
+</ul></li>
+<li>In Time Machine
+
+<ul>
+<li><a href="https://pnpm.io/"><code>pnpm</code></a> as an alternative to <code>npm</code> (via Paul Galow)
+
+<ul>
+<li><a href="https://pnpm.io/motivation#saving-disk-space"> …</a></li></ul></li></ul></li></ul></li></ul></li></ul>]]></description>
+</item>
+</channel>
+</rss>
