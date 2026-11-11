@@ -63,6 +63,13 @@
     <string name="extra_offer_detail">They join the next scheduled edition. Or print an Extra edition from them now.</string>
     <string name="extra_offer_print">Print an Extra edition</string>
     <string name="extra_offer_dismiss">Not now</string>
+    <string name="extra_reprint_detail">Today’s Extra edition went to press before they were added. It can be reprinted to include them: stories you have read drop out, and the rest are set again alongside the new ones.</string>
+    <plurals name="extra_reprint">
+        <item quantity="one">Reprint the Extra with %d new source</item>
+        <item quantity="other">Reprint the Extra with %d new sources</item>
+    </plurals>
+    <string name="extra_reprinting">Fetching the new sources and reprinting the Extra edition…</string>
+    <string name="extra_reprinted">Extra edition reprinted</string>
     <string name="extra_printing">Fetching the new sources and setting the Extra edition…</string>
     <string name="extra_printed">Extra edition printed</string>
     <string name="extra_nothing_to_print">Nothing recent from the new sources to print. Their next posts join the next edition.</string>

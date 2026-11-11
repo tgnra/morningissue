@@ -548,12 +548,13 @@ class EditionScenariosTest {
         assertEquals(extra, publisher.ensureCurrentEdition())
         assertEquals(2, db.editionDao().count())
 
-        // A second Extra on the same date is refused, and changes nothing.
+        // Asked again for a feed with nothing to print, the Extra is left exactly as it was.
         val another = addFeed("Another")
-        addPost(another, at(10, "10:30"))
         clock.now = at(10, "11:00")
         assertNull(publisher.publishExtraEdition(setOf(another)))
         assertEquals(2, db.editionDao().count())
+        assertEquals(edition, db.editionDao().getById(extra))
+        assertEquals(extraPrinted, printedIn(extra))
 
         // Tomorrow morning: what the Extra printed is not new again; what it only listed is.
         clock.now = at(11, "07:00")
@@ -575,6 +576,119 @@ class EditionScenariosTest {
         morningItems.filter { it.kind != ItemKind.INDEX }.forEach { assertEquals(1, runs(it.articleId)) }
         extraPrinted.forEach { assertEquals(1, runs(it)) }
         assertEquals(listOf(next), db.editionDao().getPending().map { it.id })
+    }
+
+    @Test
+    fun anExtraEditionIsReprintedInPlaceWhenSourcesAreAddedLaterThatDay() = runTest {
+        addPosts(6, at(10, "06:40"), "Tue")
+        val morning = publisher.ensureCurrentEdition()!!
+        val morningItems = itemsOf(morning)
+        val morningRow = db.editionDao().getById(morning)
+        val nextRelease = publisher.nextReleaseAt()
+
+        // 10:00: a first Extra from two new sources.
+        clock.now = at(10, "10:00")
+        val essays = addFeed("New essays", CadenceTier.RARE)
+        val essayPosts = (1L..3L).map { addPost(essays, clock.now, publishedAt = clock.now.minus(Duration.ofDays(it))) }
+        val notes = addFeed("New notes", CadenceTier.WEEKLY)
+        val notePosts = (1L..3L).map { addPost(notes, clock.now, publishedAt = clock.now.minus(Duration.ofHours(it))) }
+        val extra = publisher.publishExtraEdition(setOf(essays, notes))!!
+        val first = db.editionDao().getById(extra)!!
+        val firstLead = itemsOf(extra).single { it.kind == ItemKind.LEAD }.articleId
+        assertEquals((essayPosts + notePosts).toSet(), printedIn(extra))
+
+        // The reader opens the Extra, reads one story to the end, Likes another and opens a third.
+        clock.now = at(10, "10:30")
+        open(extra)
+        db.editionDao().markFinished(extra, clock.now)
+        val finished = notePosts[0]
+        db.engagementDao().markOpened(finished, clock.now)
+        db.engagementDao().markRead(finished, clock.now)
+        val liked = essayPosts[0]
+        db.engagementDao().setLiked(liked, clock.now)
+        val opened = notePosts[1]
+        db.engagementDao().markOpened(opened, clock.now)
+
+        // 12:00: another source is added and synced. Today already has an Extra: it is reprinted.
+        clock.now = at(10, "12:00")
+        val added = addFeed("Added later")
+        val addedPosts = (1L..2L).map { addPost(added, clock.now, publishedAt = clock.now.minus(Duration.ofMinutes(it))) }
+        val reprint = publisher.publishExtraEdition(setOf(added))
+
+        // The same edition: same ID, number, date and kind; a new cutoff and release time.
+        assertEquals(extra, reprint)
+        assertEquals(2, db.editionDao().count())
+        val second = db.editionDao().getById(extra)!!
+        // It keeps when it was first opened and loses its "read" tick.
+        assertEquals(
+            first.copy(cutoffAt = clock.now, releaseAt = clock.now, builtAt = clock.now, openedAt = at(10, "10:30"), finishedAt = null),
+            second,
+        )
+        // Its own feeds and the new one, set again as one paper.
+        val printed = printedIn(extra)
+        assertTrue(addedPosts.all { it in printed })
+        assertTrue((essayPosts + notePosts - finished).all { it in printed })
+        assertTrue("a story read to the end is not printed again", finished !in printed)
+        assertEquals(1, itemsOf(extra).count { it.kind == ItemKind.LEAD })
+        assertTrue(render(extra).pages.first() is EditionPage.Front)
+        // What the reader did stays with the stories.
+        assertNotNull(db.engagementDao().get(finished)!!.readAt)
+        assertNotNull(db.engagementDao().get(liked)!!.likedAt)
+        assertNotNull(db.engagementDao().get(opened)!!.openedAt)
+        // A story that led both printings has led once.
+        val lead = itemsOf(extra).single { it.kind == ItemKind.LEAD }.articleId
+        assertEquals(1, db.engagementDao().get(lead)!!.leadCount)
+        if (lead != firstLead) assertEquals(1, db.engagementDao().get(firstLead)!!.leadCount)
+
+        // The schedule is as it was.
+        assertEquals(morningItems, itemsOf(morning))
+        assertEquals(morningRow, db.editionDao().getById(morning))
+        assertEquals(nextRelease, publisher.nextReleaseAt())
+        assertEquals(at(10, "07:00"), db.editionDao().getLatestByCutoffOf(listOf(EditionKind.MORNING, EditionKind.EVENING))!!.cutoffAt)
+        assertEquals(setOf(morning, extra), db.editionDao().getPending().map { it.id }.toSet())
+        (morningItems.map { it.articleId } + essayPosts + notePosts + addedPosts).forEach { assertEquals(0, runs(it)) }
+        // It is the newest paper on the stand.
+        assertEquals(extra, publisher.ensureCurrentEdition())
+
+        // Tomorrow morning supersedes it once: untouched stories of the reprint count one run,
+        // and the story the reprint dropped counts none.
+        addPost(added, at(11, "06:00"))
+        clock.now = at(11, "07:00")
+        val next = publisher.ensureCurrentEdition()!!
+        assertEquals(3, db.editionDao().getById(next)!!.number)
+        addedPosts.forEach { assertEquals(1, runs(it)) }
+        assertEquals(1, runs(essayPosts[1]))
+        assertEquals(0, runs(finished))
+        assertEquals("opened, so not left unopened", 0, runs(opened))
+        // What the reprint printed is not new in the morning paper.
+        val nextNew = db.editionDao().getItems(next).filter { it.item.reason?.startsWith("Held over") != true }.map { it.item.articleId }
+        assertTrue(addedPosts.none { it in nextNew })
+    }
+
+    @Test
+    fun aReprintThatDropsAStoryLeavesItWithoutARun() = runTest {
+        addPosts(6, at(10, "06:40"), "Tue")
+        publisher.ensureCurrentEdition()!!
+        // A wire fills the first Extra's pages; most of its posts are only listed.
+        clock.now = at(10, "10:00")
+        val wire = addFeed("Wire", CadenceTier.FIREHOSE)
+        val wirePosts = (0 until 60).map { addPost(wire, clock.now, publishedAt = clock.now.minus(Duration.ofMinutes(5L * it))) }
+        val extra = publisher.publishExtraEdition(setOf(wire))!!
+        val firstPrinted = printedIn(extra)
+
+        // Favourites added later take places from it.
+        clock.now = at(10, "12:00")
+        val favourites = (0 until 12).map { addFeed("Favourite $it", CadenceTier.RARE, SliderStep.FAVOURITE) }
+        favourites.forEach { addPost(it, clock.now) }
+        assertEquals(extra, publisher.publishExtraEdition(favourites.toSet()))
+        val dropped = firstPrinted - printedIn(extra)
+        assertTrue("the reprint is a new printing, not an addition", dropped.isNotEmpty())
+        assertTrue(wirePosts.containsAll(dropped))
+
+        addPost(wire, at(11, "06:00"))
+        clock.now = at(11, "07:00")
+        publisher.ensureCurrentEdition()!!
+        dropped.forEach { assertEquals(0, runs(it)) }
     }
 
     @Test

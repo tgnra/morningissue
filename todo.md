@@ -108,7 +108,9 @@ Built; see "Archive export and import" in `docs/how-it-works.md`. The file-picke
 - [x] Checked on the emulator in the light phone layout: the offer after an OPML import, printing (18 s for 15 sources), and the "No. 2 · Extra" label on the cover and in the paper. Not checked in dark, e-ink or tablet layouts, nor "Not now".
 - [ ] The Back issues calendar shows one edition per day, the morning one, so an Extra or Evening edition on the same date cannot be opened from it once it has left the rack.
 - [ ] If sources are added after tomorrow's edition was pre-built but before it is released, the Extra and the pre-built edition can both carry the same stories. Untested.
-- [ ] Only one Extra edition per calendar date can be stored, because `edition` has a unique `(date, kind)` index. Lifting this needs a schema change.
+- [x] The day's Extra edition can be reprinted to take in sources added after it was printed: in place, under the same ID and number, set again as a whole. The newsstand offers "Reprint the Extra with 3 new sources". Engine and offer rule unit-tested; the offer has not been seen on a device.
+- [ ] Still only one Extra edition per calendar date, because `edition` has a unique `(date, kind)` index. The reprint removes the practical cost (later sources no longer have to wait), but two separate Extras on one date would still need a schema change.
+- [ ] A reprint rewrites the paper while it may be open in the paper screen or reader. The screens observe the edition, so they should follow; not checked on a device.
 
 ### Unprinted placeholder and Print now
 

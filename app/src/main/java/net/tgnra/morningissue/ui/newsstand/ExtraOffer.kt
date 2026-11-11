@@ -12,14 +12,22 @@ object ExtraOffer {
      * The sources an Extra edition would be printed from: those added since the newest edition
      * closed for copy, and since the reader last turned the offer down ([dismissedAt]).
      *
-     * Empty when no edition has been printed yet (the first edition takes every source) and when
-     * [today] already has an Extra edition, because only one is kept per day; sources added
-     * after it wait for the next scheduled edition.
+     * Empty when no edition has been printed yet (the first edition takes every source).
+     *
+     * An Extra edition already printed today does not end the offer: its cutoff counts like
+     * any edition's, so sources added after it are offered again, this time as a reprint of
+     * that Extra ([reprints]).
      */
-    fun newSources(feeds: List<Feed>, editions: List<EditionSummary>, dismissedAt: Instant?, today: LocalDate): List<Feed> {
+    fun newSources(feeds: List<Feed>, editions: List<EditionSummary>, dismissedAt: Instant?): List<Feed> {
         val newest = editions.maxOfOrNull { it.cutoffAt } ?: return emptyList()
-        if (editions.any { it.kind == EditionKind.EXTRA && it.date == today }) return emptyList()
         val since = if (dismissedAt != null && dismissedAt > newest) dismissedAt else newest
         return feeds.filter { it.addedAt > since }
     }
+
+    /**
+     * Whether printing would reprint an Extra edition rather than print a first one: [today]
+     * already has one, and only one is kept per date. The offer then says "Reprint".
+     */
+    fun reprints(editions: List<EditionSummary>, today: LocalDate): Boolean =
+        editions.any { it.kind == EditionKind.EXTRA && it.date == today }
 }

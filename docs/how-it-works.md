@@ -45,7 +45,7 @@ Everything runs on the device. There is no account and no server; the only netwo
 
 | Term | Meaning |
 | --- | --- |
-| Edition | One day's paper. Once built it is frozen: its stories and their order never change. |
+| Edition | One day's paper. Once built it is frozen: its stories and their order never change. The one exception is an Extra edition reprinted the same day (see [The Extra edition](#the-extra-edition)). |
 | Reset time | The local time at which a new edition is released. 06:30 by default, set in Settings. |
 | Release | The moment an edition becomes visible (its `releaseAt`). An edition built ahead of time is hidden until then. |
 | First-seen time | When the app first fetched a post (`article.firstSeenAt`). This, not the publish date, decides which edition a post belongs to. |
@@ -455,13 +455,20 @@ Optional and off by default. Settings has the switch and, when it is on, the rel
 
 `EditionPublisher.publishExtraEdition(feedIds)` (also on `EditionRepository`) prints an edition at once from chosen feeds, meant for sources the reader has just added. The caller syncs those feeds first.
 
-The newsstand makes the offer (`ui/newsstand/ExtraOffer.kt`). Sources added after the newest edition's cutoff bring up a notice with "Print an Extra edition" and "Not now". Printing syncs those sources and calls `publishExtraEdition`. "Not now" is remembered (`AppSettings.extraOfferDismissedAt`), so the same sources are not offered twice; they join the next scheduled edition as usual. Nothing is offered before the first edition, or on a date that already has an Extra edition. Covers and paper headers read "No. 12 · Extra".
+The newsstand makes the offer (`ui/newsstand/ExtraOffer.kt`). Sources added after the newest edition's cutoff bring up a notice with "Print an Extra edition" and "Not now". Printing syncs those sources and calls `publishExtraEdition`. "Not now" is remembered (`AppSettings.extraOfferDismissedAt`), so the same sources are not offered twice; they join the next scheduled edition as usual. Nothing is offered before the first edition. On a date that already has an Extra edition, sources added after it went to press are offered as a reprint of it (below). Covers and paper headers read "No. 12 · Extra".
 
 - **What it covers.** Those feeds' posts first seen in the last 3 days that no edition has printed. Each feed's 5 newest posts are exempt from the 30-day age limit and the freshness floor, so a quiet blog still shows what it has.
 - **Structure.** The same as a morning edition, without held-over posts or a pull-out. Kind `EXTRA`, the next running number, released immediately, dated today.
 - **It does not disturb the schedule.** No cutoff moves, today's edition is not changed, and nothing is superseded: today's stories do not count as ignored and the next release time is the same.
 - **Afterwards.** In the next morning edition, the stories the Extra printed are not new. A loved Weekly or Rare feed's untouched ones are held over under the usual rules. Posts the Extra only listed in its index are still new. The next scheduled build counts the Extra's unopened runs along with those of the scheduled edition it supersedes.
-- **Limits.** It returns null and stores nothing when the feeds have nothing printable. There is at most one Extra edition per calendar date, because the database allows one edition per date and kind; a second request on the same date returns null.
+- **Limits.** It returns null and stores nothing when the feeds have nothing printable. There is at most one Extra edition per calendar date, because the database allows one edition per date and kind.
+- **Reprinting.** When sources are added after the day's Extra was printed, the newsstand offers "Reprint the Extra with 3 new sources" (and "Not now"). A reprint is the one case in which a stored edition changes, and it is deliberate:
+  - **It replaces the first printing in place.** The paper is set again as a whole from the feeds it had plus the new ones, and stored under the same ID and edition number, with a new cutoff and release time, so it is the newest paper on the stand. It is not the old pages with stories added: the new feeds' stories compete for the front page like any others, and a story of the first printing can lose its place to them or drop to the index.
+  - **Reading state is kept.** What the reader did with a story (opened, read, saved, Liked) is stored with the story, not the edition, and is untouched. A story read to the end is not printed again. The edition keeps the time it was first opened and loses its "read" tick, since it has new stories.
+  - **Dropped stories.** A story the reprint no longer prints is in no printing any more: it gets no "ran unopened" count and does not count against its feed in learning. Stories the reprint does print are counted once, when the next scheduled edition supersedes it. (If a scheduled edition had already superseded the first printing, its untouched stories were counted then, and those still in the reprint are counted again when the reprint is superseded: once per printing.) A story that led both printings has led once.
+  - **The schedule is not disturbed**, exactly as for the first printing: no cutoff moves and nothing is superseded.
+  - If the new sources have nothing printable, the first printing is left exactly as it was.
+  - No schema change was needed: the old row and its items are deleted and the reprint inserted under the same ID in one transaction.
 
 ### Long gaps
 

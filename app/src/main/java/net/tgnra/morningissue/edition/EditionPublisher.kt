@@ -52,8 +52,12 @@ interface EditionPublisher {
      * nothing is superseded. Stories it prints are not new in the next morning edition; posts
      * it only lists in its index still are.
      *
-     * Returns null, storing nothing, when those feeds have nothing printable, or when an Extra
-     * edition already exists for today's date (one per calendar date).
+     * There is one Extra edition per calendar date. If today already has one, it is
+     * **reprinted** to include [feedIds]: set again from its own feeds and these, and stored
+     * in the first printing's place under the same ID and number, as the newest paper on the
+     * stand. This is the one case in which a stored edition changes.
+     *
+     * Returns null, storing and changing nothing, when those feeds have nothing printable.
      */
     suspend fun publishExtraEdition(feedIds: Set<Long>): Long? = null
 }

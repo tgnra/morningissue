@@ -40,8 +40,9 @@ interface EditionRepository {
 
     /**
      * Prints an Extra edition from the stored posts of [feedIds] and returns its ID; see
-     * `EditionPublisher.publishExtraEdition`. Sync the feeds first. Null when nothing was
-     * printed (no posts, or today already has an Extra edition).
+     * `EditionPublisher.publishExtraEdition`. Sync the feeds first. If today already has an
+     * Extra edition it is reprinted to include these feeds and keeps its ID. Null when the
+     * feeds had nothing to print; nothing is then stored or changed.
      */
     suspend fun publishExtraEdition(feedIds: Set<Long>): Long? = null
 

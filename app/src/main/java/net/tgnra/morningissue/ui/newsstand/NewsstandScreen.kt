@@ -204,9 +204,10 @@ fun NewsstandScreen(
             feeds = feeds.orEmpty(),
             editions = editions.orEmpty(),
             dismissedAt = settings?.extraOfferDismissedAt,
-            today = now.atZone(zone).toLocalDate(),
         )
     }
+    // Today's Extra edition, if there is one, is reprinted with the new sources.
+    val reprintsExtra = ExtraOffer.reprints(editions.orEmpty(), now.atZone(zone).toLocalDate())
     var printingExtra by remember { mutableStateOf(false) }
     val printExtra: () -> Unit = {
         if (!printingExtra && newSources.isNotEmpty()) {
@@ -222,7 +223,13 @@ fun NewsstandScreen(
                         // Nothing recent enough to print; do not keep offering the same sources.
                         container.settings.setExtraOfferDismissedAt(container.clock.instant())
                     }
-                    notice = resources.getString(if (printed == null) R.string.extra_nothing_to_print else R.string.extra_printed)
+                    notice = resources.getString(
+                        when {
+                            printed == null -> R.string.extra_nothing_to_print
+                            reprintsExtra -> R.string.extra_reprinted
+                            else -> R.string.extra_printed
+                        },
+                    )
                 } finally {
                     printingExtra = false
                 }
@@ -277,6 +284,7 @@ fun NewsstandScreen(
                     if (newSources.isNotEmpty() && unprinted == null) {
                         ExtraEditionOffer(
                             sourceCount = newSources.size,
+                            reprint = reprintsExtra,
                             printing = printingExtra,
                             onPrint = printExtra,
                             onDismiss = { scope.launch { container.settings.setExtraOfferDismissedAt(container.clock.instant()) } },
@@ -419,9 +427,20 @@ private fun NoNewEditionNotice(
     }
 }
 
-/** Offered after sources are added: a paper from them now, without waiting for the next reset. */
+/**
+ * Offered after sources are added: a paper from them now, without waiting for the next reset.
+ * With [reprint], today's Extra edition was printed before they were added, and the offer is
+ * to print it again with them in it.
+ */
 @Composable
-private fun ExtraEditionOffer(sourceCount: Int, printing: Boolean, onPrint: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+private fun ExtraEditionOffer(
+    sourceCount: Int,
+    reprint: Boolean,
+    printing: Boolean,
+    onPrint: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
     Box(modifier.fillMaxWidth().stepAnchor().padding(top = 12.dp), contentAlignment = Alignment.TopCenter) {
@@ -431,7 +450,14 @@ private fun ExtraEditionOffer(sourceCount: Int, printing: Boolean, onPrint: () -
             SectionLabel(pluralStringResource(R.plurals.extra_offer_title, sourceCount, sourceCount), color = colors.ink, heading = true)
             Spacer(Modifier.height(6.dp))
             Text(
-                text = stringResource(if (printing) R.string.extra_printing else R.string.extra_offer_detail),
+                text = stringResource(
+                    when {
+                        printing && reprint -> R.string.extra_reprinting
+                        printing -> R.string.extra_printing
+                        reprint -> R.string.extra_reprint_detail
+                        else -> R.string.extra_offer_detail
+                    },
+                ),
                 style = type.standfirst.copy(fontStyle = FontStyle.Italic),
                 color = colors.ink,
                 textAlign = TextAlign.Center,
@@ -440,7 +466,11 @@ private fun ExtraEditionOffer(sourceCount: Int, printing: Boolean, onPrint: () -
                 Spacer(Modifier.height(12.dp))
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    TextLink(stringResource(R.string.extra_offer_print), onPrint)
+                    TextLink(
+                        if (reprint) pluralStringResource(R.plurals.extra_reprint, sourceCount, sourceCount)
+                        else stringResource(R.string.extra_offer_print),
+                        onPrint,
+                    )
                     TextLink(stringResource(R.string.extra_offer_dismiss), onDismiss)
                 }
             }
