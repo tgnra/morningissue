@@ -10,6 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import net.tgnra.morningissue.sync.TeaserBackfillWorker
 
 class MorningIssueApp : Application(), SingletonImageLoader.Factory {
     /** Created on first use so tests and receivers do not pay for what they do not touch. */
@@ -20,6 +21,8 @@ class MorningIssueApp : Application(), SingletonImageLoader.Factory {
         // Off the main thread: building the modules opens the database and settings.
         container.appScope.launch {
             container.syncScheduler.ensurePeriodicSync()
+            // Once after upgrading: fetch the pages of stored posts whose feed gave only a teaser.
+            TeaserBackfillWorker.ensureDone(this@MorningIssueApp)
             // Runs once now and again whenever a release time changes.
             container.settings.settings
                 .map { listOf(it.resetTime, it.eveningEditionEnabled, it.eveningEditionTime, it.resetChange, it.eveningChange) }

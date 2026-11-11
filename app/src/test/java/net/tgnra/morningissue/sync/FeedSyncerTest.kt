@@ -329,4 +329,37 @@ class FeedSyncerTest {
     fun noFeedsIsAnEmptyReport() = runBlocking<Unit> {
         assertEquals(SyncReport(), syncer.syncAll())
     }
+
+    @Test
+    fun teaserPostsAreFetchedFromTheirPageOnRefresh() = runBlocking<Unit> {
+        val fetching = DefaultFeedSyncer(
+            db, FeedFetcher(OkHttpClient()), clock, scope,
+            fullText = DefaultFullTextFetcher(db, FeedFetcher(OkHttpClient()), clock),
+        )
+        val feedId = addFeed("/teasers")
+        val page = url("/article")
+        routes["/article"] = { response(Fixtures.text("article.html"), 200, "Content-Type" to "text/html; charset=utf-8") }
+        routes["/teasers"] = {
+            response(
+                """<?xml version="1.0"?><rss version="2.0"><channel><title>Cafe</title><link>https://site.example/</link>""" +
+                    """<item><title>The Long Way Round</title><guid>t</guid><link>$page</link>""" +
+                    """<description><![CDATA[<p>A ferry trip.</p><p>Read in full on <a href="$page">Cafe</a>.</p>]]></description></item>""" +
+                    """<item><title>Short note</title><guid>n</guid><link>$page</link>""" +
+                    """<description><![CDATA[<p>A short note, complete as it is.</p>]]></description></item>""" +
+                    "</channel></rss>",
+            )
+        }
+
+        assertEquals(2, fetching.syncAll().newArticles)
+
+        val teaser = db.articleDao().getByGuid(feedId, "t")!!
+        val content = db.articleDao().getContent(teaser.id)!!
+        assertEquals(ContentSource.FETCHED, content.source)
+        assertTrue("The ferry leaves the harbour at six in the morning" in ContentBlocks.plainText(ContentBlocks.decode(content.blocksJson)))
+        assertTrue(db.articleDao().getById(teaser.id)!!.wordCount > 200)
+        // A short post that does not send the reader away is left as the feed gave it.
+        val note = db.articleDao().getByGuid(feedId, "n")!!
+        assertEquals(ContentSource.FEED, db.articleDao().getContent(note.id)!!.source)
+        assertEquals(1, routes.hits("/article"))
+    }
 }

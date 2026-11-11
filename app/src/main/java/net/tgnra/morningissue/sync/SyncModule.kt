@@ -28,16 +28,17 @@ object SyncModule {
         // feeds the reader only looked into through discovery go after 7 days, the image store is
         // swept of files and rows that have lost their other half, then stored images
         // and text are trimmed to the storage budget.
+        val fullText = DefaultFullTextFetcher(core.database, fetcher, core.clock)
         val discoveryCleanup = DiscoveryCleanup(core.database, core.images, core.clock)
         val syncer = MaintainedFeedSyncer(
-            delegate = DefaultFeedSyncer(core.database, fetcher, core.clock, core.appScope),
+            delegate = DefaultFeedSyncer(core.database, fetcher, core.clock, core.appScope, fullText = fullText),
             afterSync = listOf({ healthChecker.run() }, { core.signals.run() }, { discoveryCleanup.run() }, { core.images.sweep() }, { core.storage.trimToBudget() }),
         )
         return SyncComponents(
             feedSyncer = syncer,
             syncScheduler = WorkManagerSyncScheduler(core.appContext),
             feedDiscovery = discovery,
-            fullTextFetcher = DefaultFullTextFetcher(core.database, fetcher, core.clock),
+            fullTextFetcher = fullText,
             opmlTransfer = DefaultOpmlTransfer(core.feeds, core.clock),
             feedHealth = DefaultFeedHealthRepository(
                 core.database, healthChecker, syncer, PrefsDeskNoticeStore(core.appContext), core.clock,

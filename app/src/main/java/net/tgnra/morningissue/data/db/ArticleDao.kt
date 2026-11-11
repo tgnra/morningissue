@@ -147,6 +147,18 @@ abstract class ArticleDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     protected abstract suspend fun upsertContent(content: ArticleContentEntity)
 
+    /**
+     * Feed-provided bodies (source `FEED`) of subscribed feeds' posts published at or after
+     * [since] that have a web address, by article ID after [afterId]; for `TeaserBackfill`.
+     */
+    @Query(
+        "SELECT c.articleId AS articleId, c.blocksJson AS blocksJson FROM article_content c " +
+            "JOIN article a ON a.id = c.articleId JOIN feed f ON f.id = a.feedId " +
+            "WHERE c.source = 'FEED' AND f.status = 'SUBSCRIBED' AND a.url IS NOT NULL " +
+            "AND a.publishedAt >= :since AND c.articleId > :afterId ORDER BY c.articleId LIMIT :limit",
+    )
+    abstract suspend fun feedBodiesSince(since: Instant, afterId: Long, limit: Int): List<FeedBodyRow>
+
     /** Bytes of stored article text (approximate: characters of block JSON). */
     @Query("SELECT COALESCE(SUM(LENGTH(blocksJson)), 0) FROM article_content")
     abstract suspend fun contentSize(): Long

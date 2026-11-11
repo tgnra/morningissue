@@ -50,6 +50,8 @@ class DefaultFeedSyncer(
     private val config: RankingConfig = RankingConfig.Default,
     private val parallelism: Int = DEFAULT_PARALLELISM,
     private val parseDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** Fetches the page of a new post whose feed body is only a teaser ([DefaultFullTextFetcher.isTeaser]). */
+    private val fullText: FullTextFetcher? = null,
 ) : FeedSyncer {
     private val feedDao = database.feedDao()
     private val articleDao = database.articleDao()
@@ -157,6 +159,7 @@ class DefaultFeedSyncer(
                     return Outcome(failed = true)
                 }
                 val added = store(feed, parsed, now)
+                fetchTeasers(added.teasers)
                 val moved = applyPermanentRedirect(feed, result.permanentUrl)
                 feedDao.updateSyncState(feed.id, result.etag, result.lastModified, now)
                 feedDao.updateSiteInfo(feed.id, parsed.siteUrl, parsed.iconUrl)
@@ -164,26 +167,46 @@ class DefaultFeedSyncer(
                 if (parsed.title != null && feed.title == FeedUrls.hostOf(feed.url)) feedDao.updateTitle(feed.id, parsed.title)
                 healthDao.recordSuccess(feed.id, if (moved) 301 else result.status, articleDao.latestPublishedAt(feed.id))
                 updateCadence(feed.id, now)
-                Outcome(newArticles = added)
+                Outcome(newArticles = added.count)
             }
         }
     }
 
     /**
+     * Fetches the pages of new teaser posts, newest first and at most [MAX_TEASER_FETCHES] per
+     * feed per sync (a newly added feed can bring a backlog), so the stored body is the article.
+     * A failure leaves the teaser; the reader tries again when the post is opened.
+     */
+    private suspend fun fetchTeasers(teasers: List<Teaser>) {
+        val fetcher = fullText ?: return
+        if (teasers.isEmpty()) return
+        val permits = Semaphore(TEASER_PARALLEL)
+        coroutineScope {
+            for (teaser in teasers.sortedByDescending { it.publishedAt }.take(MAX_TEASER_FETCHES)) {
+                async { permits.withPermit { fetcher.ensureFullText(teaser.articleId) } }
+            }
+        }
+    }
+
+    private class Teaser(val articleId: Long, val publishedAt: Instant)
+
+    private class Stored(val count: Int, val teasers: List<Teaser>)
+
+    /**
      * Stores the posts the feed has not had before, with their categories and traits, and
-     * returns how many there were.
+     * returns how many there were and which of them are teasers.
      *
      * Posts already held are completed where something is missing: categories and traits did
      * not exist before database version 2, and a category or an enclosure can only be learned
      * from the feed. Once a post has them it is passed over, so an ordinary sync costs one
      * read per feed here ([ArticleSignalDao.storedPosts]) and converts no HTML.
      */
-    private suspend fun store(feed: FeedEntity, parsed: ParsedFeed, now: Instant): Int {
+    private suspend fun store(feed: FeedEntity, parsed: ParsedFeed, now: Instant): Stored {
         val stored = parsed.items.map { it.guid }.chunked(ArticleSignalDao.MAX_IDS)
             .flatMap { signalDao.storedPosts(feed.id, it) }.associateBy { it.guid }
         val fresh = parsed.items.filter { it.guid !in stored }
         val incomplete = parsed.items.mapNotNull { item -> stored[item.guid]?.let { completion(item, it) } }
-        if (fresh.isEmpty() && incomplete.isEmpty()) return 0
+        if (fresh.isEmpty() && incomplete.isEmpty()) return Stored(0, emptyList())
         // HTML conversion is the slow part; do it outside the transaction.
         val rows = withContext(parseDispatcher) {
             fresh.map { item ->
@@ -204,13 +227,17 @@ class DefaultFeedSyncer(
                     feedWordCount = content.wordCount,
                     contentHash = content.contentHash,
                 )
-                NewPost(item, article, content.blocks.takeIf { it.isNotEmpty() }?.let(ContentBlocks::encode))
+                NewPost(
+                    item, article, content.blocks.takeIf { it.isNotEmpty() }?.let(ContentBlocks::encode),
+                    teaser = fullText != null && item.url != null && DefaultFullTextFetcher.isTeaser(content.blocks),
+                )
             }
         }
         val traits = withContext(parseDispatcher) {
             incomplete.filter { it.traits }.associate { it.articleId to it.item.content.traits }
         }
-        return database.withWriteTransaction {
+        val teasers = mutableListOf<Teaser>()
+        val count = database.withWriteTransaction {
             for (post in incomplete) {
                 if (post.categories) signalDao.addCategories(post.articleId, post.item.categories)
                 traits[post.articleId]?.let { signalDao.upsertTraits(ArticleSignalDao.traitsRow(post.articleId, it)) }
@@ -222,12 +249,14 @@ class DefaultFeedSyncer(
                     ?: return@count false
                 signalDao.addCategories(id, post.item.categories)
                 signalDao.upsertTraits(ArticleSignalDao.traitsRow(id, content.traits))
+                if (post.teaser) teasers += Teaser(id, post.article.publishedAt)
                 true
             }
         }
+        return Stored(count, teasers)
     }
 
-    private class NewPost(val item: ParsedItem, val article: ArticleEntity, val blocksJson: String?)
+    private class NewPost(val item: ParsedItem, val article: ArticleEntity, val blocksJson: String?, val teaser: Boolean)
 
     /** What a post already held is missing that [item] can supply. */
     private class Completion(
@@ -276,5 +305,9 @@ class DefaultFeedSyncer(
     companion object {
         /** Enough to finish a hundred feeds quickly without hammering a phone's radio. */
         const val DEFAULT_PARALLELISM = 6
+
+        /** Teaser pages fetched per feed per sync, and at once within a feed. */
+        const val MAX_TEASER_FETCHES = 10
+        const val TEASER_PARALLEL = 2
     }
 }

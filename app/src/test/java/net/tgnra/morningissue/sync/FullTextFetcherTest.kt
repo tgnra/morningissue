@@ -153,6 +153,18 @@ class FullTextFetcherTest {
     }
 
     @Test
+    fun teasersAreShortBodiesThatSendTheReaderToThePage() {
+        assertTrue(DefaultFullTextFetcher.isTeaser(paragraphs(40, "Read in full on Analog.Cafe.")))
+        assertTrue(DefaultFullTextFetcher.isTeaser(paragraphs(40, "Continue reading →")))
+        assertTrue(DefaultFullTextFetcher.isTeaser(paragraphs(40, "Read the full story at Example")))
+        assertTrue(DefaultFullTextFetcher.isTeaser(paragraphs(40, "and so on…")))
+        assertFalse(DefaultFullTextFetcher.isTeaser(paragraphs(40)))
+        // Long text is the article, unless it too ends by sending the reader away.
+        assertFalse(DefaultFullTextFetcher.isTeaser(paragraphs(300)))
+        assertFalse(DefaultFullTextFetcher.looksComplete(paragraphs(300, "Read in full on Analog.Cafe.")))
+    }
+
+    @Test
     fun shortButCompleteFeedTextIsKeptAndThePageIsCheckedOnlyOnce() = runBlocking<Unit> {
         // Too short to be taken for complete on sight, but the page turns out to have no more.
         val shortFeed = paragraphs(120)

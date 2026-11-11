@@ -108,6 +108,12 @@ data class FeedPostStatsRow(
     val opened: Int,
 )
 
+/** A feed-provided body; see `ArticleDao.feedBodiesSince`. */
+data class FeedBodyRow(
+    val articleId: Long,
+    val blocksJson: String,
+)
+
 /** A stored body and its size in characters, search-index copy included; see `ArticleDao.trimCandidates`. */
 data class ContentSizeRow(
     val articleId: Long,

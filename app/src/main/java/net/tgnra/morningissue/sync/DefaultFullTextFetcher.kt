@@ -118,9 +118,28 @@ class DefaultFullTextFetcher(
         private const val FEED_WAS_COMPLETE_RATIO = 1.2
         private val HTML_TYPES = setOf("text/html", "application/xhtml+xml", "text/plain")
         private val EXCERPT_ENDING = Regex(
-            """(…|\.\.\.|\[…]|\[\.\.\.]|\[&#8230;]|read more\W*|continue reading\W*|read the rest.*|appeared first on .*)$""",
+            """(…|\.\.\.|\[…]|\[\.\.\.]|\[&#8230;]|read more\W*|continue reading\W*|read the rest.*|read (it )?in full\b.*|appeared first on .*)$""",
             RegexOption.IGNORE_CASE,
         )
+
+        /**
+         * A feed body that ends by sending the reader to the site ("Read in full on …", "Continue
+         * reading", "Read more"). Such a post is fetched when the feed is refreshed, not only
+         * when it is opened, so its text is there to read anywhere (the Kobo has no browser).
+         */
+        private val SENDS_TO_PAGE = Regex(
+            """(read (it |this |the (full|whole|rest of the) (story|article|post|piece) )?(in full|more|on)\b.*|continue reading\b.*|keep reading\b.*|read the rest\b.*|full (story|article|post)\b.*|…|\.\.\.|\[…]|\[\.\.\.])$""",
+            RegexOption.IGNORE_CASE,
+        )
+
+        /** True when feed-provided [blocks] are a short teaser that points the reader to the web page. */
+        internal fun isTeaser(blocks: List<ContentBlock>): Boolean {
+            if (looksComplete(blocks)) return false
+            val text = ContentBlocks.plainText(blocks)
+            return SENDS_TO_PAGE.containsMatchIn(text.takeLast(TEASER_TAIL).trim())
+        }
+
+        private const val TEASER_TAIL = 120
 
         /** True when feed-provided [blocks] read like a whole article rather than a teaser. */
         internal fun looksComplete(blocks: List<ContentBlock>): Boolean {
