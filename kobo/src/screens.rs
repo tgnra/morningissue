@@ -1,13 +1,13 @@
-//! The three screens, laid out for whatever size and density the panel has: the newsstand,
-//! an edition's pages, and an article.
+//! An edition's pages and an article, laid out for whatever size and density the panel has.
+//! The home, saved, settings and popover screens are in [`crate::ui`].
 
-use crate::canvas::{Canvas, Rect, BLACK, WHITE};
+use crate::canvas::{Rect, BLACK};
 use crate::fonts::{Fonts, Style};
 use crate::images::Fit;
-use crate::layout::{self, paginate, Action, El, ImageCache, Metrics, Piece, Screen, Type};
+use crate::layout::{paginate, paginate_balanced, Action, El, ImageCache, Metrics, Piece, Screen, Type};
 use crate::model::{read_minutes, Article, Block, Bundle, EditionPage, PageKind, RichText};
 use crate::text::{self, Align, Inline, Opts, Para};
-use crate::time::{self, Date};
+use crate::time::Date;
 use std::rc::Rc;
 
 pub const READ_GREY: u8 = 105;
@@ -26,10 +26,15 @@ impl<'a> Ctx<'a> {
         Ctx { fonts, ty: Type::new(&m), m, images }
     }
 
-    fn hair(&self) -> i32 {
+    /// With the article text at `scale` times its base size ("Aa").
+    pub fn reading(fonts: &'a Fonts, m: Metrics, images: &'a ImageCache, scale: f32) -> Ctx<'a> {
+        Ctx { fonts, ty: Type::with_text_scale(&m, scale), m, images }
+    }
+
+    pub fn hair(&self) -> i32 {
         self.m.pt(0.5).round().max(1.0) as i32
     }
-    fn heavy(&self) -> i32 {
+    pub fn heavy(&self) -> i32 {
         self.m.pt(2.0).round().max(2.0) as i32
     }
 
@@ -45,12 +50,13 @@ impl<'a> Ctx<'a> {
         self.para(&text::plain(s, style), width, align, 1.3, Some(1))
     }
 
-    fn has_image(&self, url: Option<&str>) -> Option<(u32, u32)> {
-        url.filter(|u| !u.is_empty()).and_then(|u| self.images.dims(u))
+    /// The size to lay out a story's picture at: stored, or still to come in this sync.
+    pub fn has_image(&self, url: Option<&str>) -> Option<(u32, u32)> {
+        url.filter(|u| !u.is_empty()).and_then(|u| self.images.slot(u, None))
     }
 }
 
-fn byline(a: &Article) -> String {
+pub fn byline(a: &Article) -> String {
     let mins = read_minutes(a.word_count);
     let feed = a.feed_title.trim();
     if feed.is_empty() {
@@ -156,7 +162,7 @@ fn story(ctx: &Ctx, id: i64, a: &Article, x: f32, w: f32, role: Role, budget: Op
             let mut text_els = Vec::new();
             let th = story_text(ctx, a, x, 0.0, w, role, true, &mut text_els);
             let share = if role == Role::Lead { 0.42 } else { 0.32 };
-            let ph = (w * aspect).clamp(w * 0.42, w * 0.7).min(ctx.m.content().h as f32 * share).min(budget - th - gap).floor();
+            let ph = (w * aspect).clamp(w * 0.42, w * 0.7).min(ctx.m.page().h as f32 * share).min(budget - th - gap).floor();
             if ph >= min_h {
                 els.push(El::Image { url, r: Rect::new(x as i32, 0, w as i32, ph as i32), fit: Fit::Cover });
                 els.extend(text_els.iter().map(|e| e.shifted(ph + gap)));
@@ -176,7 +182,7 @@ fn story(ctx: &Ctx, id: i64, a: &Article, x: f32, w: f32, role: Role, budget: Op
 
 /// Stories laid out `cols` across, with rules between rows and columns.
 fn grid(ctx: &Ctx, bundle: &Bundle, ids: &[i64], cols: usize) -> Vec<Piece> {
-    let c = ctx.m.content();
+    let c = ctx.m.page();
     let gutter = ctx.m.pt(14.0).round();
     let mut out = Vec::new();
     for row in ids.chunks(cols) {
@@ -226,7 +232,7 @@ pub fn page_title(kind: &PageKind) -> String {
 }
 
 fn masthead(ctx: &Ctx, b: &Bundle) -> Piece {
-    let c = ctx.m.content();
+    let c = ctx.m.page();
     let ty = &ctx.ty;
     let w = c.w as f32;
     let mut els = Vec::new();
@@ -266,7 +272,7 @@ fn masthead(ctx: &Ctx, b: &Bundle) -> Piece {
 }
 
 fn heading(ctx: &Ctx, page: &EditionPage, intro: Option<&str>) -> Piece {
-    let c = ctx.m.content();
+    let c = ctx.m.page();
     let ty = &ctx.ty;
     let w = c.w as f32;
     let mut els = Vec::new();
@@ -303,7 +309,7 @@ fn heading(ctx: &Ctx, page: &EditionPage, intro: Option<&str>) -> Piece {
 }
 
 fn brief(ctx: &Ctx, id: i64, a: &Article) -> Piece {
-    let c = ctx.m.content();
+    let c = ctx.m.page();
     let ty = &ctx.ty;
     let read = is_read(a);
     let pad = ctx.m.pt(6.0);
@@ -328,7 +334,7 @@ fn brief(ctx: &Ctx, id: i64, a: &Article) -> Piece {
 }
 
 fn back_page(ctx: &Ctx, b: &Bundle, page: &EditionPage, latest: bool) -> Vec<Piece> {
-    let c = ctx.m.content();
+    let c = ctx.m.page();
     let ty = &ctx.ty;
     let w = c.w as f32;
     let mut out = Vec::new();
@@ -402,7 +408,7 @@ trait WithTitle {
 impl WithTitle for Piece {
     /// Rebuilds a page heading with an arbitrary title (the back page's index).
     fn with_title(self, ctx: &Ctx, title: &str, intro: Option<&str>) -> Piece {
-        let c = ctx.m.content();
+        let c = ctx.m.page();
         let ty = &ctx.ty;
         let w = c.w as f32;
         let mut els = Vec::new();
@@ -425,13 +431,13 @@ impl WithTitle for Piece {
 
 /// Every screen of every page of an edition: `(page index, screen)`.
 pub fn edition_screens(ctx: &Ctx, b: &Bundle, pages: &[EditionPage], latest: bool) -> Vec<(usize, Screen)> {
-    let area = ctx.m.content();
+    let area = ctx.m.page();
     let cols = ctx.m.columns();
     let gap = ctx.m.pt(10.0);
     let mut out = Vec::new();
     for (pi, page) in pages.iter().enumerate() {
         let mut pieces = Vec::new();
-        let c = ctx.m.content();
+        let c = area;
         match &page.kind {
             PageKind::Front => {
                 let mast = masthead(ctx, b);
@@ -502,7 +508,7 @@ pub fn edition_screens(ctx: &Ctx, b: &Bundle, pages: &[EditionPage], latest: boo
             piece.els.push(El::Text { para: p, x: area.x as f32, y: 0.0 });
             pieces.push(piece);
         }
-        for s in paginate(&pieces, area) {
+        for s in paginate_balanced(&pieces, area) {
             out.push((pi, s));
         }
     }
@@ -546,7 +552,7 @@ pub struct ArticleLayout {
 
 pub fn article_screens(ctx: &Ctx, a: &Article) -> ArticleLayout {
     let ty = &ctx.ty;
-    let c = ctx.m.content();
+    let c = ctx.m.page();
     let measure = ctx.m.measure(&ty.reader);
     let x = c.x as f32 + ((c.w as f32 - measure) / 2.0).floor();
     let w = measure;
@@ -585,7 +591,7 @@ pub fn article_screens(ctx: &Ctx, a: &Article) -> ArticleLayout {
     // The lead picture, unless the body starts with it anyway.
     let body_images: Vec<&str> = a.blocks.iter().filter_map(|b| if let Block::Image { url, .. } = b { Some(url.as_str()) } else { None }).collect();
     if let Some(url) = a.image_url.as_deref().filter(|u| !body_images.contains(u)) {
-        if let Some(mut p) = image_piece(ctx, url, None, x, w, gap) {
+        if let Some(mut p) = image_piece(ctx, url, None, None, x, w, gap) {
             // The lead stays under the headline.
             p.float = false;
             pieces.push(p);
@@ -600,6 +606,7 @@ pub fn article_screens(ctx: &Ctx, a: &Article) -> ArticleLayout {
     let body = ty.reader;
     for (bi, block) in blocks.iter().enumerate() {
         let first_gap = if bi == 0 { gap * 1.4 } else { gap };
+        let start = pieces.len();
         match block {
             Block::Paragraph(t) => {
                 if t.text.trim().is_empty() {
@@ -664,10 +671,19 @@ pub fn article_screens(ctx: &Ctx, a: &Article) -> ArticleLayout {
             }
             Block::Image { url, caption, alt, .. } => {
                 let cap = caption.clone().or_else(|| alt.as_ref().filter(|s| !s.trim().is_empty()).map(|_| RichText::plain(""))).filter(|c| !c.text.trim().is_empty());
-                if let Some(p) = image_piece(ctx, url, cap.as_ref(), x, w, first_gap) {
+                let hint = match (block, ) {
+                    (Block::Image { width: Some(iw), height: Some(ih), .. },) => Some((*iw, *ih)),
+                    _ => None,
+                };
+                if let Some(p) = image_piece(ctx, url, cap.as_ref(), hint, x, w, first_gap) {
                     pieces.push(p);
                 }
             }
+        }
+        // Anchors: the block's number, plus how far into it each piece starts.
+        let n = (pieces.len() - start).max(1) as f32;
+        for (k, p) in pieces[start..].iter_mut().enumerate() {
+            p.anchor = (bi + 1) as f32 + k as f32 / n;
         }
     }
     if a.blocks.is_empty() {
@@ -701,10 +717,15 @@ pub fn article_screens(ctx: &Ctx, a: &Article) -> ArticleLayout {
     ArticleLayout { screens: paginate(&pieces, c) }
 }
 
-fn image_piece(ctx: &Ctx, url: &str, caption: Option<&RichText>, x: f32, w: f32, gap: f32) -> Option<Piece> {
-    let (iw, ih) = ctx.images.dims(url)?;
-    let max_h = ctx.m.content().h as f32 * 0.42;
-    let mut dw = w.min(iw as f32 * ctx.m.dpi / 150.0).max(w * 0.4).min(w);
+/// A picture as wide as it reads well, at the size the bundle gives (or its own size once
+/// stored), so the text does not move when it arrives.
+fn image_piece(ctx: &Ctx, url: &str, caption: Option<&RichText>, hint: Option<(u32, u32)>, x: f32, w: f32, gap: f32) -> Option<Piece> {
+    let (iw, ih) = ctx.images.slot(url, hint)?;
+    let max_h = ctx.m.page().h as f32 * 0.42;
+    // Pictures come at the screen's width; a small one is shown at least 40% wide. The
+    // shape, not the pixel count, decides the space while the picture is on its way.
+    let natural = if ctx.images.dims(url).is_some() { iw as f32 * ctx.m.dpi / 150.0 } else { w };
+    let mut dw = w.min(natural).max(w * 0.4).min(w);
     let mut dh = dw * ih as f32 / iw as f32;
     if dh > max_h {
         dh = max_h;
@@ -723,29 +744,72 @@ fn image_piece(ctx: &Ctx, url: &str, caption: Option<&RichText>, x: f32, w: f32,
     Some(p)
 }
 
+/// A line of code split where it is spaced out: (the column it starts at, the text).
+fn code_segments(line: &str) -> Vec<(usize, String)> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        while i < chars.len() && chars[i] == ' ' {
+            i += 1;
+        }
+        if i >= chars.len() {
+            break;
+        }
+        let start = i;
+        // A segment runs until two spaces in a row.
+        while i < chars.len() && !(chars[i] == ' ' && chars.get(i + 1).is_none_or(|c| *c == ' ')) {
+            i += 1;
+        }
+        out.push((start, chars[start..i].iter().collect()));
+    }
+    out
+}
+
 fn pre_pieces(ctx: &Ctx, t: &str, x: f32, w: f32, gap: f32) -> Vec<Piece> {
-    // No monospaced font is bundled, so each character of Inter sits centred in a fixed cell.
-    // Long lines are set smaller, down to 70%, then wrap.
+    // No monospaced font is bundled, so code is set in Inter at its own spacing, which reads
+    // far better than letters spread over fixed cells. Indentation and columns (a run of two
+    // or more spaces) still line up: each part starts at its column on a grid of the font's
+    // average letter width, or just after the part before when that is further right.
+    // Long lines are set smaller, down to 80%, then wrap.
     let base = ctx.ty.caption.weight(500.0);
     let lines: Vec<String> = t.trim_end_matches('\n').replace('\t', "    ").lines().map(str::to_owned).collect();
-    let longest = lines.iter().map(|l| l.chars().count()).max().unwrap_or(1).max(1);
-    let cell0 = ctx.fonts.width("0", &base) * 1.02;
     let pad = ctx.m.pt(6.0);
     let avail = w - 2.0 * pad;
-    let scale = (avail / (cell0 * longest as f32)).clamp(0.7, 1.0);
+    let place = |l: &str, st: &crate::fonts::Style| -> (Vec<(f32, String)>, f32) {
+        let cell = ctx.fonts.width("abcdefghijklmnopqrstuvwxyz0123456789", st) / 36.0;
+        let space = ctx.fonts.width(" ", st).max(cell * 0.5);
+        let mut cursor: f32 = 0.0;
+        let mut parts = Vec::new();
+        for (k, (col, text)) in code_segments(l).into_iter().enumerate() {
+            let sx = (col as f32 * cell).max(if k == 0 { 0.0 } else { cursor + space * 2.0 });
+            cursor = sx + ctx.fonts.width(&text, st);
+            parts.push((sx, text));
+        }
+        (parts, cursor)
+    };
+    let longest = lines.iter().map(|l| place(l, &base).1).fold(1.0, f32::max);
+    let scale = (avail / longest).clamp(0.8, 1.0);
     let style = base.size(base.size * scale);
-    let cell = cell0 * scale;
-    let per_line = ((avail / cell).floor() as usize).max(8);
     let lh = (style.size * 1.45).round();
     let mut wrapped: Vec<String> = Vec::new();
     for l in lines {
-        let chars: Vec<char> = l.chars().collect();
-        if chars.is_empty() {
-            wrapped.push(String::new());
+        if place(&l, &style).1 <= avail {
+            wrapped.push(l);
+            continue;
         }
-        for chunk in chars.chunks(per_line) {
-            wrapped.push(chunk.iter().collect());
+        // Break at the last character that fits, keeping the indentation on the next line.
+        let lead: String = l.chars().take_while(|c| *c == ' ').collect();
+        let mut cur = String::new();
+        for ch in l.chars() {
+            cur.push(ch);
+            if place(&cur, &style).1 > avail && cur.trim().chars().count() > 1 {
+                let last = cur.pop().unwrap();
+                wrapped.push(cur);
+                cur = format!("{lead}  {last}");
+            }
         }
+        wrapped.push(cur);
     }
     let n = wrapped.len();
     let mut out = Vec::new();
@@ -754,7 +818,9 @@ fn pre_pieces(ctx: &Ctx, t: &str, x: f32, w: f32, gap: f32) -> Vec<Piece> {
         let bottom = if i + 1 == n { pad } else { 0.0 };
         let mut p = Piece::new(lh + top + bottom);
         p.els.push(El::Fill { r: Rect::new(x as i32, 0, w as i32, (lh + top + bottom).ceil() as i32), v: 238 });
-        p.els.push(El::Mono { lines: vec![l], x: x + pad, y: top, cell, line_height: lh, style });
+        for (sx, text) in place(&l, &style).0 {
+            p.els.push(El::Mono { lines: vec![text], x: x + pad + sx, y: top, cell: 0.0, line_height: lh, style });
+        }
         if i == 0 {
             p.gap = gap;
         }
@@ -764,287 +830,14 @@ fn pre_pieces(ctx: &Ctx, t: &str, x: f32, w: f32, gap: f32) -> Vec<Piece> {
     out
 }
 
-// --------------------------------------------------------------------------------------------
-// Chrome: the bars at the top and bottom of the edition and article screens.
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub struct Chrome<'s> {
-    pub back_label: &'s str,
-    pub title: String,
-    pub position: String,
-    pub progress: f32,
-    /// Article screens: Like and Save, on or off.
-    pub toggles: Option<(bool, bool)>,
-}
-
-pub fn draw_chrome(ctx: &Ctx, canvas: &mut Canvas, ch: &Chrome) -> Vec<(Rect, Action)> {
-    let m = &ctx.m;
-    let ty = &ctx.ty;
-    let bar = m.bar().round() as i32;
-    let margin = m.margin().round() as i32;
-    let mut hits = Vec::new();
-    let ui = ty.ui;
-    // Top bar.
-    let mid = bar as f32 / 2.0;
-    let back = ctx.line(ch.back_label, ui, m.w as f32 / 2.0, Align::Left);
-    let chev = ui.size * 0.62;
-    canvas.chevron(margin as f32 + chev * 0.3, mid, chev, -1.0, BLACK);
-    let bx = margin as f32 + chev * 1.25;
-    back.draw(ctx.fonts, canvas, bx, mid - back.height() / 2.0);
-    let back_w = back.lines.first().map(|l| l.width).unwrap_or(0.0) + chev * 1.25;
-    hits.push((Rect::new(0, 0, margin + back_w as i32 + margin, bar), Action::Back));
-    let pos = ctx.line(&ch.position, ty.byline.color(MUTED), m.w as f32 / 2.0, Align::Right);
-    let pos_w = pos.lines.first().map(|l| l.width).unwrap_or(0.0);
-    pos.draw(ctx.fonts, canvas, (m.w - margin) as f32 - m.w as f32 / 2.0, mid - pos.height() / 2.0);
-    let free = m.w as f32 - 2.0 * (margin as f32 + back_w.max(pos_w)) - m.pt(12.0);
-    if free > m.inch(0.6) && !ch.title.is_empty() {
-        let t = ctx.line(&ch.title.to_uppercase(), ty.section.color(MUTED), free, Align::Center);
-        t.draw(ctx.fonts, canvas, (m.w as f32 - free) / 2.0, mid - t.height() / 2.0);
-    }
-    canvas.hline(0, bar - ctx.hair(), m.w, ctx.hair(), BLACK);
-
-    // Bottom bar: previous, the progress bar or the toggles, next.
-    let top = m.h - bar;
-    canvas.hline(0, top, m.w, ctx.hair(), BLACK);
-    let prog_h = m.pt(2.5).round().max(2.0) as i32;
-    canvas.fill(Rect::new(0, top, (m.w as f32 * ch.progress.clamp(0.0, 1.0)).round() as i32, prog_h), BLACK);
-    let cy = top as f32 + bar as f32 / 2.0;
-    let zone = (m.inch(0.55) as i32).max(bar);
-    canvas.chevron(margin as f32 + chev * 0.3, cy, chev * 1.2, -1.0, BLACK);
-    canvas.chevron((m.w - margin) as f32 - chev * 0.3, cy, chev * 1.2, 1.0, BLACK);
-    hits.push((Rect::new(0, top, zone + margin, bar), Action::Prev));
-    hits.push((Rect::new(m.w - zone - margin, top, zone + margin, bar), Action::Next));
-    match ch.toggles {
-        Some((liked, saved)) => {
-            let pill_w = (m.inch(0.9)).min((m.w - 2 * (zone + margin)) as f32 / 2.0 - m.pt(6.0)) as i32;
-            let pill_h = (bar as f32 * 0.68) as i32;
-            let gap = m.pt(10.0) as i32;
-            let x0 = m.w / 2 - pill_w - gap / 2;
-            for (i, (on, on_label, off_label, act)) in [(liked, "Liked", "Like", Action::Like), (saved, "Saved", "Save", Action::Save)].into_iter().enumerate() {
-                let r = Rect::new(x0 + i as i32 * (pill_w + gap), top + (bar - pill_h) / 2 + prog_h / 2, pill_w, pill_h);
-                let (fg, label) = if on {
-                    canvas.fill(r, BLACK);
-                    (WHITE, on_label)
-                } else {
-                    canvas.frame(r, ctx.hair() * 2, BLACK);
-                    (BLACK, off_label)
-                };
-                let lp = ctx.line(label, ui.color(fg), r.w as f32, Align::Center);
-                lp.draw(ctx.fonts, canvas, r.x as f32, r.y as f32 + (r.h as f32 - lp.height()) / 2.0);
-                hits.push((r.inflate(m.pt(3.0) as i32), act));
-            }
-        }
-        None => {
-            let pl = ctx.line("Previous", ui, m.w as f32 / 3.0, Align::Left);
-            pl.draw(ctx.fonts, canvas, margin as f32 + chev * 1.5, cy - pl.height() / 2.0);
-            let nl = ctx.line("Next", ui, m.w as f32 / 3.0, Align::Right);
-            nl.draw(ctx.fonts, canvas, (m.w - margin) as f32 - chev * 1.5 - m.w as f32 / 3.0, cy - nl.height() / 2.0);
-            let pw = pl.lines.first().map(|l| l.width).unwrap_or(0.0) as i32;
-            hits.insert(0, (Rect::new(0, top, margin + pw + zone, bar), Action::Prev));
-            hits.insert(0, (Rect::new(m.w - margin - pw - zone, top, margin + pw + zone, bar), Action::Next));
-        }
-    }
-    hits
-}
-
-// --------------------------------------------------------------------------------------------
-// Newsstand
-
-pub struct Stand<'s> {
-    pub editions: &'s [Bundle],
-    pub status: String,
-    pub status_is_error: bool,
-    pub can_rotate: bool,
-}
-
-/// A cover: a small front page, drawn rather than shot.
-fn cover(ctx: &Ctx, canvas: &mut Canvas, b: &Bundle, r: Rect, big: bool) {
-    let m = &ctx.m;
-    let ty = &ctx.ty;
-    // Paper with a hard shadow.
-    let sh = m.pt(3.0).round() as i32;
-    canvas.fill(Rect::new(r.x + sh, r.y + sh, r.w, r.h), 150);
-    canvas.fill(r, WHITE);
-    canvas.frame(r, ctx.hair().max(2), BLACK);
-    let pad = (r.w as f32 * 0.06).round();
-    let ix = r.x as f32 + pad;
-    let iw = r.w as f32 - 2.0 * pad;
-    let mut y = r.y as f32 + pad * 0.8;
-    let scale = (r.w as f32 / m.content().w as f32).clamp(0.45, 1.0);
-    let mast = ty.masthead.size(ty.masthead.size * scale * if big { 1.0 } else { 1.05 });
-    let name = ctx.line("Morning Issue", mast, iw, Align::Center);
-    name.draw(ctx.fonts, canvas, ix, y);
-    y += name.height();
-    canvas.hline(ix as i32, y as i32, iw as i32, ctx.hair(), BLACK);
-    y += m.pt(3.0);
-    let date = Date::parse(&b.date);
-    let line1 = if big { date.map(|d| d.long()) } else { date.map(|d| d.short()) }.unwrap_or_else(|| b.date.clone()).to_uppercase();
-    let st = ty.section.size(ty.section.size * scale.max(0.8));
-    let l = ctx.line(&line1, st, iw, Align::Center);
-    l.draw(ctx.fonts, canvas, ix, y);
-    y += l.height();
-    let l2 = ctx.line(&format!("{} \u{b7} No.\u{a0}{}", b.kind_label(), b.number).to_uppercase(), st.color(MUTED), iw, Align::Center);
-    l2.draw(ctx.fonts, canvas, ix, y);
-    y += l2.height() + m.pt(2.0);
-    canvas.hline(ix as i32, y as i32, iw as i32, ctx.heavy(), BLACK);
-    y += ctx.heavy() as f32 + m.pt(6.0);
-
-    let pages = b.edition_pages();
-    let lead = pages.first().and_then(|p| p.lead.or_else(|| p.stories.first().copied())).and_then(|id| b.article(id));
-    let bottom = (r.bottom() as f32 - pad * 0.8).floor();
-    // The column the headline and stand-in text use; narrower when the picture sits beside it.
-    let (tx, mut tw) = (ix, iw);
-    if let Some(a) = lead {
-        if let (Some((w0, h0)), Some(url)) = (ctx.has_image(a.image_url.as_deref()), a.image_url.as_ref()) {
-            let avail = bottom - y;
-            if iw > avail * 1.5 && avail > m.pt(40.0) {
-                // A wide, short cover: the picture on the right, full height.
-                let gut = m.pt(8.0);
-                let pw = (iw * 0.45).round();
-                layout::draw(&[El::Image { url: url.clone(), r: Rect::new((ix + iw - pw) as i32, y as i32, pw as i32, avail as i32), fit: Fit::Cover }], ctx.fonts, ctx.images, canvas);
-                tw = iw - pw - gut;
-            } else {
-                let h = (iw * h0 as f32 / w0 as f32).clamp(iw * 0.4, iw * 0.62).min(avail * 0.48);
-                if h > m.pt(30.0) {
-                    layout::draw(&[El::Image { url: url.clone(), r: Rect::new(ix as i32, y as i32, iw as i32, h as i32), fit: Fit::Cover }], ctx.fonts, ctx.images, canvas);
-                    y += h + m.pt(5.0);
-                }
-            }
-        }
-        let hs = ty.lead.size(ty.lead.size * scale * if big { 0.95 } else { 0.85 } * if tw < iw { 0.8 } else { 1.0 });
-        let head = ctx.para(&text::plain(a.title.trim(), hs), tw, Align::Left, 1.1, Some(if big { 4 } else { 5 }));
-        if y + head.line_height <= bottom {
-            let lines = ((bottom - y) / head.line_height).floor() as usize;
-            let head = if lines < head.lines.len() { ctx.para(&text::plain(a.title.trim(), hs), tw, Align::Left, 1.1, Some(lines.max(1))) } else { head };
-            head.draw(ctx.fonts, canvas, tx, y);
-            y += head.height() + m.pt(4.0);
-        }
-    }
-    // Stand-in text: grey lines in columns, the way a folded paper reads from across a room.
-    let cols = if big && tw == iw { 3 } else { 2 };
-    let gut = m.pt(6.0);
-    let cw = (tw - gut * (cols as f32 - 1.0)) / cols as f32;
-    let lh = m.pt(5.5).max(4.0);
-    let th = (lh * 0.42).max(2.0);
-    let mut k = 0usize;
-    let mut ly = y;
-    while ly + lh <= bottom {
-        for c in 0..cols {
-            let x = tx + c as f32 * (cw + gut);
-            let frac = [1.0, 0.93, 0.97, 0.88, 1.0, 0.6, 0.95, 0.9][(k + c * 3) % 8];
-            canvas.fill(Rect::new(x as i32, ly as i32, (cw * frac) as i32, th as i32), 200);
-        }
-        ly += lh;
-        k += 1;
-    }
-    if b.finished_at.is_some() {
-        // A read edition has a tick in the corner.
-        let s = m.pt(18.0) * scale.max(0.7);
-        let cx = r.right() as f32 - s * 0.85;
-        let cy = r.y as f32 + s * 0.85;
-        canvas.disc(cx, cy, s * 0.62, BLACK);
-        canvas.tick(cx - s * 0.36, cy - s * 0.36, s * 0.72, WHITE);
-    }
-}
-
-pub fn draw_stand(ctx: &Ctx, canvas: &mut Canvas, stand: &Stand) -> Vec<(Rect, Action)> {
-    let m = &ctx.m;
-    let ty = &ctx.ty;
-    let mut hits = Vec::new();
-    canvas.clear(WHITE);
-    let margin = m.margin().round() as i32;
-    let w = m.w - 2 * margin;
-    let mut y = (m.bar() * 0.35) as i32;
-    let name = ctx.line("Morning Issue", ty.masthead, w as f32, Align::Center);
-    name.draw(ctx.fonts, canvas, margin as f32, y as f32);
-    y += name.height() as i32;
-    let sub = ctx.line("NEWSSTAND", ty.section.color(MUTED), w as f32, Align::Center);
-    sub.draw(ctx.fonts, canvas, margin as f32, y as f32);
-    y += sub.height() as i32 + m.pt(4.0) as i32;
-    canvas.hline(margin, y, w, ctx.heavy(), BLACK);
-    y += ctx.heavy() + m.pt(14.0) as i32;
-
-    // Footer: status line, then Rotate and Exit.
-    let bar = m.bar().round() as i32;
-    let foot_buttons = m.h - bar - (m.pt(10.0) as i32);
-    let status_style = if stand.status_is_error { ty.caption.italic() } else { ty.caption.color(MUTED) };
-    let status = ctx.para(&text::plain(&stand.status, status_style), w as f32, Align::Center, 1.35, Some(3));
-    let status_y = foot_buttons - status.height() as i32 - m.pt(10.0) as i32;
-    status.draw(ctx.fonts, canvas, margin as f32, status_y as f32);
-    canvas.hline(margin, status_y - m.pt(8.0) as i32, w, ctx.hair(), BLACK);
-    let mut buttons: Vec<(&str, Action)> = Vec::new();
-    if stand.can_rotate {
-        buttons.push(("Rotate", Action::Rotate));
-    }
-    buttons.push(("Exit", Action::Exit));
-    let bw = (m.inch(1.1) as i32).min(w / buttons.len() as i32 - m.pt(8.0) as i32);
-    let gap = m.pt(14.0) as i32;
-    let total = buttons.len() as i32 * bw + (buttons.len() as i32 - 1) * gap;
-    let mut bx = (m.w - total) / 2;
-    for (label, act) in buttons {
-        let r = Rect::new(bx, foot_buttons, bw, bar);
-        canvas.frame(r, ctx.hair() * 2, BLACK);
-        let l = ctx.line(label, ty.ui, bw as f32, Align::Center);
-        l.draw(ctx.fonts, canvas, r.x as f32, r.y as f32 + (bar as f32 - l.height()) / 2.0);
-        hits.push((r, act));
-        bx += bw + gap;
-    }
-
-    // The covers, in what is left.
-    let area = Rect::new(margin, y, w, status_y - m.pt(22.0) as i32 - y);
-    let n = stand.editions.len().min(3);
-    if n == 0 {
-        let msg = ctx.para(&text::plain("No editions on this Kobo yet.", ty.headline.italic()), w as f32, Align::Center, 1.2, None);
-        let mut my = area.y as f32 + area.h as f32 * 0.3;
-        msg.draw(ctx.fonts, canvas, margin as f32, my);
-        my += msg.height() + m.pt(8.0);
-        let how = ctx.para(&text::plain("On the phone, open Morning Issue\u{2019}s Sync with Kobo screen on the same Wi-Fi, then open Morning Issue from this Kobo\u{2019}s menu again.", ty.standfirst.color(MUTED)), (w as f32).min(m.inch(3.6)), Align::Center, 1.4, None);
-        how.draw(ctx.fonts, canvas, margin as f32 + (w as f32 - how.lines.iter().map(|l| l.width).fold(0.0, f32::max).max((w as f32).min(m.inch(3.6)))) / 2.0, my);
-        return hits;
-    }
-    let gap = m.pt(16.0) as i32;
-    // The newest faces out, large; the others rack beside or beneath it.
-    let rects: Vec<Rect> = if n == 1 {
-        let cw = (area.h as f32 * 0.72).min(area.w as f32) as i32;
-        vec![Rect::new(area.x + (area.w - cw) / 2, area.y, cw, area.h)]
-    } else if area.w as f32 > area.h as f32 * 1.1 {
-        // Landscape: big cover on the left, the rest stacked on the right.
-        let bigw = ((area.w - gap) as f32 * 0.56) as i32;
-        let bigw = bigw.min((area.h as f32 * 0.8) as i32);
-        let rest = n - 1;
-        let sh = (area.h - gap * (rest as i32 - 1)) / rest as i32;
-        let sw = (area.w - bigw - gap).min((sh as f32 * 1.6) as i32);
-        let mut v = vec![Rect::new(area.x, area.y, bigw, area.h)];
-        for i in 0..rest {
-            v.push(Rect::new(area.x + bigw + gap, area.y + i as i32 * (sh + gap), sw, sh));
-        }
-        v
-    } else {
-        let bigh = ((area.h - gap) as f32 * 0.6) as i32;
-        let rest = n - 1;
-        let sw = (area.w - gap * (rest as i32 - 1)) / rest as i32;
-        let mut v = vec![Rect::new(area.x, area.y, area.w, bigh)];
-        for i in 0..rest {
-            v.push(Rect::new(area.x + i as i32 * (sw + gap), area.y + bigh + gap, sw, area.h - bigh - gap));
-        }
-        v
-    };
-    for (i, (b, r)) in stand.editions.iter().zip(rects).enumerate() {
-        cover(ctx, canvas, b, r, i == 0);
-        hits.push((r, Action::OpenEdition(i)));
-    }
-    hits
-}
-
-/// "Last synced 12 minutes ago with Pixel 9." or the error from the last attempt.
-pub fn status_line(state: &crate::store::State, now_ms: i64) -> (String, bool) {
-    let when = state.last_sync_at.map(|t| time::relative(t, now_ms));
-    match (&state.last_error, when) {
-        (Some(e), Some(w)) => (format!("{e} Last synced {w}."), true),
-        (Some(e), None) => (format!("{e} Not synced yet."), true),
-        (None, Some(w)) => match &state.phone_name {
-            Some(p) => (format!("Last synced {w} with {p}."), false),
-            None => (format!("Last synced {w}."), false),
-        },
-        (None, None) => ("Not synced yet.".into(), false),
+    #[test]
+    fn code_is_split_at_its_columns() {
+        assert_eq!(code_segments("Tide   Height Wheel"), vec![(0, "Tide".into()), (7, "Height Wheel".into())]);
+        assert_eq!(code_segments("    let x = 1;  // one"), vec![(4, "let x = 1;".into()), (16, "// one".into())]);
+        assert!(code_segments("   ").is_empty());
     }
 }

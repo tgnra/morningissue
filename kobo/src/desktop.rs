@@ -20,6 +20,9 @@ pub struct Shared {
     /// coordinates.
     pub rotation: Cell<u8>,
     pub refreshes: RefCell<Vec<(Rect, Refresh)>>,
+    /// What can be touched on the last frame, as (region, `{:?}` of the action), in the
+    /// order the reader looks at them: the last one that contains a point wins.
+    pub hits: RefCell<Vec<(Rect, String)>>,
 }
 
 pub struct DesktopDisplay {
@@ -105,6 +108,12 @@ pub enum Step {
     Orientation(u8),
     /// Let time pass with nothing happening.
     Wait(u64),
+    /// Let real time pass too, for work on other threads (a sync); the scripted clocks move
+    /// on by the same amount.
+    Sleep(u64),
+    /// Tap the middle of what does the action whose `{:?}` starts with this; panics if
+    /// nothing on screen does.
+    TapOn(String),
     /// Called with the display when reached, e.g. to save a screenshot.
     Mark(String),
 }
@@ -161,6 +170,26 @@ impl Input for ScriptInput {
                 }
                 Some(Step::Key(k)) => self.pending.push_back(RawEvent::Key(k)),
                 Some(Step::Orientation(r)) => self.pending.push_back(RawEvent::Orientation(r)),
+                Some(Step::TapOn(label)) => {
+                    let hits = self.shared.hits.borrow();
+                    let Some((r, _)) = hits.iter().rev().find(|(_, a)| a.starts_with(&label)) else {
+                        panic!("nothing on screen does {label}; there is {:?}", hits.iter().map(|h| &h.1).collect::<Vec<_>>());
+                    };
+                    let (x, y) = (r.x + r.w / 2, r.y + r.h / 2);
+                    drop(hits);
+                    let (bx, by) = self.to_base(x, y);
+                    self.pending.push_back(RawEvent::Touch { phase: Phase::Down, x: bx, y: by });
+                    self.pending.push_back(RawEvent::Touch { phase: Phase::Up, x: bx, y: by });
+                }
+                Some(Step::Sleep(ms)) => {
+                    let step = (timeout.as_millis() as u64).max(1).min(ms);
+                    std::thread::sleep(Duration::from_millis(step));
+                    self.advance(step);
+                    if ms > step {
+                        self.steps.push_front(Step::Sleep(ms - step));
+                    }
+                    return None;
+                }
                 Some(Step::Wait(ms)) => {
                     // Time passes in steps no longer than the reader's timeout, so idle checks run.
                     let step = (timeout.as_millis() as u64).max(1).min(ms);

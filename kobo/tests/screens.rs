@@ -1,13 +1,20 @@
 //! Drives the reader on the desktop backend at several Kobo screen sizes and writes a PNG at
-//! each step to `target/screens/<size>/`. Also checks the events the session recorded.
+//! each step to `target/screens/<size>/`. Also checks the events the session recorded, what a
+//! sync started from the reader did, and what the light was told.
 
+mod fakephone;
+
+use fakephone::FakePhone;
 use morningissue::app::{self, App};
 use morningissue::config::Config;
 use morningissue::desktop::{self, DesktopDisplay, ScriptClock, ScriptInput, Shared, Step};
 use morningissue::device::{Key, Refresh};
+use morningissue::light::FakeLight;
+use morningissue::net::NetStatus;
 use morningissue::store::{image_key, State, Store};
 use morningissue::time;
-use serde_json::Value;
+use serde_json::{json, Value};
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -80,41 +87,118 @@ fn encode(img: image::RgbImage, fmt: image::ImageFormat) -> Vec<u8> {
     out
 }
 
-/// A home directory with three editions, their pictures, and a sync twelve minutes ago.
-fn setup(name: &str, now_ms: i64) -> PathBuf {
-    let home = std::env::temp_dir().join(format!("mi-screens-{name}-{}", std::process::id()));
+fn fixture() -> Value {
+    serde_json::from_str(&std::fs::read_to_string(manifest_dir().join("tests/fixtures/edition.json")).unwrap()).unwrap()
+}
+
+/// The fixture edition as edition `id` of `date`.
+fn edition(id: i64) -> Value {
+    let variants = [
+        (121, "2026-11-12", "MORNING", None, Some("Harbour wall repairs finish a month early, under budget"), None),
+        (120, "2026-11-11", "MORNING", None, None, Some("https://example.org/img/lead.jpg")),
+        (119, "2026-11-10", "MORNING", Some("2026-11-10T08:00:00Z"), Some("Night trains return to the coast line after twenty years"), Some("https://example.org/img/comet.png")),
+        (118, "2026-11-09", "EVENING", None, Some("The bakery that never closes, and the town that keeps it going"), None),
+    ];
+    let (_, date, kind, finished, lead_title, image) = variants.iter().find(|v| v.0 == id).copied().unwrap();
+    let mut b = fixture();
+    b["id"] = id.into();
+    b["number"] = id.into();
+    b["date"] = date.into();
+    b["kind"] = kind.into();
+    b["finishedAt"] = finished.map(Value::from).unwrap_or(Value::Null);
+    if let Some(t) = lead_title {
+        b["articles"]["9001"]["title"] = t.into();
+    }
+    b["articles"]["9001"]["imageUrl"] = image.map(Value::from).unwrap_or(Value::Null);
+    if id == 121 {
+        // Pictures the Kobo has not got yet, one of them with its size given.
+        b["articles"]["9001"]["imageUrl"] = "https://example.org/img/harbour.jpg".into();
+        let blocks = b["articles"]["9001"]["blocks"].as_array_mut().unwrap();
+        for bl in blocks.iter_mut() {
+            if bl["t"] == "img" {
+                bl["url"] = "https://example.org/img/harbour-plan.png".into();
+            }
+        }
+    }
+    b
+}
+
+/// Three saved articles, newest saved first: a full one with a picture, the baker with code
+/// blocks, and one whose text the phone could not get.
+fn saved_list() -> Value {
+    let f = fixture();
+    let mut articles = serde_json::Map::new();
+    let mut a = f["articles"]["9038"].clone();
+    a["engagement"]["savedAt"] = "2026-11-10T19:12:00Z".into();
+    articles.insert("9038".into(), a);
+    let mut a = f["articles"]["9001"].clone();
+    a["engagement"]["savedAt"] = "2026-11-09T07:40:00Z".into();
+    articles.insert("9001".into(), a);
+    let mut a = f["articles"]["9006"].clone();
+    a["engagement"]["savedAt"] = "2026-11-02T21:05:00Z".into();
+    a["blocks"] = json!([]);
+    articles.insert("9006".into(), a);
+    json!({"version": "s1", "order": [9038, 9001, 9006], "articles": articles})
+}
+
+/// What a run starts from, and what it can reach.
+#[derive(Clone)]
+struct Setup {
+    /// How many of the editions 120, 119, 118 are stored.
+    editions: usize,
+    saved: bool,
+    online: bool,
+    /// A typed phone address in the settings.
+    phone: Option<String>,
+    sync_on_start: bool,
+    warmth: bool,
+    /// A sync has never succeeded; this was the last error.
+    last_error: Option<&'static str>,
+}
+
+impl Default for Setup {
+    fn default() -> Setup {
+        Setup { editions: 3, saved: true, online: true, phone: None, sync_on_start: false, warmth: true, last_error: None }
+    }
+}
+
+/// A home directory with editions, their pictures, saved articles and a sync twelve minutes ago.
+fn setup(name: &str, now_ms: i64, s: &Setup) -> PathBuf {
+    let home = std::env::temp_dir().join(format!("mi-screens-{}-{}", name.replace('/', "-"), std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     let store = Store::new(&home);
     store.ensure_dirs().unwrap();
-    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(manifest_dir().join("tests/fixtures/edition.json")).unwrap()).unwrap();
     let mut state = State { device_id: "test-device".into(), token: Some("t".into()), db_id: Some("db".into()), next_seq: 1, phone_name: Some("Pixel 9".into()), last_sync_at: Some(now_ms - 12 * 60_000), ..Default::default() };
-    let variants = [(120, "2026-11-11", "MORNING", None, None), (119, "2026-11-10", "MORNING", Some("2026-11-10T08:00:00Z"), Some("Night trains return to the coast line after twenty years")), (118, "2026-11-09", "EVENING", None, Some("The bakery that never closes, and the town that keeps it going"))];
-    for (id, date, kind, finished, lead_title) in variants {
-        let mut b = fixture.clone();
-        b["id"] = id.into();
-        b["number"] = id.into();
-        b["date"] = date.into();
-        b["kind"] = kind.into();
-        b["finishedAt"] = finished.map(Value::from).unwrap_or(Value::Null);
-        if let Some(t) = lead_title {
-            b["articles"]["9001"]["title"] = t.into();
-            b["articles"]["9001"]["imageUrl"] = if id == 119 { "https://example.org/img/comet.png".into() } else { Value::Null };
-        }
-        std::fs::write(store.edition_path(id), serde_json::to_vec(&b).unwrap()).unwrap();
+    if let Some(e) = s.last_error {
+        state.last_sync_at = None;
+        state.last_error = Some(e.into());
+    }
+    for id in [120, 119, 118].into_iter().take(s.editions) {
+        std::fs::write(store.edition_path(id), serde_json::to_vec(&edition(id)).unwrap()).unwrap();
         state.editions.insert(id.to_string(), format!("v{id}"));
         state.edition_order.push(id);
     }
+    if s.saved {
+        std::fs::write(store.saved_path(), serde_json::to_vec(&saved_list()).unwrap()).unwrap();
+        state.saved_version = Some("s1".into());
+    }
     store.save_state(&state).unwrap();
-    let images = [
+    if let Some(p) = &s.phone {
+        std::fs::write(store.settings_path(), serde_json::to_vec(&json!({"phoneAddress": p})).unwrap()).unwrap();
+    }
+    for (url, bytes) in pictures() {
+        std::fs::write(store.images_dir().join(format!("{}.img", image_key(url))), bytes).unwrap();
+    }
+    home
+}
+
+fn pictures() -> Vec<(&'static str, Vec<u8>)> {
+    vec![
         ("https://example.org/img/lead.jpg", encode(photo(1600, 1000, 1), image::ImageFormat::Jpeg)),
         ("https://example.org/img/satellite.webp", encode(photo(900, 600, 4), image::ImageFormat::WebP)),
         ("https://example.org/img/comet.png", encode(photo(800, 800, 7), image::ImageFormat::Png)),
         ("https://example.org/img/mill-plan.png", encode(plan(1200, 800), image::ImageFormat::Png)),
-    ];
-    for (url, bytes) in images {
-        std::fs::write(store.images_dir().join(format!("{}.img", image_key(url))), bytes).unwrap();
-    }
-    home
+    ]
 }
 
 #[derive(Clone, Copy)]
@@ -135,15 +219,24 @@ const SIZES: [Size; 6] = [
     Size { name: "1264x1680-300dpi-inverted", w: 1264, h: 1680, dpi: 300.0, rotation: 2 },
 ];
 
-fn run(size: &Size, script: Vec<Step>) -> (PathBuf, Vec<(Refresh, morningissue::canvas::Rect)>, Vec<Value>) {
+struct Outcome {
+    out: PathBuf,
+    home: PathBuf,
+    refreshes: Vec<(Refresh, morningissue::canvas::Rect)>,
+    events: Vec<Value>,
+    syncs_started: usize,
+    light: Vec<(char, u8)>,
+}
+
+fn run(dir: &str, size: &Size, s: &Setup, script: Vec<Step>) -> Outcome {
     let now = time::parse_iso("2026-11-11T07:30:00Z").unwrap();
-    let home = setup(size.name, now);
+    let home = setup(dir, now, s);
     let shared = Rc::new(Shared::default());
     shared.wall_ms.set(now);
     shared.rotation.set(size.rotation);
     let display = DesktopDisplay::new(size.w, size.h, size.dpi, shared.clone());
     let panel = display.panel.clone();
-    let out = manifest_dir().join("target/screens").join(size.name);
+    let out = manifest_dir().join("target/screens").join(dir);
     let _ = std::fs::remove_dir_all(&out);
     std::fs::create_dir_all(&out).unwrap();
     let mut input = ScriptInput::new(script, (size.w, size.h), shared.clone());
@@ -152,12 +245,25 @@ fn run(size: &Size, script: Vec<Step>) -> (PathBuf, Vec<(Refresh, morningissue::
         let view = desktop::view(&panel.borrow(), shared2.rotation.get());
         desktop::save_png(&view, &out2.join(format!("{name}.png"))).unwrap();
     }));
-    let opts = app::Options { rotation: size.rotation, follow_sensor: true, can_rotate: true };
+    let writes = Rc::new(RefCell::new(Vec::new()));
+    let light = FakeLight { warmth: s.warmth, level: (40, 30), original: (40, 30), writes: writes.clone() };
+    let online = s.online;
+    let network = move || if online { NetStatus::Online { iface: "wlan0".into(), ip: Some("192.168.1.31".into()), ssid: Some("Harbour Lane".into()) } } else { NetStatus::Offline };
+    let shared3 = shared.clone();
+    let opts = app::Options {
+        rotation: size.rotation,
+        follow_sensor: true,
+        light: Box::new(light),
+        network: Box::new(network),
+        sync_on_start: s.sync_on_start,
+        hit_probe: Some(Box::new(move |hits| *shared3.hits.borrow_mut() = hits.to_vec())),
+    };
     let mut app = App::new(Box::new(display), Box::new(input), Box::new(ScriptClock(shared.clone())), Store::new(&home), Config::default(), &fonts_dir(), opts).unwrap();
     app.run().unwrap();
     contact_sheet(&out);
     let events: Vec<Value> = std::fs::read_to_string(home.join("data/events.jsonl")).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-    (out, app.refreshes.clone(), events)
+    let light = writes.borrow().clone();
+    Outcome { out, home, refreshes: app.refreshes.clone(), events, syncs_started: app.syncs_started, light }
 }
 
 /// Every picture in `dir`, scaled down onto one sheet (`contact.png`), for review.
@@ -168,125 +274,313 @@ fn contact_sheet(dir: &std::path::Path) {
         return;
     }
     let imgs: Vec<image::GrayImage> = names.iter().map(|p| image::open(p).unwrap().to_luma8()).collect();
-    let (w, h) = imgs[0].dimensions();
+    let (w, h) = imgs.iter().fold((0, 0), |(w, h), i| (w.max(i.width()), h.max(i.height())));
     let scale = 360.0 / w.max(h) as f32;
     let (tw, th) = ((w as f32 * scale) as u32, (h as f32 * scale) as u32);
     let cols = 6u32;
     let rows = (imgs.len() as u32).div_ceil(cols);
     let mut sheet = image::GrayImage::from_pixel(cols * (tw + 8), rows * (th + 8), image::Luma([128]));
     for (i, img) in imgs.iter().enumerate() {
-        let t = image::imageops::resize(img, tw, th, image::imageops::FilterType::Triangle);
+        let t = image::imageops::resize(img, (img.width() as f32 * scale) as u32, (img.height() as f32 * scale) as u32, image::imageops::FilterType::Triangle);
         image::imageops::overlay(&mut sheet, &t, ((i as u32 % cols) * (tw + 8)) as i64, ((i as u32 / cols) * (th + 8)) as i64);
     }
     sheet.save(dir.join("contact.png")).unwrap();
 }
 
-/// The walk every size takes: the stand, the edition page by page, an article, Like.
-fn walk(size: &Size) -> Vec<Step> {
-    let (w, h) = if size.rotation % 2 == 1 { (size.h, size.w) } else { (size.w, size.h) };
-    let inch = |v: f32| (v * size.dpi) as i32;
-    let bar = inch(0.33);
-    let mut s = vec![Step::Mark("01-newsstand".into())];
-    // The newest cover is at the top (portrait) or on the left (landscape).
-    if w > h {
-        s.push(Step::Tap(w / 4, h / 2));
+fn dims(size: &Size) -> (i32, i32) {
+    if size.rotation % 2 == 1 {
+        (size.h, size.w)
     } else {
-        s.push(Step::Tap(w / 2, h / 3));
+        (size.w, size.h)
     }
-    s.push(Step::Wait(6000));
-    s.push(Step::Mark("02-front".into()));
+}
+
+fn tap_on(label: &str) -> Step {
+    Step::TapOn(label.into())
+}
+
+fn mark(name: &str) -> Step {
+    Step::Mark(name.into())
+}
+
+/// A swipe down from the top edge, which brings the reading chrome.
+fn pull_down(size: &Size) -> Step {
+    let (w, h) = dims(size);
+    let top = (0.15 * size.dpi) as i32;
+    Step::Swipe(w / 2, top, w / 2, h / 3)
+}
+
+/// The walk every size takes: home, the edition page by page, an article with its chrome and
+/// the "Aa" popover, then Settings, the keypad and Saved.
+fn walk(size: &Size) -> Vec<Step> {
+    let (w, h) = dims(size);
+    let mut s = vec![mark("01-home"), tap_on("OpenEdition(0)"), Step::Wait(6000), mark("02-front")];
     // Through the edition with the page-turn button, a swipe and a tap in the right margin.
     s.push(Step::Key(Key::Forward));
     s.push(Step::Wait(7000));
-    s.push(Step::Mark("03-next".into()));
+    s.push(mark("03-next"));
     s.push(Step::Swipe(w * 3 / 4, h / 2, w / 4, h / 2 + 10));
     s.push(Step::Wait(2000));
-    s.push(Step::Mark("04-next".into()));
-    for i in 0..12 {
+    s.push(mark("04-next"));
+    s.push(pull_down(size));
+    s.push(mark("05-edition-chrome"));
+    s.push(Step::Wait(8000));
+    s.push(mark("06-chrome-timed-out"));
+    for i in 0..10 {
         s.push(Step::Key(Key::Forward));
         s.push(Step::Wait(1500));
-        s.push(Step::Mark(format!("{:02}-page", 5 + i)));
+        s.push(mark(&format!("{:02}-page", 7 + i)));
     }
     // Back to the front page and into the lead story.
     for _ in 0..20 {
         s.push(Step::Key(Key::Back));
     }
     s.push(Step::Wait(500));
-    let lead_y = if w > h { h * 45 / 100 } else { h * 30 / 100 };
-    s.push(Step::Tap(w / 2, lead_y));
+    s.push(tap_on("OpenArticle(9001)"));
     s.push(Step::Wait(30_000));
-    s.push(Step::Mark("20-article".into()));
-    for i in 0..5 {
+    s.push(mark("20-article"));
+    for i in 0..4 {
         s.push(Step::Tap(w * 3 / 4, h / 2));
         s.push(Step::Wait(20_000));
-        s.push(Step::Mark(format!("{:02}-article", 21 + i)));
+        s.push(mark(&format!("{:02}-article", 21 + i)));
     }
-    // Like, from the bottom bar.
-    let pill = (0.9 * size.dpi) as i32;
-    let gap = (10.0 / 72.0 * size.dpi) as i32;
-    s.push(Step::Tap(w / 2 - gap / 2 - pill / 2, h - bar / 2));
-    s.push(Step::Mark("26-liked".into()));
-    s.push(Step::Tap(5 * inch(0.1), bar / 2)); // Back to the edition
+    s.push(pull_down(size));
+    s.push(mark("25-article-chrome"));
+    s.push(tap_on("Like"));
+    s.push(mark("26-liked"));
+    s.push(tap_on("TextAndLight"));
+    s.push(mark("27-popover"));
+    s.push(tap_on("SetTextSize(4)"));
+    s.push(mark("28-larger-text"));
+    s.push(tap_on("Nudge { warmth: true, by: 10 }"));
+    s.push(Step::Tap(w / 2, h / 2)); // outside the popover: closes it
+    s.push(mark("29-popover-closed"));
+    s.push(Step::Tap(w / 2, h / 2)); // on the page: hides the chrome
+    s.push(mark("30-larger-text-page"));
+    s.push(pull_down(size));
+    s.push(tap_on("Back"));
     s.push(Step::Wait(1000));
-    s.push(Step::Mark("27-back".into()));
+    s.push(mark("31-back"));
+    s.push(Step::Key(Key::Home));
+    s.push(mark("32-home-again"));
+    s.push(tap_on("OpenSettings"));
+    s.push(mark("40-settings"));
+    s.push(tap_on("PhoneTyped"));
+    s.push(mark("41-keypad"));
+    for c in "192.168.1.40".chars() {
+        s.push(tap_on(&format!("KeyChar({c:?})")));
+    }
+    s.push(mark("42-keypad-typed"));
+    s.push(tap_on("KeyOk"));
+    s.push(mark("43-settings-typed"));
+    s.push(tap_on("Back"));
+    s.push(tap_on("OpenSaved"));
+    s.push(mark("50-saved"));
+    s.push(tap_on("OpenArticle(9006)"));
+    s.push(mark("51-saved-summary-only"));
+    s.push(pull_down(size));
+    s.push(tap_on("Save"));
+    s.push(mark("52-unsaved"));
+    s.push(tap_on("Back"));
+    s.push(tap_on("OpenArticle(9001)"));
+    s.push(mark("53-saved-article"));
     s
 }
 
 #[test]
 fn screens_at_every_size() {
     for size in &SIZES {
-        let (out, refreshes, events) = run(size, walk(size));
-        eprintln!("{}: {} refreshes, {} events, pictures in {}", size.name, refreshes.len(), events.len(), out.display());
-        assert!(out.join("02-front.png").exists());
+        let o = run(&format!("{}/walk", size.name), size, &Setup::default(), walk(size));
+        eprintln!("{}: {} refreshes, {} events, pictures in {}", size.name, o.refreshes.len(), o.events.len(), o.out.display());
+        assert!(o.out.join("53-saved-article.png").exists());
         // The first frame and every change of screen flash; page turns mostly don't.
-        assert_eq!(refreshes[0].0, Refresh::Full);
-        assert!(refreshes.iter().filter(|r| r.0 == Refresh::Partial).count() >= 6, "{:?}", refreshes);
-        let kinds: Vec<&str> = events.iter().map(|e| e["type"].as_str().unwrap()).collect();
+        assert_eq!(o.refreshes[0].0, Refresh::Full);
+        assert!(o.refreshes.iter().filter(|r| r.0 == Refresh::Partial).count() >= 6, "{:?}", o.refreshes);
+        let kinds: Vec<&str> = o.events.iter().map(|e| e["type"].as_str().unwrap()).collect();
         assert_eq!(kinds[0], "editionOpened", "{kinds:?}");
-        assert!(kinds.contains(&"pageView"));
-        assert!(kinds.contains(&"opened"), "{kinds:?}");
-        assert!(kinds.contains(&"liked"), "{kinds:?}");
-        assert!(kinds.contains(&"readFraction"), "{kinds:?}");
+        for k in ["pageView", "opened", "liked", "readFraction", "saved"] {
+            assert!(kinds.contains(&k), "{k} in {kinds:?}");
+        }
+        // Unsaving a saved article sends saved=false; it stays listed until the next sync.
+        let unsave = o.events.iter().find(|e| e["type"] == "saved").unwrap();
+        assert_eq!((unsave["articleId"].as_i64(), unsave["value"].as_bool()), (Some(9006), Some(false)));
         // Seq only goes up, from 1.
-        let seqs: Vec<i64> = events.iter().map(|e| e["seq"].as_i64().unwrap()).collect();
+        let seqs: Vec<i64> = o.events.iter().map(|e| e["seq"].as_i64().unwrap()).collect();
         assert_eq!(seqs, (1..=seqs.len() as i64).collect::<Vec<_>>());
         // Page views carry milliseconds on screen and no time while an article was open.
-        let first = events.iter().find(|e| e["type"] == "pageView").unwrap();
+        let first = o.events.iter().find(|e| e["type"] == "pageView").unwrap();
         assert_eq!(first["editionId"], 120);
         assert_eq!(first["page"], 1);
         assert!(first["ms"].as_i64().unwrap() >= 6000);
-        for e in events.iter().filter(|e| e["type"] == "pageView") {
+        for e in o.events.iter().filter(|e| e["type"] == "pageView") {
             assert!(e["ms"].as_i64().unwrap() < 30_000, "article time is never page time: {e}");
+        }
+        // The settings were kept: the bigger text, the warmer light, the typed address.
+        let settings: Value = serde_json::from_slice(&std::fs::read(Store::new(&o.home).settings_path()).unwrap()).unwrap();
+        assert_eq!(settings["textSize"], 4);
+        assert_eq!(settings["warmth"], 40);
+        assert_eq!(settings["phoneAddress"], "192.168.1.40:47824");
+        // The light went back to Nickel's levels on the way out.
+        assert_eq!(o.light.last(), Some(&('w', 30)), "{:?}", o.light);
+        assert!(o.light.contains(&('w', 40)));
+        // No sync was asked for, so none ran.
+        assert_eq!(o.syncs_started, 0);
+    }
+}
+
+/// The home screen with one, two and three editions, offline, after a failed sync, and with
+/// nothing yet, at every size.
+#[test]
+fn home_screens() {
+    for size in &SIZES {
+        for (name, setup) in [
+            ("home-1", Setup { editions: 1, ..Default::default() }),
+            ("home-2", Setup { editions: 2, ..Default::default() }),
+            ("home-offline", Setup { online: false, sync_on_start: true, ..Default::default() }),
+            ("home-error", Setup { editions: 0, saved: false, last_error: Some("The phone stopped answering. Keep Sync with Kobo open on the phone."), ..Default::default() }),
+        ] {
+            let mut script = vec![mark(name)];
+            if name == "home-offline" {
+                script.extend([tap_on("OpenSettings"), mark("settings-offline"), Step::Key(Key::Home)]);
+            }
+            let o = run(&format!("{}/{name}", size.name), size, &setup, script);
+            assert!(o.out.join(format!("{name}.png")).exists());
+            // Offline, nothing is even tried.
+            assert_eq!(o.syncs_started, 0);
         }
     }
 }
 
+/// Starting with Wi-Fi off never reaches for the phone, even with an address typed.
 #[test]
-fn rotate_button_and_sensor() {
-    let size = &SIZES[2];
-    let (w, h) = (size.w, size.h);
-    let bar = (0.33 * size.dpi) as i32;
-    let foot = h - bar - (10.0 / 72.0 * size.dpi) as i32 + bar / 2;
-    // The Rotate button is left of Exit at the foot of the newsstand.
-    let bw = (1.1 * size.dpi) as i32;
-    let gap = (14.0 / 72.0 * size.dpi) as i32;
-    let rotate_x = (w - (2 * bw + gap)) / 2 + bw / 2;
-    let script = vec![
-        Step::Orientation(1),
-        Step::Mark("sensor-landscape".into()),
-        Step::Orientation(0),
-        Step::Mark("sensor-portrait".into()),
-        Step::Tap(rotate_x, foot),
-        Step::Mark("rotated".into()),
-        Step::Orientation(0), // ignored once rotated by hand
-        Step::Mark("still-rotated".into()),
-    ];
-    let (out, refreshes, _) = run(&Size { name: "rotation", ..*size }, script);
-    let dims = |n: &str| image::image_dimensions(out.join(format!("{n}.png"))).unwrap();
-    assert_eq!(dims("sensor-landscape"), (1680, 1264));
-    assert_eq!(dims("sensor-portrait"), (1264, 1680));
-    assert_eq!(dims("rotated"), (1680, 1264));
-    assert_eq!(dims("still-rotated"), (1680, 1264));
-    assert!(refreshes.iter().all(|r| r.0 == Refresh::Full));
+fn offline_never_tries_to_sync() {
+    let phone = FakePhone::start("db");
+    phone.with(|s| s.tokens = vec!["t".into()]);
+    let setup = Setup { online: false, sync_on_start: true, phone: Some(phone.address.clone()), ..Default::default() };
+    let o = run("offline", &SIZES[2], &setup, vec![Step::Sleep(500), tap_on("OpenSettings"), mark("settings"), Step::Sleep(300)]);
+    assert_eq!(o.syncs_started, 0);
+    assert!(phone.with(|s| s.requests.is_empty()));
 }
 
+/// While the phone takes its time, the home screen says it is syncing.
+#[test]
+fn syncing_status_on_every_size() {
+    // A phone that takes the connection and never answers.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    for size in &SIZES {
+        let setup = Setup { sync_on_start: true, phone: Some(address.clone()), ..Default::default() };
+        let o = run(&format!("{}/home-syncing", size.name), size, &setup, vec![Step::Sleep(300), mark("home-syncing"), tap_on("OpenSettings"), mark("settings-syncing")]);
+        assert_eq!(o.syncs_started, 1);
+    }
+    drop(listener);
+}
+
+/// A sync started by the reader, against a fake phone: a new edition shows up on the home
+/// screen while the reader is open, pictures are asked for at the screen's width, three at a
+/// time, and the saved list follows the phone.
+#[test]
+fn what_a_sync_brings_shows_as_it_arrives() {
+    let phone = FakePhone::start("db");
+    let mut saved = saved_list();
+    // The phone has dropped the summary-only article and saved nothing new.
+    saved["order"] = json!([9038, 9001]);
+    saved["articles"].as_object_mut().unwrap().remove("9006");
+    saved["version"] = "s2".into();
+    phone.with(|s| {
+        s.tokens = vec!["t".into()];
+        s.editions = [121, 120, 119, 118].into_iter().map(|id| (id, format!("v{id}"), edition(id))).collect();
+        s.saved = Some(("s2".into(), saved));
+        for (url, bytes) in pictures() {
+            s.images.insert(url.into(), bytes);
+        }
+        s.images.insert("https://example.org/img/harbour.jpg".into(), encode(photo(1400, 900, 3), image::ImageFormat::Jpeg));
+        s.images.insert("https://example.org/img/harbour-plan.png".into(), encode(plan(1200, 800), image::ImageFormat::Png));
+        s.image_delay_ms = 2500;
+    });
+    let size = &SIZES[2];
+    let setup = Setup { sync_on_start: true, phone: Some(phone.address.clone()), ..Default::default() };
+    let mut script = vec![mark("01-before")];
+    // Wait for the new edition, then look at it while its pictures come.
+    for _ in 0..15 {
+        script.push(Step::Sleep(100));
+    }
+    script.push(mark("02-new-edition"));
+    script.push(tap_on("OpenEdition(0)"));
+    script.push(tap_on("OpenArticle(9001)"));
+    script.push(mark("03-article-while-pictures-come"));
+    for _ in 0..100 {
+        script.push(Step::Sleep(100));
+    }
+    script.push(Step::Key(Key::Forward));
+    script.push(Step::Key(Key::Forward));
+    script.push(mark("04-article-pictures-in"));
+    script.push(Step::Key(Key::Home));
+    script.push(Step::Key(Key::Home));
+    script.push(mark("05-home-synced"));
+    script.push(tap_on("OpenSaved"));
+    script.push(mark("06-saved-after-sync"));
+    let o = run("arrival", size, &setup, script);
+    assert_eq!(o.syncs_started, 1);
+    let widths = phone.with(|s| s.image_widths.clone());
+    assert!(!widths.is_empty() && widths.iter().all(|w| *w == Some(1264)), "{widths:?}");
+    assert!(phone.with(|s| s.max_images_in_flight) <= 3);
+    let store = Store::new(&o.home);
+    let state = store.load_state().unwrap();
+    assert_eq!(state.edition_order, vec![121, 120, 119, 118]);
+    assert_eq!(store.load_saved().order, vec![9038, 9001]);
+}
+
+#[test]
+fn orientation_from_settings_and_sensor() {
+    let size = &SIZES[2];
+    let script = vec![
+        Step::Orientation(1),
+        mark("sensor-landscape"),
+        Step::Orientation(0),
+        mark("sensor-portrait"),
+        tap_on("OpenSettings"),
+        tap_on("SetOrientation(Landscape)"),
+        mark("landscape"),
+        Step::Orientation(0), // ignored: the setting is fixed
+        mark("still-landscape"),
+        tap_on("SetOrientation(Portrait)"),
+        mark("portrait"),
+        tap_on("SetOrientation(Sensor)"),
+        Step::Orientation(1),
+        mark("sensor-again"),
+    ];
+    let o = run("rotation", size, &Setup::default(), script);
+    let dims = |n: &str| image::image_dimensions(o.out.join(format!("{n}.png"))).unwrap();
+    assert_eq!(dims("sensor-landscape"), (1680, 1264));
+    assert_eq!(dims("sensor-portrait"), (1264, 1680));
+    assert_eq!(dims("landscape"), (1680, 1264));
+    assert_eq!(dims("still-landscape"), (1680, 1264));
+    assert_eq!(dims("portrait"), (1264, 1680));
+    assert_eq!(dims("sensor-again"), (1680, 1264));
+    let settings: Value = serde_json::from_slice(&std::fs::read(Store::new(&o.home).settings_path()).unwrap()).unwrap();
+    assert_eq!(settings["orientation"], "sensor");
+}
+
+/// With the buttons inverted, Back turns forward.
+#[test]
+fn inverted_page_turn_buttons() {
+    let size = &SIZES[2];
+    let script = vec![tap_on("OpenSettings"), tap_on("InvertButtons"), mark("inverted"), Step::Key(Key::Home), tap_on("OpenEdition(0)")];
+    let script = script.into_iter().chain((0..4).flat_map(|_| [Step::Key(Key::Back), Step::Wait(3000)])).collect();
+    let o = run("inverted", size, &Setup::default(), script);
+    let pages: Vec<i64> = o.events.iter().filter(|e| e["type"] == "pageView").map(|e| e["page"].as_i64().unwrap()).collect();
+    assert!(pages.iter().any(|p| *p > 1), "{pages:?}");
+}
+
+/// Without warmth, the popover offers brightness only.
+#[test]
+fn popover_without_warmth() {
+    for size in [&SIZES[0], &SIZES[2]] {
+        let setup = Setup { warmth: false, ..Default::default() };
+        let script = vec![tap_on("OpenEdition(0)"), tap_on("OpenArticle(9001)"), pull_down(size), tap_on("TextAndLight"), mark("popover-brightness-only"), tap_on("Nudge { warmth: false, by: -10 }"), mark("dimmer")];
+        let o = run(&format!("{}/no-warmth", size.name), size, &setup, script);
+        assert!(o.light.contains(&('b', 30)), "{:?}", o.light);
+        assert!(!o.light.iter().any(|w| w.0 == 'w'));
+    }
+}

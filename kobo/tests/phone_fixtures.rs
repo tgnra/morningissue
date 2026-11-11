@@ -1,13 +1,44 @@
 //! The phone's golden fixtures (`docs/kobo-sync-fixtures/`, written by the app's
 //! `BundleExportTest`) parse here without losing anything, so the two sides agree on the wire.
 
-use morningissue::model::{Block, Bundle, Manifest};
+use morningissue::model::{Block, Bundle, Manifest, SavedList};
 use serde_json::Value;
 use std::path::PathBuf;
 
+fn fixture_path(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/kobo-sync-fixtures").join(name)
+}
+
 fn fixture(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/kobo-sync-fixtures").join(name);
+    let path = fixture_path(name);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// The phone's `GET /v1/saved` parses whole: every listed article is there with all its
+/// blocks, and one whose text the phone could not get is marked summary-only.
+#[test]
+fn phone_saved_list_parses() {
+    // The phone side adds this fixture; until it is merged there is nothing to check.
+    if !fixture_path("saved.json").exists() {
+        eprintln!("no saved.json fixture yet");
+        return;
+    }
+    let raw = fixture("saved.json");
+    let saved: SavedList = serde_json::from_str(&raw).unwrap();
+    let value: Value = serde_json::from_str(&raw).unwrap();
+    assert!(!saved.version.is_empty());
+    assert_eq!(saved.items().len(), saved.order.len(), "every id in order has its article");
+    for (id, article) in &saved.articles {
+        let stored = value["articles"][id]["blocks"].as_array().unwrap();
+        assert_eq!(article.blocks.len(), stored.len(), "saved article {id} dropped a block");
+        assert_eq!(article.summary_only(), stored.is_empty());
+    }
+    // The manifest says the same list is there.
+    let manifest: Manifest = serde_json::from_str(&fixture("manifest.json")).unwrap();
+    if let Some(info) = manifest.saved {
+        assert_eq!(info.count as usize, saved.order.len());
+        assert_eq!(info.version, saved.version);
+    }
 }
 
 #[test]
