@@ -114,9 +114,11 @@ fun EditionPageContent(edition: Edition, page: EditionPage, links: BackPageLinks
 /**
  * The masthead: the paper's name set modestly so the stories get the space, then the date,
  * edition number and estimated reading time between rules. Tapping the name returns to the stand.
+ * With no [edition] (it is still loading) the dateline is left blank at its full height, so
+ * the furniture is on the page at once and nothing moves when the edition arrives.
  */
 @Composable
-fun Masthead(edition: Edition, onBackToStand: () -> Unit, modifier: Modifier = Modifier) {
+fun Masthead(edition: Edition?, onBackToStand: () -> Unit, modifier: Modifier = Modifier) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -132,7 +134,7 @@ fun Masthead(edition: Edition, onBackToStand: () -> Unit, modifier: Modifier = M
         )
         DoubleRule()
         Text(
-            text = listOf(
+            text = if (edition == null) " " else listOf(
                 PaperFormat.longDate(edition.date),
                 editionNumberLabel(edition.kind, edition.number),
                 stringResource(R.string.minutes_read, edition.readMinutes),

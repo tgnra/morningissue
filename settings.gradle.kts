@@ -24,4 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Morning Issue"
 include(":app")
+include(":macrobenchmark")
  

@@ -55,6 +55,20 @@ android {
                 "proguard-rules.pro"
             )
         }
+        // What :macrobenchmark measures: the release build, profileable and signed with the
+        // debug key so it installs anywhere, plus the seeding hook in src/benchmark. Never shipped.
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+            isDebuggable = false
+        }
+    }
+    sourceSets {
+        // The benchmark build shares the release build's empty debug-settings twin.
+        getByName("benchmark") {
+            kotlin.directories.add("src/release/java")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

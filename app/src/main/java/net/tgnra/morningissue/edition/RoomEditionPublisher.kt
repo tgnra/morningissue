@@ -1,11 +1,14 @@
 package net.tgnra.morningissue.edition
 
+import android.os.Build
+import android.os.Trace
 import androidx.room3.withWriteTransaction
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -28,6 +31,12 @@ import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.model.AppSettings
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
+
+/** The trace section around the on-open fallback build; `:macrobenchmark` measures it by this name. */
+const val TRACE_ON_OPEN_BUILD = "MorningIssue.onOpenEditionBuild"
+
+/** Tells concurrent trace sections of the same name apart; shared by every publisher in the process. */
+private val traceCookies = AtomicInteger()
 
 /**
  * Builds editions from stored posts with the pure `EditionBuilder` and freezes them in Room. It
@@ -106,7 +115,9 @@ class RoomEditionPublisher(
         val released = editionDao.getLatestReleasedOf(EditionKind.MORNING, now)
         // A newer morning edition than this reset's is already out (see "Time zones").
         if (released == null || released.date < date) {
-            build(EditionKind.MORNING, date, releaseAt = reset, now = now, length = settings.editionLength)
+            traced(TRACE_ON_OPEN_BUILD) {
+                build(EditionKind.MORNING, date, releaseAt = reset, now = now, length = settings.editionLength)
+            }
         }
         if (settings.eveningEditionEnabled) {
             EditionClock.currentEveningRelease(now, settings.resetTime, settings.eveningEditionTime, zone)?.let { evening ->
@@ -309,6 +320,22 @@ class RoomEditionPublisher(
             lastVisitAt = lastVisit,
             engagedFeedIds = articleDao.feedsLikedOrSavedSince(now.minus(Duration.ofDays(config.awayFirehoseEngagementDays))).toSet(),
         )
+    }
+
+    /**
+     * Runs [block] inside a trace section, for the macrobenchmark of the on-open build's 300 ms
+     * budget. An async section, because a suspending block may finish on another thread; those
+     * need Android 10, and on older versions nothing is traced.
+     */
+    private suspend fun <T> traced(name: String, block: suspend () -> T): T {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return block()
+        val cookie = traceCookies.incrementAndGet()
+        Trace.beginAsyncSection(name, cookie)
+        try {
+            return block()
+        } finally {
+            Trace.endAsyncSection(name, cookie)
+        }
     }
 
     private fun EditionDraft.toEntities(): List<EditionItemEntity> = items.map {

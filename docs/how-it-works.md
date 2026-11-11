@@ -498,8 +498,12 @@ Newsstand ─┬─ Paper ── Reader
 
 ### Paper (`ui/paper/`)
 
-- A horizontal pager over the edition's pages: front page, Top stories, sections, In brief, From the archive, back page. Pages slide; each page scrolls vertically when its stories exceed the screen.
-- A line across the top has the way back to the stand, the date and edition number, and "Page 3 of 7" over a thin progress bar. Tapping the page count opens a contents list.
+- A horizontal pager over the edition's pages: front page, Top stories, sections, In brief, From the archive, back page. Each page scrolls vertically when its stories exceed the screen.
+- **Pages turn** (`ui/paper/PageTurn.kt`). A page is one sheet hinged at its left edge (the right edge in right-to-left layouts). Dragging lifts the sheet towards the reader and swings it round the spine while the next page lies flat beneath it; the sheet darkens a little as it stands up, the page beneath starts in its shadow, and a thin line marks the sheet's free edge. The free edge stays under the finger, so a half-turned page can be let go and settles whichever way it was heading. Turning back is the same motion in reverse. The sheet is gone when it stands edge-on, so its back is never seen. The hinge stays at the edge on tablets too: a page is a single sheet, not a spread, and a hinge in the middle would fold through the lead story.
+  - The geometry is a pure function of how far the pager has moved (`PageTurnMath`), applied in a graphics layer: a turn re-runs no composition, layout or drawing of the page. A page at rest has no transform at all.
+  - When the system's animations are switched off (animator duration scale 0) pages slide plainly instead. In E-ink mode they change at once.
+- While an edition is being read from the database the folio line and the masthead are already drawn, so opening a paper never shows a blank screen.
+- A line across the top has the way back to the stand, the date and edition number, and "Page 3 of 7" over a thin progress bar. Tapping the page count opens a contents list: each page with its first headline and how many stories it carries (In brief counts its lines as briefs).
 - Every story has a menu, opened by a long press or the "⋯" at the end of its byline: Save, Like, "Why is this here?" with the stored reason, Show less and Show more (each moves the feed's slider one step), mute the source for 1, 3, 7 or 30 days, and a link to more from the source. Changes shape the next edition; today's stays as printed.
 - **Front page**: the masthead (the app's name set modestly, the date, the edition number and the estimated reading time), the lead story, then the secondaries in a grid. A lead with a photo gets the photo, the headline and a two-line standfirst. Without a photo the headline grows, the standfirst runs to four lines, and heavy rules sit above and below.
 - **Inside pages**: a page heading, the page's first story with its excerpt, then the rest in the grid. Stories sit on the page divided by thin rules, with no cards or shadows.
@@ -517,7 +521,7 @@ Newsstand ─┬─ Paper ── Reader
 
 ### Back issues (`ui/backissues/`)
 
-A month calendar of every released edition, read ones ticked, with the month's editions listed beneath by lead headline.
+A month calendar of every released edition, read ones ticked, with the month's editions listed by lead headline: beneath the calendar, or beside it on a tablet in landscape.
 
 ### Sources (`ui/sources/`)
 
@@ -531,7 +535,10 @@ A month calendar of every released edition, read ones ticked, with the month's e
 ### Saved and search
 
 - **Saved** (`ui/saved/`): two shelves, Saved and Liked, most recent first, each with a remove button and Undo.
-- **Search** (`ui/search/`): one field, full-text search over every stored post, newest first, with a matching excerpt. Each word is a prefix and all must match. Filters are not built.
+- **Search** (`ui/search/`): one field, full-text search over every stored post, newest first, with a matching excerpt. Each word is a prefix and all must match.
+  - **Filters** narrow the search: when (any time, past week, month or year), Saved only, Liked only, one tag, one source. A line under the field has a Filters button that says how many are set, and each active filter as a token that removes it. The button opens the controls in place of the results; on a tablet in landscape they stay open in a column beside the results. The source is chosen from a list in a dialog.
+  - A filter needs a word to search for: with filters set and nothing typed the screen says so. With filters set and nothing found it offers to clear them.
+  - `SearchFilters` holds the state and turns it into the repository's `SearchQuery`.
 
 ### Settings (`ui/settings/`)
 
@@ -564,7 +571,9 @@ Type is three bundled open-licence variable fonts: Fraunces for headlines, Newsr
 | Medium (small tablet, phone in landscape) | 3 columns | Cover above two shelves; button bar | Text column capped at 600 dp, centred |
 | Expanded (tablet in landscape) | 4 columns; the lead spans 2 with secondaries beside it | Cover on the left, a grid of shelves on the right; button rail | Text column capped at 640 dp |
 
-On Expanded, the paper's contents list opens as a panel beside the page instead of over it.
+Also on Expanded: the paper's contents list opens as a panel beside the page instead of over it, search keeps its filters in a column beside the results, and back issues sets the month's editions beside the calendar.
+
+A grid row that comes up short is spread over the page's full width. One or two stories left over are set as a headline with its excerpt and a small photo at the side; three are set as text alone, because three such cells are too narrow for the photo as well.
 
 ### E-ink mode
 
@@ -576,7 +585,8 @@ In E-ink mode:
 - **Motion**: none. No ripples, no transitions between screens, no animated scrolling.
 - **Movement is paged.** Dragging does nothing until the finger lifts; then the content jumps one screen in the direction of the swipe, snapped to a story row or text line with a one-line overlap. In the paper a sideways swipe turns a whole page. Volume keys, page keys, arrow keys and space step forward and back. Previous and Next buttons appear under the content; in the paper they step through a long page before turning it.
 - **Images** are greyscale with raised contrast. Small thumbnails are dropped in favour of text.
-- Pull to refresh is replaced by the header button, the phone shelf wraps instead of scrolling sideways, and code blocks wrap instead of scrolling.
+- Pull to refresh is replaced by the header button, and the phone shelf wraps instead of scrolling sideways.
+- **Code blocks** cannot scroll sideways, so they are set smaller, just far enough for the longest line to fit (down to 70% of the usual size). Only lines longer than that wrap.
 
 ## Architecture
 
@@ -622,7 +632,10 @@ You need JDK 21 and the Android SDK (platform 37).
 ./gradlew assembleDebug          # debug build
 ./gradlew testDebugUnitTest      # unit tests (JVM and Robolectric)
 ./gradlew connectedAndroidTest   # on-device tests; needs a device or emulator
+./gradlew :macrobenchmark:connectedBenchmarkAndroidTest   # the on-open build benchmark; replaces the installed app and its data
 ```
+
+**Benchmark.** The `:macrobenchmark` module measures the budget "the on-open fallback build takes under 300 ms on a low-end phone". It runs against the app's `benchmark` build type: the release build made profileable and signed with the debug key, plus a seeding receiver (`app/src/benchmark`) that only the shell can call. Each iteration stores 1,000 unread posts from 40 feeds and no edition, starts the app cold and measures the trace section `MorningIssue.onOpenEditionBuild`, which wraps the build in `RoomEditionPublisher.ensureCurrentEdition`. Results are written under `macrobenchmark/build/outputs/connected_android_test_additional_output/`. Numbers from an emulator are only indicative, and it has not yet been run on a phone. To run it without Gradle, install `app-benchmark.apk` and `macrobenchmark-benchmark.apk` and start `net.tgnra.morningissue.macrobenchmark/androidx.test.runner.AndroidJUnitRunner` with `am instrument -w` (add `-e androidx.benchmark.suppressErrors EMULATOR` on an emulator).
 
 Unit tests are in `app/src/test`: the engine (scoring, cadence, affinity, edition building, sections, carry-over, the clock), the publisher and early build against an in-memory database and `work-testing`, the sync layer against saved feed fixtures and a mock web server, and the pure parts of the UI.
 
@@ -634,6 +647,6 @@ Signing is configured in `app/build.gradle.kts` only when `KEYSTORE_FILE`, `KEYS
 
 These are described in [`todo.md`](../todo.md) with the detail needed to build them.
 
-- **Planned:** search filters, the 3D page turn, and a benchmark for the on-open build.
+- **Planned:** nothing from the three milestones is left unbuilt. The smaller gaps against the original spec are in `todo.md`.
 - **Engine built, screen missing:** the Extra edition has no button, the comeback label is not shown as a badge, and the While you were away page has no "12 posts from 7 feeds" summary line.
 - **Out of scope for now:** notifications, compression of stored content, and PDF export.

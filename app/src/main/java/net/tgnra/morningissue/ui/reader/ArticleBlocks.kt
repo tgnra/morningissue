@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -29,6 +30,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -80,6 +82,23 @@ fun RichText.toAnnotatedString(linkColor: Color, codeBackground: Color = Color.T
         }
     }
     return builder.toAnnotatedString()
+}
+
+/** How far a code block is shrunk in E-ink so that its lines fit the column without wrapping. */
+object CodeFit {
+    /** Below this the type is too small to read; longer lines wrap instead. */
+    const val MIN_SCALE = 0.7f
+
+    /**
+     * The factor to set code at when its longest line is [longestLinePx] wide at full size and
+     * the column is [availablePx] wide: 1 when it fits already, otherwise just small enough to
+     * fit, and never below [MIN_SCALE].
+     */
+    fun scale(longestLinePx: Int, availablePx: Int): Float = when {
+        longestLinePx <= 0 || availablePx <= 0 || longestLinePx <= availablePx -> 1f
+        // A hair under the exact ratio, so rounding never tips the longest line over.
+        else -> (availablePx.toFloat() / longestLinePx * 0.99f).coerceIn(MIN_SCALE, 1f)
+    }
 }
 
 private fun TextStyle.scaled(factor: Float): TextStyle = copy(fontSize = fontSize * factor, lineHeight = lineHeight * factor)
@@ -168,17 +187,32 @@ fun ArticleBody(blocks: List<ContentBlock>, textScale: Float, modifier: Modifier
                 }
 
                 is ContentBlock.Preformatted -> {
-                    val frame = if (colors.isEink) Modifier.border(1.dp, colors.ink) else Modifier.background(colors.hairline.copy(alpha = 0.4f))
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .stepAnchor()
-                            .then(frame)
-                            // E-ink never scrolls freely, so code wraps there instead of sliding sideways.
-                            .then(if (colors.isEink) Modifier else Modifier.horizontalScroll(rememberScrollState()))
-                            .padding(12.dp),
-                    ) {
-                        Text(block.text.trimEnd(), style = type.code.scaled(textScale), color = colors.ink, softWrap = colors.isEink)
+                    val code = block.text.trimEnd()
+                    val style = type.code.scaled(textScale)
+                    if (colors.isEink) {
+                        // E-ink never scrolls freely, so code cannot slide sideways. It is set
+                        // smaller instead, as far as it takes for the longest line to fit (down
+                        // to a floor that is still readable); only lines longer than that wrap.
+                        BoxWithConstraints(Modifier.fillMaxWidth().stepAnchor().border(1.dp, colors.ink).padding(12.dp)) {
+                            val measurer = rememberTextMeasurer()
+                            val available = constraints.maxWidth
+                            val fitted = remember(code, style, available) {
+                                val longest = measurer.measure(code, style, softWrap = false).size.width
+                                style.scaled(CodeFit.scale(longest, available))
+                            }
+                            Text(code, style = fitted, color = colors.ink, softWrap = true)
+                        }
+                    } else {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .stepAnchor()
+                                .background(colors.hairline.copy(alpha = 0.4f))
+                                .horizontalScroll(rememberScrollState())
+                                .padding(12.dp),
+                        ) {
+                            Text(code, style = style, color = colors.ink, softWrap = false)
+                        }
                     }
                 }
             }

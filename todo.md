@@ -41,8 +41,9 @@ In progress. The edition engine's part is built; how it works is in `docs/how-it
 
 ### Search with filters
 
-- [ ] Add filters to the search screen: by tag, by source, by date range, and Liked or saved only.
-- Already in place: `SearchQuery` and `ArticleDao.search` accept every one of these filters; only the controls are missing.
+- [x] Filters on the search screen: one tag, one source, when (past week, month or year), Saved only and Liked only, with the active ones shown as removable tokens.
+- [ ] The date filter is a choice of periods, not a from-and-to range. `SearchQuery` takes both ends; a date picker in the paper's furniture has not been drawn.
+- [ ] A filter cannot be browsed without a word to search for, because `ArticleRepository.search` returns nothing for blank text. Listing "everything Saved from this source last month" needs a repository change.
 
 ### Cross-feed deduplication
 
@@ -83,15 +84,16 @@ Built; see "Archive export and import" in `docs/how-it-works.md`. The file-picke
 
 ### 3D page turn
 
-- [ ] Each page rotates around its spine (`graphicsLayer` with `rotationY` and a raised camera distance) and darkens slightly as it turns.
-  - It tracks the finger, so a half-turn can be let go.
-  - Falls back to the plain slide when the system's animations are switched off, and in e-ink mode.
-  - A true paper curl with an AGSL shader on Android 13 and up is a possible later step.
-- Already in place: `Modifier.pageTurn` in `ui/paper/PageTurn.kt` is applied to every page and currently does nothing.
+- [x] Each page rotates around its spine (`graphicsLayer` with `rotationY` and a raised camera distance) and darkens slightly as it turns. It tracks the finger, so a half-turn can be let go. It falls back to the plain slide when the system's animations are switched off, and to no motion in E-ink mode.
+- [ ] Smoothness has only been judged on a software-rendered emulator. Check it on a real phone and a real tablet.
+- [ ] Right-to-left: the geometry is mirrored and unit-tested, but has not been looked at on a device.
+- A true paper curl with an AGSL shader on Android 13 and up is a possible later step (see Later).
 
 ### Tablet refinements
 
-- [ ] Review every screen at Medium and Expanded sizes in both orientations, in all three themes (see Known rough edges).
+- [x] Every screen reviewed on an emulator at tablet portrait (Medium) and landscape (Expanded) in Light, Dark and E-ink. Fixed: the contents panel beside the page (wider, headline under the title at full width), short grid rows of three (set as text, without the squeezed side photo), back issues in landscape (the month's editions beside the calendar), and search in landscape (filters in a column beside the results).
+- [ ] The reader's lead picture fills most of a landscape tablet screen, so the text starts below the fold. It is shown whole on purpose; decide whether landscape should crop it shallower.
+- [ ] Sources, Saved and Settings keep one 680 dp column on a landscape tablet, with empty margins either side.
 
 ### Evening edition
 
@@ -110,7 +112,8 @@ Built; see "Archive export and import" in `docs/how-it-works.md`. The file-picke
 
 ### Benchmark
 
-- [ ] A Macrobenchmark test for the on-open fallback build: under 300 ms on a low-end phone. The expectation is that scoring about 1,000 candidates takes about a millisecond and the database read tens of milliseconds.
+- [x] A Macrobenchmark for the on-open fallback build (`:macrobenchmark`, `OnOpenEditionBuildBenchmark`): 1,000 unread posts from 40 feeds, cold start, measuring the trace section around the build. How to run it is in `docs/how-it-works.md`.
+- [ ] Run it on a real low-end phone. The budget is under 300 ms there; an emulator's numbers are only indicative. On the software-rendered API 37 emulator, on a host short of memory, five cold starts gave 371 ms at best, 573 ms median and 1,061 ms at worst for the build, which is over budget there. If a real phone is over too, see "Scores kept current during sync" below.
 
 ## Smaller gaps against the original spec
 
@@ -119,7 +122,6 @@ Specified but not built, and not assigned to a milestone.
 - [ ] **Scores kept current during sync.** The spec wanted scores updated at sync so a fallback build mostly reads a sorted list. Scores are computed at build time instead. Decide after the benchmark whether this is needed.
 - [ ] **Burstiness** is computed and stored but unused. It was meant to detect feeds that post many items at once.
 - [ ] **Material You accent colour**, optional.
-- [ ] **Masthead drawn instantly** while stories load. Not verified; the paper shows a blank page until the edition has loaded.
 - [ ] **Favourites during onboarding.** The spec asked new users to star 3 to 5 favourite feeds (setting their affinity to 0.8) so ranking has something to go on. Onboarding only adds feeds.
 - [ ] **Cold-start diversity.** For the first two weeks, raise the same-feed penalty so every feed gets seen and its affinity can be measured.
 - [ ] **"Always show everything"** per feed, for feeds read exhaustively such as a webcomic.
@@ -226,19 +228,16 @@ Dropped when the design moved from a live ranked feed to a daily edition:
 - [ ] **The release workflow has never run.** GitHub has not registered `.github/workflows/release.yml` since the first push. The cause is unknown.
 - [ ] **The early build has only run under tests**, never overnight on a device. Whether WorkManager runs it in time under Doze is unknown.
 - [ ] **Relearning affinity on every engagement change** (each open, read, Save or Like) is unmeasured for performance.
-- [ ] **E-ink and dark themes are unchecked at tablet sizes.**
 - [ ] **OPML export on a device is untested.** The writer is unit-tested; the file-picker path is not.
 - [ ] **E-ink: a long page can end on a mostly blank screen**, because steps snap to anchors.
-- [ ] **E-ink: code blocks wrap** instead of scrolling sideways, which can make code hard to read.
+- [ ] **E-ink: very long code lines still wrap.** Code is set smaller until its longest line fits, down to 70% of the usual size; lines longer than that wrap.
 - [ ] **`targetSdk` is 36 while `compileSdk` is 37.**
 - [ ] **E-ink has no tap zones.** Paging is by swipe, keys and the Previous and Next buttons.
 - [ ] **Source comments still cite the deleted plan files** by name ("v1 Live feed", "v2 Daily edition") in `engine/RankingConfig.kt`, `Cadence.kt` and `Affinity.kt`. Point them at `docs/how-it-works.md` when those files are next touched.
 
-- [ ] In two-column story cells the byline truncates because the "⋯" menu button takes room.
+- [ ] In a narrow story cell a long byline runs to a second line ("Source ·" over "4 min read") instead of being cut off. It leaves the dot at the end of the first line.
 - [ ] Undo on the Saved and Liked shelves puts the story back at the top, because re-saving stamps a new time. Exposing `savedAt` / `likedAt` on `ArticleSummary` would fix it.
-- [ ] An OPML import in flight is lost on rotation (add-feed discovery survives it).
-- [ ] Dialogs drawn with the older `PaperDialog` leave the screen beneath visible to screen readers. TalkBack and right-to-left layouts have not been tested at all.
-- [ ] The contents list counts In brief lines as "stories".
+- [ ] TalkBack and right-to-left layouts have not been tested at all. (A `PaperDialog` now hides the screen beneath it from screen readers; that was checked in the semantics tree, not with TalkBack.)
 - [ ] Comments in `ui/reader/ReadRule.kt`, `sync/DefaultFeedSyncer.kt` and `ScorerTest.kt` also refer to the deleted v1/v2 plan files.
 
 - [ ] **Milestone 3 health, storage and archive screens are unchecked on a device**: the Subscriptions desk, the Quiet group in Sources, the back-page desk notice, the storage budget stepper and usage bar, and archive export and import through the file picker. Their logic is unit-tested.

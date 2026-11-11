@@ -48,6 +48,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.pluralStringResource
@@ -119,7 +120,7 @@ fun PaperScreen(
     val state = loaded
     val edition = state?.edition
     when {
-        state == null -> Box(Modifier.fillMaxSize().background(MorningIssueTheme.colors.paper))
+        state == null -> LoadingPaper(onBack)
         edition == null -> PaperScreenFrame(title = stringResource(R.string.app_name), onBack = onBack) {
             EmptyMessage(stringResource(R.string.paper_missing_title), stringResource(R.string.paper_missing_detail))
         }
@@ -191,7 +192,9 @@ private class MenuFeed(val feed: Feed?)
 private fun Paper(edition: Edition, links: BackPageLinks, onFinished: () -> Unit) {
     val colors = MorningIssueTheme.colors
     val spec = LocalPaperLayoutSpec.current
-    val animate = !MorningIssueTheme.isEink
+    val turnStyle = rememberPageTurnStyle()
+    val animate = turnStyle != PageTurnStyle.None
+    val turnAnimation = if (turnStyle == PageTurnStyle.Turn) PageTurnAnimation else null
     val scope = rememberCoroutineScope()
     val pages = edition.pages
     val pagerState = rememberPagerState { pages.size }
@@ -203,18 +206,18 @@ private fun Paper(edition: Edition, links: BackPageLinks, onFinished: () -> Unit
         if (pagerState.settledPage == pages.lastIndex) onFinished()
     }
 
-    val turnTo: (Int) -> Unit = { page -> scope.launch { pagerState.turnToPage(page, animate) } }
+    val turnTo: (Int) -> Unit = { page -> scope.launch { pagerState.turnToPage(page, animate, turnAnimation) } }
     // "Onward": the rest of this page first, then the next page.
     val forward: () -> Unit = {
         scope.launch {
             val page = pagerState.currentPage
-            if (scrollers[page]?.stepForward() != true) pagerState.turnToPage(page + 1, animate)
+            if (scrollers[page]?.stepForward() != true) pagerState.turnToPage(page + 1, animate, turnAnimation)
         }
     }
     val backward: () -> Unit = {
         scope.launch {
             val page = pagerState.currentPage
-            if (scrollers[page]?.stepBackward() != true) pagerState.turnToPage(page - 1, animate)
+            if (scrollers[page]?.stepBackward() != true) pagerState.turnToPage(page - 1, animate, turnAnimation)
         }
     }
 
@@ -228,17 +231,21 @@ private fun Paper(edition: Edition, links: BackPageLinks, onFinished: () -> Unit
                 onOpenContents = { contentsOpen = !contentsOpen },
             )
             Row(Modifier.weight(1f).fillMaxWidth()) {
-                Box(Modifier.weight(1f).fillMaxHeight()) {
+                // Clipped: a sheet lifting towards the reader looms taller than the page.
+                Box(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
                     HorizontalPager(
                         state = pagerState,
                         modifier = Modifier.fillMaxSize(),
                         // E-ink turns whole pages on a swipe, key or button, never by dragging.
                         userScrollEnabled = animate,
+                        // The pages either side are kept ready, so a turn has its other sheet from the first frame.
+                        beyondViewportPageCount = if (turnStyle == PageTurnStyle.Turn) 1 else 0,
                         key = { pages[it].number },
                     ) { index ->
                         PageSheet(
                             index = index,
                             pagerState = pagerState,
+                            turnStyle = turnStyle,
                             scrollers = scrollers,
                             onHorizontalSwipe = { onward -> turnTo(pagerState.currentPage + if (onward) 1 else -1) },
                         ) {
@@ -255,7 +262,7 @@ private fun Paper(edition: Edition, links: BackPageLinks, onFinished: () -> Unit
                 if (contentsOpen && spec.readerSidePanel) {
                     // Tablet landscape: the contents list stays open beside the page.
                     Box(Modifier.fillMaxHeight().width(1.dp).background(colors.rule))
-                    ContentsList(pages, pagerState.currentPage, Modifier.width(300.dp).fillMaxHeight(), onSelect = turnTo)
+                    ContentsList(pages, pagerState.currentPage, Modifier.width(320.dp).fillMaxHeight(), onSelect = turnTo)
                 }
             }
             if (!animate) {
@@ -271,11 +278,37 @@ private fun Paper(edition: Edition, links: BackPageLinks, onFinished: () -> Unit
     BackHandler(enabled = contentsOpen && !spec.readerSidePanel) { contentsOpen = false }
 }
 
+/**
+ * The paper before its edition has been read from the database: the folio line with the way
+ * back and the front page's masthead, drawn at once in the places they will keep, so opening
+ * an edition never shows a blank screen.
+ */
+@Composable
+private fun LoadingPaper(onBack: () -> Unit) {
+    val spec = LocalPaperLayoutSpec.current
+    Box(Modifier.fillMaxSize().background(MorningIssueTheme.colors.paper)) {
+        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+            FolioLine(edition = null, page = 0, pageCount = 0, onBack = onBack, onOpenContents = {})
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                Column(
+                    Modifier
+                        .widthIn(max = 1180.dp)
+                        .fillMaxWidth()
+                        .padding(start = spec.pageMargin, end = spec.pageMargin, top = 8.dp),
+                ) {
+                    Masthead(edition = null, onBackToStand = onBack)
+                }
+            }
+        }
+    }
+}
+
 /** One page: its own vertical scroll (stepped in E-ink) inside the page margins. */
 @Composable
 private fun PageSheet(
     index: Int,
     pagerState: PagerState,
+    turnStyle: PageTurnStyle,
     scrollers: MutableMap<Int, PagedScroller>,
     onHorizontalSwipe: (onward: Boolean) -> Unit,
     content: @Composable () -> Unit,
@@ -287,7 +320,7 @@ private fun PageSheet(
         onDispose { if (scrollers[index] === scroller) scrollers.remove(index) }
     }
     CompositionLocalProvider(LocalPagedScroller provides scroller) {
-        Box(Modifier.fillMaxSize().pageTurn(pagerState, index), contentAlignment = Alignment.TopCenter) {
+        Box(Modifier.fillMaxSize().pageTurn(pagerState, index, turnStyle), contentAlignment = Alignment.TopCenter) {
             Column(
                 Modifier
                     .fillMaxHeight()
@@ -298,6 +331,7 @@ private fun PageSheet(
             ) {
                 content()
             }
+            PageTurnShading(pagerState, index, turnStyle)
         }
     }
 }
@@ -305,18 +339,20 @@ private fun PageSheet(
 /**
  * The line across the top of every page: back to the stand, the edition's date and number,
  * and "Page 3 of 7" over a thin progress bar. The page count opens the contents list.
+ * With no [edition] yet, only the way back and the empty bar are drawn.
  */
 @Composable
-private fun FolioLine(edition: Edition, page: Int, pageCount: Int, onBack: () -> Unit, onOpenContents: () -> Unit) {
+private fun FolioLine(edition: Edition?, page: Int, pageCount: Int, onBack: () -> Unit, onOpenContents: () -> Unit) {
     val colors = MorningIssueTheme.colors
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
             PaperIconButton(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.paper_back_to_stand), onBack)
             SectionLabel(
-                text = PaperFormat.shortDate(edition.date) + "  ·  " + editionNumberLabel(edition.kind, edition.number),
+                text = if (edition == null) "" else PaperFormat.shortDate(edition.date) + "  ·  " + editionNumberLabel(edition.kind, edition.number),
                 modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
             )
-            Row(
+            // No page count until there are pages (the edition is still loading).
+            if (pageCount > 0) Row(
                 modifier = Modifier
                     .heightIn(min = 48.dp)
                     .clickable(onClickLabel = stringResource(R.string.paper_open_contents), role = Role.Button, onClick = onOpenContents)
@@ -389,23 +425,32 @@ private fun ContentsList(pages: List<EditionPage>, current: Int, modifier: Modif
                 Column(Modifier.weight(1f)) {
                     // A tag's page is named after the tag; the kicker says what kind of page that is.
                     if (page is EditionPage.Section) SectionLabel(stringResource(R.string.contents_section))
-                    Text(
-                        text = pageTitle(page),
-                        style = type.headlineSmall,
-                        color = if (isCurrent) colors.accent else colors.ink,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = pageTitle(page),
+                            style = type.headlineSmall,
+                            color = if (isCurrent) colors.accent else colors.ink,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (page !is EditionPage.Back && page.stories.isNotEmpty()) {
+                            Text(
+                                // In brief prints headlines only: they are lines, not stories.
+                                text = pluralStringResource(
+                                    if (page is EditionPage.InBrief) R.plurals.brief_count else R.plurals.story_count,
+                                    page.stories.size,
+                                    page.stories.size,
+                                ),
+                                style = type.caption,
+                                color = colors.inkSecondary,
+                                modifier = Modifier.padding(start = 10.dp),
+                            )
+                        }
+                    }
+                    // Under the title and the count, so the headline has the row's full width.
                     val first = (page as? EditionPage.Front)?.lead?.title ?: page.stories.firstOrNull()?.title?.takeIf { page !is EditionPage.Back }
                     if (first != null) {
-                        Text(first, style = type.byline, color = colors.inkSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(first, style = type.byline, color = colors.inkSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
-                }
-                if (page !is EditionPage.Back && page.stories.isNotEmpty()) {
-                    Text(
-                        text = pluralStringResource(R.plurals.story_count, page.stories.size, page.stories.size),
-                        style = type.caption,
-                        color = colors.inkSecondary,
-                        modifier = Modifier.padding(start = 10.dp),
-                    )
                 }
                 Box(Modifier.padding(start = 10.dp).size(8.dp).background(if (isCurrent) colors.accent else Color.Transparent))
             }

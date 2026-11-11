@@ -13,17 +13,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
@@ -211,50 +210,73 @@ const val OPML_EXPORT_NAME = "morning-issue-feeds.opml"
 /** OPML rarely has a registered type, so the picker has to allow any file. */
 private val OPML_IMPORT_TYPES = arrayOf("text/x-opml", "text/xml", "application/xml", "application/octet-stream", "*/*")
 
+/** The outcome of an OPML import or export, waiting to be shown. */
+class OpmlOutcome(val message: String, val isError: Boolean)
+
+/**
+ * Runs OPML imports and exports in the destination's view-model scope, so one in flight is not
+ * thrown away when the screen rotates. The outcome waits in [outcome] until a screen has shown it.
+ */
+class OpmlHolder : ViewModel() {
+    var outcome by mutableStateOf<OpmlOutcome?>(null)
+        private set
+
+    fun consume() {
+        outcome = null
+    }
+
+    /** [work] runs off the main thread and returns the line to show; any failure shows [failure]. */
+    fun run(failure: String, work: suspend () -> String) {
+        viewModelScope.launch {
+            outcome = try {
+                OpmlOutcome(withContext(Dispatchers.IO) { work() }, isError = false)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                OpmlOutcome(failure, isError = true)
+            }
+        }
+    }
+}
+
 /**
  * OPML import and export through the Storage Access Framework: the user picks the file, so no
  * storage permission is involved. [onResult] gets a line such as "Added 38, skipped 4".
- * [syncAfterImport] fetches the new feeds afterwards.
+ * [syncAfterImport] fetches the new feeds afterwards. The work survives rotation (see
+ * [OpmlHolder]); its outcome is delivered to whichever instance of the screen is showing.
  */
 @Composable
 fun rememberOpmlActions(syncAfterImport: Boolean, onResult: (message: String, isError: Boolean) -> Unit): OpmlActions {
     val container = LocalAppContainer.current
-    val context = LocalContext.current
-    val resources = LocalResources.current
-    val scope = rememberCoroutineScope()
+    // The application's context and resources: the work outlives any one activity instance.
+    val appContext = LocalContext.current.applicationContext
+    val resources = appContext.resources
     val report = rememberUpdatedState(onResult)
+    val holder: OpmlHolder = viewModel()
+
+    val outcome = holder.outcome
+    LaunchedEffect(outcome) {
+        if (outcome != null) {
+            report.value(outcome.message, outcome.isError)
+            holder.consume()
+        }
+    }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    val stream = context.contentResolver.openInputStream(uri) ?: throw IOException("No stream for $uri")
-                    stream.use { container.opmlTransfer.importFrom(it) }
-                }
-                report.value(resources.getString(R.string.opml_import_result, result.added, result.skipped), false)
-                if (syncAfterImport && result.added > 0) container.appScope.launch { container.feedSyncer.syncAll() }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                report.value(resources.getString(R.string.opml_import_failed), true)
-            }
+        holder.run(failure = resources.getString(R.string.opml_import_failed)) {
+            val stream = appContext.contentResolver.openInputStream(uri) ?: throw IOException("No stream for $uri")
+            val result = stream.use { container.opmlTransfer.importFrom(it) }
+            if (syncAfterImport && result.added > 0) container.appScope.launch { container.feedSyncer.syncAll() }
+            resources.getString(R.string.opml_import_result, result.added, result.skipped)
         }
     }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/x-opml")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            try {
-                val count = withContext(Dispatchers.IO) {
-                    val stream = context.contentResolver.openOutputStream(uri) ?: throw IOException("No stream for $uri")
-                    stream.use { container.opmlTransfer.exportTo(it) }
-                }
-                report.value(resources.getQuantityString(R.plurals.opml_exported, count, count), false)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                report.value(resources.getString(R.string.opml_export_failed), true)
-            }
+        holder.run(failure = resources.getString(R.string.opml_export_failed)) {
+            val stream = appContext.contentResolver.openOutputStream(uri) ?: throw IOException("No stream for $uri")
+            val count = stream.use { container.opmlTransfer.exportTo(it) }
+            resources.getQuantityString(R.plurals.opml_exported, count, count)
         }
     }
     return remember(importLauncher, exportLauncher) {

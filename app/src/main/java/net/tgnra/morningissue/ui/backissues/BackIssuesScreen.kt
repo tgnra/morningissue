@@ -19,6 +19,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.widthIn
+import net.tgnra.morningissue.ui.layout.PaperWidthClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -89,7 +92,7 @@ fun BackIssuesScreen(
                 var monthText by rememberSaveable { mutableStateOf(newest.toString()) }
                 val month = YearMonth.parse(monthText).coerceIn(oldest, newest)
 
-                PagedColumn(contentPadding = PaddingValues(start = margin, end = margin, bottom = 32.dp), maxWidth = 560.dp) {
+                val calendar: @Composable () -> Unit = {
                     MonthHeader(
                         month = month,
                         canGoBack = month > oldest,
@@ -97,7 +100,8 @@ fun BackIssuesScreen(
                         onChange = { monthText = it.toString() },
                     )
                     MonthCalendar(month, byDate, onOpenEdition)
-                    Spacer(Modifier.height(28.dp))
+                }
+                val issues: @Composable () -> Unit = {
                     val inMonth = list.filter { YearMonth.from(it.date) == month }
                     SectionLabel(stringResource(R.string.backissues_this_month), color = MorningIssueTheme.colors.ink, heading = true)
                     HeavyRule(Modifier.padding(top = 6.dp))
@@ -112,6 +116,30 @@ fun BackIssuesScreen(
                     inMonth.forEachIndexed { index, edition ->
                         if (index > 0) HairlineRule()
                         EditionLine(edition, onClick = { onOpenEdition(edition.id) })
+                    }
+                }
+                if (LocalPaperLayoutSpec.current.widthClass == PaperWidthClass.Expanded) {
+                    // A tablet in landscape is wide and short: the month's editions go beside
+                    // the calendar instead of under it, where they would be off the screen.
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                        Row(Modifier.widthIn(max = 1180.dp).fillMaxSize()) {
+                            PagedColumn(
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(start = margin, end = margin, bottom = 32.dp),
+                                maxWidth = 520.dp,
+                            ) { calendar() }
+                            PagedColumn(
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(start = margin, end = margin, top = 24.dp, bottom = 32.dp),
+                                maxWidth = 560.dp,
+                            ) { issues() }
+                        }
+                    }
+                } else {
+                    PagedColumn(contentPadding = PaddingValues(start = margin, end = margin, bottom = 32.dp), maxWidth = 560.dp) {
+                        calendar()
+                        Spacer(Modifier.height(28.dp))
+                        issues()
                     }
                 }
             }
