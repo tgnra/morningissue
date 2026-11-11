@@ -39,6 +39,10 @@ abstract class StoredImageDao {
     )
     abstract suspend fun ofFeed(feedId: Long): List<StoredImageFileRow>
 
+    /** The images of [articleIds], to delete with the posts. At most `ArticleSignalDao.MAX_IDS` per call. */
+    @Query("SELECT url, fileName, byteSize FROM stored_image WHERE articleId IN (:articleIds)")
+    abstract suspend fun ofArticles(articleIds: List<Long>): List<StoredImageFileRow>
+
     /** At most `ArticleSignalDao.MAX_IDS` per call. */
     @Query("DELETE FROM stored_image WHERE url IN (:urls)")
     abstract suspend fun delete(urls: List<String>)

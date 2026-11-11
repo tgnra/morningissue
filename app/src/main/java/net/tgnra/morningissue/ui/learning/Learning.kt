@@ -173,6 +173,7 @@ object StoryReason {
         ItemKind.BRIEF -> R.string.reason_brief
         ItemKind.ARCHIVE -> R.string.reason_archive
         ItemKind.AWAY -> R.string.reason_away
+        ItemKind.READING_LIST -> R.string.reason_reading_list
         ItemKind.INDEX -> R.string.reason_index
     }
 }

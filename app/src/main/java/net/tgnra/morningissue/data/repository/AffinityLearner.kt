@@ -81,14 +81,14 @@ class AffinityLearner(
     /** Learns as of [at] from [evidence] (see the function above) without storing anything. */
     suspend fun learn(evidence: Map<Long, ArticleEvidence>, at: Instant): LearnedAffinities {
         val feedTags = HashMap<Long, MutableList<Long>>()
-        feedDao.getAll().forEach { feedTags[it.id] = ArrayList() }
+        feedDao.getSubscribed().forEach { feedTags[it.id] = ArrayList() }
         tagDao.getAllLinks().forEach { feedTags[it.feedId]?.add(it.tagId) }
         return affinity.learn(evidence.values, feedTags, at, tagIds = tagDao.getAll().map { it.id })
     }
 
     /** Writes the values that changed. */
     suspend fun store(learned: LearnedAffinities) {
-        for (feed in feedDao.getAll()) {
+        for (feed in feedDao.getSubscribed()) {
             val value = learned.feeds[feed.id] ?: continue
             if (abs(value - feed.affinity) > EPSILON) feedDao.updateAffinity(feed.id, value)
         }

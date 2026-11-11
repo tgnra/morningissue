@@ -13,6 +13,7 @@ import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.model.ArticleSummary
 import net.tgnra.morningissue.model.ContentBlock
 import net.tgnra.morningissue.model.ContentBlocks
+import net.tgnra.morningissue.model.FeedStatus
 import net.tgnra.morningissue.model.ReaderArticle
 import net.tgnra.morningissue.model.ReadingTime
 import net.tgnra.morningissue.model.RichText
@@ -116,6 +117,7 @@ class RoomArticleRepository(
             isLiked = likedAt != null,
             isSaved = savedAt != null,
             readFraction = readFraction ?: 0f,
+            feedSubscribed = feedStatus == FeedStatus.SUBSCRIBED,
         )
     }
 }

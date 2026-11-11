@@ -45,6 +45,9 @@ import net.tgnra.morningissue.ui.components.PaperIconButton
 import net.tgnra.morningissue.ui.components.PaperScreenFrame
 import net.tgnra.morningissue.ui.components.SectionLabel
 import net.tgnra.morningissue.ui.components.SegmentedChoice
+import net.tgnra.morningissue.ui.components.UndoLine
+import net.tgnra.morningissue.ui.components.NotSubscribedBar
+import net.tgnra.morningissue.ui.components.subscribeAndSync
 import net.tgnra.morningissue.ui.components.retainedState
 import net.tgnra.morningissue.ui.layout.LocalPaperLayoutSpec
 import net.tgnra.morningissue.ui.theme.MorningIssueTheme
@@ -125,6 +128,7 @@ fun SavedScreen(
                     )
                 },
             ) { article ->
+                Column {
                 ArticleListItem(
                     article = article,
                     onClick = { onOpenArticle(article.articleId) },
@@ -137,6 +141,17 @@ fun SavedScreen(
                         )
                     },
                 )
+                // A post saved from a source found through discovery: the way to subscribe is right here.
+                if (!article.feedSubscribed) {
+                    NotSubscribedBar(
+                        feedTitle = article.feedTitle,
+                        subscribed = false,
+                        onSubscribe = { subscribeAndSync(container, article.feedId) },
+                        compact = true,
+                        modifier = Modifier.padding(bottom = 10.dp),
+                    )
+                }
+                }
             }
         }
     }
@@ -146,37 +161,3 @@ fun SavedScreen(
 @Composable
 private fun shelfLabel(name: String, count: Int?): String =
     if (count == null || count == 0) name else stringResource(R.string.saved_tab_count, name, count)
-
-/** What was just removed, with the way to put it back. */
-@Composable
-private fun UndoLine(text: String, onUndo: () -> Unit, modifier: Modifier = Modifier) {
-    val colors = MorningIssueTheme.colors
-    val type = MorningIssueTheme.typography
-    Row(
-        modifier.fillMaxWidth().height(IntrinsicSize.Min).border(1.5.dp, colors.ink),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = text,
-            style = type.label,
-            color = colors.ink,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 12.dp, vertical = 10.dp)
-                .semantics { liveRegion = LiveRegionMode.Polite },
-        )
-        Box(Modifier.fillMaxHeight().width(1.5.dp).background(colors.ink))
-        Box(
-            Modifier
-                .fillMaxHeight()
-                .defaultMinSize(minWidth = 80.dp, minHeight = 48.dp)
-                .clickable(role = Role.Button, onClick = onUndo)
-                .padding(horizontal = 14.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(stringResource(R.string.action_undo), style = type.label.copy(fontWeight = FontWeight.Bold), color = colors.ink)
-        }
-    }
-}

@@ -55,8 +55,12 @@ abstract class ArticleDao {
     @Query("$ROW_SELECT WHERE a.id = :articleId")
     abstract fun observeRow(articleId: Long): Flow<ArticleRow?>
 
-    /** Posts first seen in `(after, upTo]`, i.e. the new posts of one edition. */
-    @Query("$ROW_SELECT WHERE a.firstSeenAt > :after AND a.firstSeenAt <= :upTo ORDER BY a.firstSeenAt")
+    /**
+     * Subscribed feeds' posts first seen in `(after, upTo]`, i.e. the new posts of one edition.
+     * A post saved from discovery is first seen when it is opened, so without the status filter
+     * it would enter the pool and on its own defeat "nothing new".
+     */
+    @Query("$ROW_SELECT WHERE a.firstSeenAt > :after AND a.firstSeenAt <= :upTo AND f.status = 'SUBSCRIBED' ORDER BY a.firstSeenAt")
     abstract suspend fun firstSeenBetween(after: Instant, upTo: Instant): List<ArticleRow>
 
     /**
@@ -77,10 +81,10 @@ abstract class ArticleDao {
     @Query("SELECT publishedAt FROM article WHERE feedId = :feedId AND firstSeenAt <= :seenUpTo ORDER BY publishedAt DESC LIMIT 1")
     abstract suspend fun lastKnownPostAt(feedId: Long, seenUpTo: Instant): Instant?
 
-    /** Feeds with a post the reader Liked or saved at or after [since]. */
+    /** Subscribed feeds with a post the reader Liked or saved at or after [since]. */
     @Query(
-        "SELECT DISTINCT a.feedId FROM engagement g JOIN article a ON a.id = g.articleId " +
-            "WHERE g.likedAt >= :since OR g.savedAt >= :since",
+        "SELECT DISTINCT a.feedId FROM engagement g JOIN article a ON a.id = g.articleId JOIN feed f ON f.id = a.feedId " +
+            "WHERE f.status = 'SUBSCRIBED' AND (g.likedAt >= :since OR g.savedAt >= :since)",
     )
     abstract suspend fun feedsLikedOrSavedSince(since: Instant): List<Long>
 
@@ -92,6 +96,38 @@ abstract class ArticleDao {
 
     @Query("$ROW_SELECT WHERE g.likedAt IS NOT NULL ORDER BY g.likedAt DESC")
     abstract fun observeLiked(): Flow<List<ArticleRow>>
+
+    /**
+     * From your reading list: the post saved longest ago, from a feed the reader does not
+     * subscribe to, that they have not read and that has never run in that slot before.
+     */
+    @Query(
+        "$ROW_SELECT WHERE f.status = 'DISCOVERED' AND g.savedAt IS NOT NULL AND g.readAt IS NULL " +
+            "AND a.id NOT IN (SELECT articleId FROM edition_item WHERE kind = 'READING_LIST') " +
+            "ORDER BY g.savedAt, a.id LIMIT 1",
+    )
+    abstract suspend fun oldestUnreadSavedFromUnsubscribed(): ArticleRow?
+
+    /**
+     * Posts of discovered feeds that the reader has neither saved nor Liked, opened (or, if
+     * never opened, first stored) before [before]: what the discovery clean-up deletes.
+     */
+    @Query(
+        "SELECT a.id FROM article a JOIN feed f ON f.id = a.feedId LEFT JOIN engagement g ON g.articleId = a.id " +
+            "WHERE f.status = 'DISCOVERED' AND g.savedAt IS NULL AND g.likedAt IS NULL " +
+            "AND COALESCE(g.openedAt, a.firstSeenAt) < :before",
+    )
+    abstract suspend fun expiredDiscoveredIds(before: Instant): List<Long>
+
+    @Query("DELETE FROM article WHERE id IN (:articleIds)")
+    protected abstract suspend fun deleteRows(articleIds: List<Long>)
+
+    /** Deletes posts with everything hanging off them, their search entries included. */
+    @Transaction
+    open suspend fun delete(articleIds: List<Long>) {
+        for (id in articleIds) deleteFts(id)
+        deleteRows(articleIds)
+    }
 
     // --- Content ---------------------------------------------------------------------------
 
@@ -173,7 +209,7 @@ abstract class ArticleDao {
      * narrow the result and are ignored when null or false. Newest first.
      */
     @Query(
-        "SELECT a.*, f.title AS feedTitle, f.iconUrl AS feedIconUrl, g.openedAt AS openedAt, " +
+        "SELECT a.*, f.title AS feedTitle, f.iconUrl AS feedIconUrl, f.status AS feedStatus, g.openedAt AS openedAt, " +
             "g.readFraction AS readFraction, g.readAt AS readAt, g.savedAt AS savedAt, g.likedAt AS likedAt, " +
             "g.editionsRunUnopened AS editionsRunUnopened, g.leadCount AS leadCount, " +
             "snippet(article_fts, '', '', '…', -1, 16) AS snippet " +
@@ -253,7 +289,7 @@ abstract class ArticleDao {
     companion object {
         /** Shared projection for [ArticleRow]; append a WHERE clause. */
         const val ROW_SELECT =
-            "SELECT a.*, f.title AS feedTitle, f.iconUrl AS feedIconUrl, g.openedAt AS openedAt, " +
+            "SELECT a.*, f.title AS feedTitle, f.iconUrl AS feedIconUrl, f.status AS feedStatus, g.openedAt AS openedAt, " +
                 "g.readFraction AS readFraction, g.readAt AS readAt, g.savedAt AS savedAt, g.likedAt AS likedAt, " +
                 "g.editionsRunUnopened AS editionsRunUnopened, g.leadCount AS leadCount " +
                 "FROM article a JOIN feed f ON f.id = a.feedId LEFT JOIN engagement g ON g.articleId = a.id"

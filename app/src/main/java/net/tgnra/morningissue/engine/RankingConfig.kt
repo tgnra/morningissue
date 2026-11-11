@@ -82,6 +82,8 @@ data class RankingConfig(
     val maxLeadRuns: Int = 2,
     /** From the archive skips posts that ran in this many most recent editions. */
     val archiveCooldownEditions: Int = 3,
+    /** From your reading list runs at most once in this many days. */
+    val readingListIntervalDays: Long = 7,
     /** The early build aims for this long before the reset time. */
     val earlyBuildLeadMinutes: Long = 90,
     /**

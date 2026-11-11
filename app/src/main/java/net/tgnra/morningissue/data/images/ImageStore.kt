@@ -121,6 +121,12 @@ interface ImageStore {
     /** Deletes the rows and files of every image of [feedId]'s posts; call before the feed is deleted. */
     suspend fun deleteForFeed(feedId: Long)
 
+    /**
+     * Deletes the rows and files of every image of [articleIds]; call before the posts are
+     * deleted. At most `ArticleSignalDao.MAX_IDS` per call.
+     */
+    suspend fun deleteForArticles(articleIds: List<Long>) = Unit
+
     /** Removes rows whose file is gone, files that have no row, and stale half-written downloads. */
     suspend fun sweep(): ImageSweepReport
 }
@@ -304,6 +310,10 @@ class FileImageStore(
     }
 
     override suspend fun deleteForFeed(feedId: Long) = withContext(dispatcher) { delete(dao.ofFeed(feedId)) }
+
+    override suspend fun deleteForArticles(articleIds: List<Long>) = withContext(dispatcher) {
+        if (articleIds.isNotEmpty()) delete(dao.ofArticles(articleIds))
+    }
 
     /** Rows first: a row without a file is a failed lookup, a file without a row is space nobody counts. */
     private suspend fun delete(rows: List<StoredImageFileRow>) {

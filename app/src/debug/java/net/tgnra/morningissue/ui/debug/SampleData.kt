@@ -297,6 +297,7 @@ class SampleDataSeeder(
         ItemKind.BRIEF -> if (turn % 2 == 0) "Fresh from a fast-moving source you follow" else null
         ItemKind.ARCHIVE -> "Held over from a source you love: still unread after three weeks"
         ItemKind.AWAY -> "From an edition you missed, ranked from your last visit"
+        ItemKind.READING_LIST -> "From your reading list: you saved this from a source you don't subscribe to"
         ItemKind.INDEX -> null
     }
 

@@ -62,6 +62,8 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import net.tgnra.morningissue.ui.components.subscribeAndSync
+import net.tgnra.morningissue.ui.components.NotSubscribedBar
 import net.tgnra.morningissue.R
 import net.tgnra.morningissue.model.ContentBlock
 import net.tgnra.morningissue.model.ReaderArticle
@@ -141,6 +143,8 @@ fun ReaderScreen(
 
 @Composable
 private fun Reader(article: ReaderArticle, fullText: FullText, onOpenSource: (Long) -> Unit, onBack: () -> Unit) {
+    // Keeps the bar (now saying "Subscribed") in place after Subscribe, so nothing jumps.
+    var justSubscribed by rememberSaveable(article.articleId) { mutableStateOf(false) }
     val container = LocalAppContainer.current
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
@@ -250,6 +254,26 @@ private fun Reader(article: ReaderArticle, fullText: FullText, onOpenSource: (Lo
                         Column(Modifier.measure(spec.readerMaxMeasure)) {
                             ArticleHeader(article, onOpenSource, openImage)
                             Spacer(Modifier.height(20.dp))
+                            // A post from a source found through discovery: Save keeps it, Subscribe follows the source.
+                            if (!article.feedSubscribed || justSubscribed) {
+                                NotSubscribedBar(
+                                    feedTitle = article.feedTitle,
+                                    subscribed = article.feedSubscribed,
+                                    onSubscribe = {
+                                        justSubscribed = true
+                                        subscribeAndSync(container, article.feedId)
+                                    },
+                                    extra = {
+                                        PaperToggleButton(
+                                            text = stringResource(if (article.isSaved) R.string.reader_saved else R.string.reader_save),
+                                            checked = article.isSaved,
+                                            onCheckedChange = { on -> scope.launch { container.articles.setSaved(articleId, on) } },
+                                            icon = if (article.isSaved) PaperIcons.Bookmark else PaperIcons.BookmarkBorder,
+                                        )
+                                    },
+                                )
+                                Spacer(Modifier.height(20.dp))
+                            }
                             ArticleStatus(article, fullText)
                             ArticleBody(article.blocks, textScale, onImageClick = openImage)
                             Spacer(Modifier.height(36.dp))

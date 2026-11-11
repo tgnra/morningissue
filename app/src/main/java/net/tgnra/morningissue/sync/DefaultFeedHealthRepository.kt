@@ -54,7 +54,7 @@ class DefaultFeedHealthRepository(
     private val feedDao = database.feedDao()
     private val healthDao = database.feedHealthDao()
 
-    override fun observeFlagged(): Flow<List<FlaggedFeed>> = feedDao.observeAllWithDetails().map { feeds ->
+    override fun observeFlagged(): Flow<List<FlaggedFeed>> = feedDao.observeSubscribedWithDetails().map { feeds ->
         val now = clock.instant()
         feeds.mapNotNull { details ->
             val flag = FeedHealthRules.visibleFlag(details.health?.lastFlag, details.health?.flagDismissedUntil, now)

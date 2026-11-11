@@ -29,6 +29,7 @@ import net.tgnra.morningissue.engine.EditionClock
 import net.tgnra.morningissue.engine.EditionDraft
 import net.tgnra.morningissue.engine.FeedProfile
 import net.tgnra.morningissue.engine.RankingConfig
+import net.tgnra.morningissue.engine.ReadingListPick
 import net.tgnra.morningissue.engine.Scorer
 import net.tgnra.morningissue.engine.schedule
 import net.tgnra.morningissue.model.AppSettings
@@ -78,6 +79,11 @@ private val traceCookies = AtomicInteger()
  * edition being superseded, and stored together with the new edition. Within-feed ranking
  * (`WithinFeedLearner`) is learned from the same evidence for every kind of build and stored
  * nowhere: it reaches the edition through each story's score and reason line.
+ *
+ * **Subscribed feeds only.** The pool is subscribed feeds' posts: a post opened or saved from
+ * feed discovery belongs to a feed the reader does not subscribe to (`FeedStatus.DISCOVERED`)
+ * and is never a candidate. A Morning edition may give one such saved post a page of its own,
+ * From your reading list, at most once a week (see [readingListPick]).
  *
  * **Nothing to build.** No edition is stored unless at least one post first seen since the
  * previous cutoff is printed (there are none, or they are all muted, older than `maxAgeDays`
@@ -216,7 +222,7 @@ class RoomEditionPublisher(
         val supersedes = kind != EditionKind.EXTRA
         val evidence = learner.evidence(now, if (supersedes) emptySet() else pending.mapTo(HashSet()) { it.id })
         val learned = learner.learn(evidence, now)
-        val details = feedDao.getAllWithDetails()
+        val details = feedDao.getSubscribedWithDetails()
         val tagAffinity = HashMap<String, Double>()
         details.forEach { feed -> feed.tags.forEach { tagAffinity[it.name] = learned.tags[it.id] ?: it.affinity } }
         val feeds = details.map { it.toProfile(learned, tagAffinity) }
@@ -228,6 +234,7 @@ class RoomEditionPublisher(
         val heldOver = if (kind == EditionKind.MORNING) heldOver(feeds, alreadyRun, pending, after, releaseAt, newIds) else emptyList()
         val heldOverIds = heldOver.mapTo(HashSet()) { it.articleId }
         val away = if (kind == EditionKind.MORNING) awayPool(now) else null
+        val readingList = if (kind == EditionKind.MORNING) readingListPick(releaseAt) else null
         val shadows = alreadyRun.filter { it.article.id !in heldOverIds && it.article.feedId in feedsById }.map { it.toCandidate() }
 
         // Within-feed ranking: learned from the same evidence as affinity, as of the release
@@ -246,6 +253,7 @@ class RoomEditionPublisher(
             kind = kind,
             alreadyRun = shadows,
             away = away,
+            readingList = readingList,
         )
         // A reprint has to print something from the feeds it was asked for; otherwise the first
         // printing stands.
@@ -364,6 +372,22 @@ class RoomEditionPublisher(
             lastVisitAt = lastVisit,
             engagedFeedIds = articleDao.feedsLikedOrSavedSince(now.minus(Duration.ofDays(config.awayFirehoseEngagementDays))).toSet(),
         )
+    }
+
+    /**
+     * From your reading list: the oldest unread post the reader saved from a feed they do not
+     * subscribe to, at most once every `readingListIntervalDays` (counted between release
+     * times), and never the same post twice. It is looked up only after the pool is known to
+     * hold something new, so it can never make a paper on its own, and it is not a candidate:
+     * the builder gives it its own page.
+     */
+    private suspend fun readingListPick(releaseAt: Instant): ReadingListPick? {
+        val last = editionDao.lastReadingListAt(releaseAt)
+        if (last != null && Duration.between(last, releaseAt) < Duration.ofDays(config.readingListIntervalDays)) return null
+        val row = articleDao.oldestUnreadSavedFromUnsubscribed() ?: return null
+        val feed = feedDao.getById(row.article.feedId) ?: return null
+        val profile = FeedProfile(id = feed.id, title = feed.title, tier = feed.tier, medianIntervalHours = feed.medianIntervalHrs)
+        return ReadingListPick(row.toCandidate(), profile)
     }
 
     /**

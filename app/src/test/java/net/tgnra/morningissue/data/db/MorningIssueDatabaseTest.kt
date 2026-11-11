@@ -38,7 +38,7 @@ class MorningIssueDatabaseTest {
         val second = db.feedDao().insert(feed(title = "Same URL"))
         assertTrue(first > 0)
         assertEquals(-1L, second)
-        assertEquals(1, db.feedDao().count())
+        assertEquals(1, db.feedDao().countSubscribed())
     }
 
     @Test

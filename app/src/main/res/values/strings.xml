@@ -96,6 +96,8 @@
     <string name="page_in_brief">In brief</string>
     <string name="page_archive">From the archive</string>
     <string name="page_archive_intro">An unread post from a source you love, held over for you.</string>
+    <string name="page_reading_list">From your reading list</string>
+    <string name="page_reading_list_intro">A post you saved from a source you don’t subscribe to, still unread.</string>
     <string name="page_away">While you were away</string>
     <string name="page_away_intro">The best of the editions you missed.</string>
     <string name="page_back">Back page</string>
@@ -187,7 +189,7 @@
     <string name="add_feed_blank">Enter a site or feed address.</string>
     <string name="add_feed_none">No feed was found at that address.</string>
     <string name="add_feed_failed">That address couldn’t be read: %1$s</string>
-    <string name="add_feed_already">You already follow %1$s.</string>
+    <string name="add_feed_already">You’re already subscribed to %1$s.</string>
     <string name="add_feed_added">Added %1$s.</string>
     <string name="remove_feed_title">Remove %1$s?</string>
     <string name="remove_feed_detail">Its posts will also be removed from your editions, back issues and search.</string>
@@ -430,6 +432,7 @@
     <string name="reason_section">One of the best stories from your %1$s sources.</string>
     <string name="reason_brief">A headline from a fast-moving source, worth a line.</string>
     <string name="reason_archive">An unread post from a slow source you love, held over until you read it.</string>
+    <string name="reason_reading_list">You saved it from a source you don’t subscribe to, and haven’t read it yet. One a week at most.</string>
     <string name="reason_away">One of the best stories from the editions you missed.</string>
     <string name="reason_index">It didn’t make the paper, so it is listed here: nothing is silently skipped.</string>
     <string name="slider_rarely">Rarely</string>
@@ -487,4 +490,56 @@
     <string name="reader_end_liked">Liked. The paper will lean towards more like this.</string>
     <string name="reader_end_saved">Saved to your shelf.</string>
     <string name="reader_end_both">Liked, and saved to your shelf.</string>
+
+    <!-- Discovery: Find sources -->
+    <string name="discover_title">Find sources</string>
+    <string name="discover_entry">Find sources</string>
+    <string name="discover_entry_detail">Suggestions from a catalogue of blogs and small sites, chosen from what you read.</string>
+    <string name="discover_unavailable_title">No suggestions available</string>
+    <string name="discover_unavailable_detail">This copy of Morning Issue has no catalogue of sources to suggest from. You can still add any site by its address.</string>
+    <string name="discover_topics_title">What do you like to read?</string>
+    <string name="discover_topics_detail">Pick a few topics to start. Suggestions follow what you read and Like from then on.</string>
+    <string name="discover_topics_show">Show suggestions</string>
+    <string name="discover_topics_skip">Show anything</string>
+    <string name="discover_browse_topics">Browse by topic</string>
+    <string name="discover_passed_list">Passed sources</string>
+    <string name="discover_how">How suggestions work</string>
+    <string name="discover_how_detail">Suggestions come from a catalogue that ships with the app. They are chosen on this device by comparing the catalogue’s sources with the posts you read, Like and save; nothing about your reading leaves the device. Each week brings a fresh set of 20. Every fifth card is something a little different, so the suggestions don’t narrow to one topic.\n\nTo show a source’s latest posts the app fetches its feed, which tells that one site your address, as visiting it would. On a metered connection nothing is fetched until you ask.\n\nA pass is permanent: the source is never suggested again, and sources like it come up less for a while. Passed sources can be suggested again from the Passed list.</string>
+    <string name="discover_card_count">%1$d of %2$d</string>
+    <string name="discover_pass">Pass</string>
+    <string name="discover_subscribe">Subscribe</string>
+    <string name="discover_subscribed">Subscribed</string>
+    <string name="discover_something_different">Something different</string>
+    <string name="discover_latest">Latest posts</string>
+    <string name="discover_catalogue_headlines">Recent posts</string>
+    <string name="discover_load_latest">Load latest</string>
+    <string name="discover_loading">Fetching the latest posts…</string>
+    <string name="discover_metered">On a metered connection: showing the catalogue’s headlines.</string>
+    <string name="discover_unreachable">Couldn’t reach the site: showing the catalogue’s headlines.</string>
+    <string name="discover_dead">This site’s feed isn’t answering properly.</string>
+    <string name="discover_no_headlines">No recent posts listed.</string>
+    <plurals name="discover_words">
+        <item quantity="one">%,d word</item>
+        <item quantity="other">%,d words</item>
+    </plurals>
+    <string name="discover_open_headline">Read %1$s</string>
+    <string name="discover_passed_one">Passed %1$s.</string>
+    <string name="discover_subscribed_one">Subscribed to %1$s. Its posts will be in your next edition.</string>
+    <string name="discover_undo">Undo</string>
+    <string name="discover_undo_loses_posts">Posts already fetched from it will be removed.</string>
+    <string name="discover_finished_title">That’s this week’s suggestions</string>
+    <string name="discover_finished_detail">A fresh set comes each week. Meanwhile you can browse by topic.</string>
+    <string name="discover_finished_count">You decided on all %1$d.</string>
+    <string name="discover_passed_title">Passed sources</string>
+    <string name="discover_passed_empty_title">Nothing passed</string>
+    <string name="discover_passed_empty_detail">Sources you pass on are listed here, so that a pass can be taken back.</string>
+    <string name="discover_passed_on">Passed %1$s</string>
+    <string name="discover_unpass">Suggest again</string>
+    <string name="discover_unpass_action">Suggest %1$s again</string>
+    <string name="not_subscribed">Not subscribed</string>
+    <string name="not_subscribed_detail">You’re reading %1$s without subscribing. Saved posts stay; others go after a week.</string>
+    <string name="not_subscribed_short">From %1$s, which you don’t subscribe to.</string>
+    <string name="subscribe_to">Subscribe to %1$s</string>
+    <string name="subscribed_to">Subscribed to %1$s.</string>
+    <string name="onboarding_discover_detail">Not sure where to start? Browse suggested blogs and small sites.</string>
 </resources>

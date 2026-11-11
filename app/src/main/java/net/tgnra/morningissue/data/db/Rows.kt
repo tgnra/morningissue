@@ -6,6 +6,7 @@ import androidx.room3.Relation
 import java.time.Instant
 import net.tgnra.morningissue.model.ArticleCategory
 import net.tgnra.morningissue.model.EnclosureKind
+import net.tgnra.morningissue.model.FeedStatus
 
 /** A feed with its tags and health row. */
 data class FeedWithDetails(
@@ -28,6 +29,8 @@ data class ArticleRow(
     @Embedded val article: ArticleEntity,
     val feedTitle: String,
     val feedIconUrl: String?,
+    /** Whether the reader subscribes to the post's feed; a post saved from discovery is not. */
+    val feedStatus: FeedStatus,
     val openedAt: Instant?,
     val readFraction: Float?,
     val readAt: Instant?,

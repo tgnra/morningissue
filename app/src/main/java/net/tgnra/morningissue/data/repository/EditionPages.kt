@@ -34,6 +34,7 @@ internal object EditionPages {
                 ItemKind.BRIEF -> EditionPage.InBrief(number, stories)
                 ItemKind.ARCHIVE -> EditionPage.FromTheArchive(number, stories)
                 ItemKind.AWAY -> EditionPage.WhileYouWereAway(number, stories)
+                ItemKind.READING_LIST -> EditionPage.FromYourReadingList(number, stories)
                 ItemKind.INDEX -> error("index items are filtered out above")
             }
         }

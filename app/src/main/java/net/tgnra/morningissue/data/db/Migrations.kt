@@ -70,6 +70,42 @@ object Migrations {
         }
     }
 
+    /**
+     * Version 3 adds feed discovery: `feed.status` and `feed.discoveredAt`, and the tables
+     * `discovery_verdict` and `discovery_candidate`.
+     *
+     * - `status` is filled by its default: every feed of a version 2 database is a
+     *   subscription. `discoveredAt` stays null, as it does for every subscription.
+     * - `discovery_verdict` records decisions about suggested feeds. Version 2 had no
+     *   suggestions, so there is nothing to fill it from; a feed removed before the upgrade is
+     *   not remembered as dropped.
+     * - `discovery_candidate` is the cache of feeds found on the device (blogrolls, links in
+     *   read posts). Nothing fills it yet; it is created now so that the crawler needs no
+     *   further schema change.
+     * - Feed centroids are deliberately not a table: they are derived from `article_embedding`
+     *   whenever discovery opens, so nothing needs filling and nothing can go stale.
+     */
+    val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+        override suspend fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("ALTER TABLE `feed` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'SUBSCRIBED'")
+            connection.execSQL("ALTER TABLE `feed` ADD COLUMN `discoveredAt` INTEGER")
+            connection.execSQL(
+                "CREATE TABLE IF NOT EXISTS `discovery_verdict` (`urlKey` TEXT NOT NULL, `url` TEXT NOT NULL, " +
+                    "`verdict` TEXT NOT NULL, `decidedAt` INTEGER NOT NULL, `title` TEXT, `clusterId` INTEGER, " +
+                    "`centroid` BLOB, PRIMARY KEY(`urlKey`))",
+            )
+            connection.execSQL("CREATE INDEX IF NOT EXISTS `index_discovery_verdict_decidedAt` ON `discovery_verdict` (`decidedAt`)")
+            connection.execSQL(
+                "CREATE TABLE IF NOT EXISTS `discovery_candidate` (`urlKey` TEXT NOT NULL, `url` TEXT NOT NULL, " +
+                    "`source` TEXT NOT NULL, `foundVia` TEXT, `foundViaTitle` TEXT, `title` TEXT, `siteUrl` TEXT, " +
+                    "`host` TEXT, `description` TEXT, `mentions` INTEGER NOT NULL DEFAULT 1, `foundAt` INTEGER NOT NULL, " +
+                    "`fetchedAt` INTEGER, `tier` TEXT, `medianIntervalHrs` REAL, `fullTextShare` REAL, `lastPostAt` INTEGER, " +
+                    "`centroid` BLOB, PRIMARY KEY(`urlKey`))",
+            )
+            connection.execSQL("CREATE INDEX IF NOT EXISTS `index_discovery_candidate_fetchedAt` ON `discovery_candidate` (`fetchedAt`)")
+        }
+    }
+
     /** Every step, for `RoomDatabase.Builder.addMigrations`. */
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2)
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 }

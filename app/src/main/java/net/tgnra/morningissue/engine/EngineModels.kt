@@ -77,6 +77,13 @@ data class AwayPool(
     val engagedFeedIds: Set<Long> = emptySet(),
 )
 
+/**
+ * From your reading list: a post the reader saved from a feed they do not subscribe to, with
+ * that feed. It is never a candidate: the builder only gives it a page of its own, once the
+ * edition has a front page.
+ */
+data class ReadingListPick(val candidate: Candidate, val feed: FeedProfile)
+
 /** A story's place in an edition draft; mirrors an `edition_item` row (see `ItemKind`). */
 data class DraftItem(
     val articleId: Long,

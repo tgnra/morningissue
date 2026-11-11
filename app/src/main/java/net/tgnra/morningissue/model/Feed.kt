@@ -29,6 +29,8 @@ data class Feed(
     val flagDismissedUntil: Instant? = null,
     /** Publish time of the feed's newest post, as of the last successful fetch. */
     val lastPostAt: Instant? = null,
+    /** False for a feed that only holds posts saved or opened from discovery (`FeedStatus.DISCOVERED`). */
+    val isSubscribed: Boolean = true,
 ) {
     /** The health flag to show now: null while it is dismissed. */
     fun visibleHealthFlag(now: Instant): HealthFlag? =

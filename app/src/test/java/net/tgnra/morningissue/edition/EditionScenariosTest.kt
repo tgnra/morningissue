@@ -717,13 +717,13 @@ class EditionScenariosTest {
         val feed = addFeed("Blog")
         (0 until 12).forEach { addPost(feed, at(10, "06:00"), publishedAt = at(10, "06:00").minus(Duration.ofHours(it.toLong()))) }
         publisher.ensureCurrentEdition()!!
-        val before = db.feedDao().getAll().single { it.id == feed }.affinity
+        val before = db.feedDao().getSubscribed().single { it.id == feed }.affinity
 
         clock.now = at(10, "10:00")
         val added = addFeed("Added")
         addPost(added, clock.now)
         assertNotNull(publisher.publishExtraEdition(setOf(added)))
 
-        assertEquals(before, db.feedDao().getAll().single { it.id == feed }.affinity, 0.0)
+        assertEquals(before, db.feedDao().getSubscribed().single { it.id == feed }.affinity, 0.0)
     }
 }

@@ -160,7 +160,7 @@ abstract class ArticleSignalDao {
     @Query("$SIGNAL_SELECT WHERE a.id IN (:articleIds)")
     protected abstract suspend fun signalRows(articleIds: List<Long>, model: Int?): List<ArticleSignalRow>
 
-    @Query("$SIGNAL_SELECT WHERE a.id IN ($EVIDENCE_IDS)")
+    @Query("$SIGNAL_SELECT WHERE a.id IN ($EVIDENCE_IDS) AND a.feedId IN (SELECT id FROM feed WHERE status = 'SUBSCRIBED')")
     protected abstract suspend fun signalRowsWithEvidenceSince(since: Instant, model: Int?): List<ArticleSignalRow>
 
     @Query("SELECT * FROM article_category WHERE articleId IN ($EVIDENCE_IDS) ORDER BY articleId, `key`")

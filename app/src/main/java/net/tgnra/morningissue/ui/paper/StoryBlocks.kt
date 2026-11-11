@@ -65,6 +65,8 @@ class StoryActions(
     val onOpenMenu: (EditionStory) -> Unit = {},
     val onToggleSaved: (EditionStory) -> Unit = {},
     val onToggleLiked: (EditionStory) -> Unit = {},
+    /** Subscribes to the story's source: a From your reading list story's feed is not subscribed. */
+    val onSubscribe: (EditionStory) -> Unit = {},
 )
 
 val LocalStoryActions = staticCompositionLocalOf { StoryActions({}, {}) }

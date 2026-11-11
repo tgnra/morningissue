@@ -9,7 +9,10 @@ import kotlinx.serialization.json.Json
  * - `manifest.json`: one [ArchiveManifest]. [ArchiveManifest.version] is raised when a reader
  *   of the old version could no longer read the file; additions that old readers can ignore
  *   do not raise it.
- * - `feeds.jsonl`: one [ArchiveFeed] per line.
+ * - `feeds.jsonl`: one [ArchiveFeed] per line, with whether the reader subscribes to it.
+ *   Version 2 added the status: a version 1 reader would subscribe to every feed in the file,
+ *   including those that only hold posts saved from discovery, so the version was raised.
+ *   A version 1 file imports with every feed subscribed, as before.
  * - `posts.jsonl`: one [ArchivePost] per line, with its stored body and the reader's
  *   engagement when there is any. A post also carries the two things only its feed could
  *   supply again, its categories and the kind of its enclosure. The rest of what the ranking
@@ -25,7 +28,7 @@ import kotlinx.serialization.json.Json
  */
 object ArchiveFormat {
     const val FORMAT = "morning-issue-archive"
-    const val VERSION = 1
+    const val VERSION = 2
     const val MIME_TYPE = "application/zip"
     const val FILE_EXTENSION = "zip"
 
@@ -61,6 +64,9 @@ data class ArchiveFeed(
     val tags: List<String> = emptyList(),
     val sliderStep: String = "AUTO",
     val addedAt: Long,
+    /** A `FeedStatus` name; absent in version 1 files, whose feeds were all subscriptions. */
+    val status: String = "SUBSCRIBED",
+    val discoveredAt: Long? = null,
 )
 
 @Serializable

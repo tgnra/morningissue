@@ -49,7 +49,7 @@ class FeedHealthChecker(
      */
     suspend fun run(repair: Boolean = true): HealthReport = lock.withLock {
         val now = clock.instant()
-        val feeds = feedDao.getAll()
+        val feeds = feedDao.getSubscribed()
         val health = healthDao.getAll().associateBy { it.feedId }
         val ignored = healthDao.runStatsSince(now.minus(Duration.ofDays(config.ignoredWindowDays)), now).associateBy { it.feedId }
         val loved = healthDao.runStatsSince(now.minus(Duration.ofDays(config.lovedFlagWindowDays)), now).associateBy { it.feedId }
@@ -63,7 +63,7 @@ class FeedHealthChecker(
             var input = input(feed, row, ignored[feed.id], loved[feed.id], posts[feed.id])
             if (repair && tried < config.repairMaxPerRun && FeedHealthRules.repairDue(input, now, config)) {
                 tried++
-                if (repair(feed, feeds, now) != RepairResult.Failed) repaired++
+                if (repair(feed, now) != RepairResult.Failed) repaired++
                 row = healthDao.get(feed.id) ?: row
                 input = input(feed, row, ignored[feed.id], loved[feed.id], posts[feed.id])
             }
@@ -79,11 +79,12 @@ class FeedHealthChecker(
     /** Repairs one feed now, whatever the rate limit says (the desk's Retry). */
     suspend fun repairNow(feedId: Long): RepairResult = lock.withLock {
         val feed = feedDao.getById(feedId) ?: return@withLock RepairResult.Failed
-        repair(feed, feedDao.getAll(), clock.instant())
+        repair(feed, clock.instant())
     }
 
-    private suspend fun repair(feed: FeedEntity, all: List<FeedEntity>, now: Instant): RepairResult {
-        val taken = all.filter { it.id != feed.id }.map { FeedUrls.normalize(it.url) }.toSet()
+    private suspend fun repair(feed: FeedEntity, now: Instant): RepairResult {
+        // Every other feed's address is taken, a discovered feed's too: `feed.url` is unique.
+        val taken = feedDao.getUrls().filter { it.id != feed.id }.map { FeedUrls.normalize(it.url) }.toSet()
         val result = repairer.repair(feed.url, feed.siteUrl, taken)
         healthDao.recordRepair(feed.id, now)
         when (result) {

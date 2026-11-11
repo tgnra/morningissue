@@ -1,6 +1,7 @@
 package net.tgnra.morningissue.sync
 
 import net.tgnra.morningissue.CoreComponents
+import net.tgnra.morningissue.data.discovery.DiscoveryCleanup
 import net.tgnra.morningissue.data.repository.FeedHealthRepository
 
 /** What the sync layer offers to the rest of the app. */
@@ -23,12 +24,14 @@ object SyncModule {
         val discovery = DefaultFeedDiscovery(fetcher, core.clock)
         val healthChecker = FeedHealthChecker(core.database, FeedRepairer(fetcher, discovery, core.clock), core.clock)
         // After every full sync the health check runs, the new posts get their traits and
-        // embeddings (before the trim, which removes the text they are computed from), the image
-        // store is swept of files and rows that have lost their other half, then stored images
+        // embeddings (before the trim, which removes the text they are computed from), posts of
+        // feeds the reader only looked into through discovery go after 7 days, the image store is
+        // swept of files and rows that have lost their other half, then stored images
         // and text are trimmed to the storage budget.
+        val discoveryCleanup = DiscoveryCleanup(core.database, core.images, core.clock)
         val syncer = MaintainedFeedSyncer(
             delegate = DefaultFeedSyncer(core.database, fetcher, core.clock, core.appScope),
-            afterSync = listOf({ healthChecker.run() }, { core.signals.run() }, { core.images.sweep() }, { core.storage.trimToBudget() }),
+            afterSync = listOf({ healthChecker.run() }, { core.signals.run() }, { discoveryCleanup.run() }, { core.images.sweep() }, { core.storage.trimToBudget() }),
         )
         return SyncComponents(
             feedSyncer = syncer,
