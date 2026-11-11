@@ -2,6 +2,8 @@ package net.tgnra.morningissue
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.os.Build
+import android.provider.Settings
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import java.time.Clock
@@ -42,6 +44,8 @@ import net.tgnra.morningissue.edition.EditionPublisher
 import net.tgnra.morningissue.edition.EditionScheduler
 import net.tgnra.morningissue.edition.ReleaseTimes
 import net.tgnra.morningissue.embedding.EmbedderAsset
+import net.tgnra.morningissue.kobo.InstallId
+import net.tgnra.morningissue.kobo.KoboSync
 import net.tgnra.morningissue.sync.CandidateFetcher
 import net.tgnra.morningissue.sync.FeedDiscovery
 import net.tgnra.morningissue.sync.FeedFetcher
@@ -101,6 +105,9 @@ interface AppContainer {
 
     /** Print now: the foreground build of an edition that was not printed in the background. */
     val editionPrinter: EditionPrinter
+
+    /** Sync with a Kobo over the local network, while the Sync screen is open; see `docs/kobo-sync.md`. */
+    val koboSync: KoboSync
 
     val imageLoader: ImageLoader
     val clock: Clock
@@ -226,4 +233,16 @@ class DefaultAppContainer(context: Context) : AppContainer {
     }
 
     override val editions: EditionRepository by lazy { RoomEditionRepository(database, editionPublisher, clock) }
+
+    override val koboSync: KoboSync by lazy {
+        KoboSync(
+            database = database,
+            installId = InstallId(appContext.settingsDataStore),
+            imageFile = imageFiles::fileFor,
+            clock = clock,
+            deviceName = {
+                Settings.Global.getString(appContext.contentResolver, Settings.Global.DEVICE_NAME)?.takeIf { it.isNotBlank() } ?: Build.MODEL
+            },
+        )
+    }
 }

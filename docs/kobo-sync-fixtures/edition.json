@@ -1,0 +1,240 @@
+{
+    "id": 2,
+    "date": "2026-11-11",
+    "kind": "MORNING",
+    "number": 120,
+    "length": "STANDARD",
+    "releaseAt": "2026-11-11T06:30:00Z",
+    "finishedAt": null,
+    "pages": [
+        {
+            "page": 1,
+            "items": [
+                {
+                    "articleId": 1,
+                    "slot": 0,
+                    "kind": "LEAD",
+                    "section": null,
+                    "reason": "A rare post from a feed you love"
+                },
+                {
+                    "articleId": 2,
+                    "slot": 1,
+                    "kind": "FRONT",
+                    "section": null,
+                    "reason": "New from a weekly feed"
+                }
+            ]
+        },
+        {
+            "page": 2,
+            "items": [
+                {
+                    "articleId": 3,
+                    "slot": 0,
+                    "kind": "SECTION",
+                    "section": "Growing",
+                    "reason": "From Growing"
+                }
+            ]
+        },
+        {
+            "page": 3,
+            "items": [
+                {
+                    "articleId": 4,
+                    "slot": 0,
+                    "kind": "INDEX",
+                    "section": null,
+                    "reason": null
+                }
+            ]
+        }
+    ],
+    "articles": {
+        "1": {
+            "feedTitle": "The Kitchen Garden",
+            "title": "The first frost",
+            "author": "M. Fenwick",
+            "url": "https://garden.example/frost",
+            "publishedAt": "2026-11-11T04:30:00Z",
+            "summary": "Brassicas sweeten after a frost.",
+            "imageUrl": "https://garden.example/img/lead.jpg",
+            "wordCount": 420,
+            "blocks": [
+                {
+                    "t": "h",
+                    "level": 2,
+                    "text": {
+                        "text": "What the frost left"
+                    }
+                },
+                {
+                    "t": "p",
+                    "text": {
+                        "text": "Bold, italic, code, a link, struck, x2 and H2O.",
+                        "spans": [
+                            {
+                                "start": 0,
+                                "end": 4,
+                                "style": "b"
+                            },
+                            {
+                                "start": 6,
+                                "end": 12,
+                                "style": "i"
+                            },
+                            {
+                                "start": 14,
+                                "end": 18,
+                                "style": "code"
+                            },
+                            {
+                                "start": 22,
+                                "end": 26,
+                                "style": "a",
+                                "href": "https://garden.example/frost"
+                            },
+                            {
+                                "start": 28,
+                                "end": 34,
+                                "style": "s"
+                            },
+                            {
+                                "start": 37,
+                                "end": 38,
+                                "style": "sup"
+                            },
+                            {
+                                "start": 44,
+                                "end": 45,
+                                "style": "sub"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "t": "img",
+                    "url": "https://garden.example/img/frost.jpg",
+                    "alt": "Frost on a cabbage leaf",
+                    "caption": {
+                        "text": "The cabbages, at dawn."
+                    },
+                    "width": 1200,
+                    "height": 800
+                },
+                {
+                    "t": "quote",
+                    "paragraphs": [
+                        {
+                            "text": "Nothing is so beautiful as spring."
+                        }
+                    ],
+                    "citation": {
+                        "text": "Gerard Manley Hopkins"
+                    }
+                },
+                {
+                    "t": "list",
+                    "ordered": false,
+                    "items": [
+                        {
+                            "text": "Fleece"
+                        },
+                        {
+                            "text": "Cloches"
+                        },
+                        {
+                            "text": "Patience"
+                        }
+                    ]
+                },
+                {
+                    "t": "list",
+                    "ordered": true,
+                    "items": [
+                        {
+                            "text": "Water"
+                        },
+                        {
+                            "text": "Wait"
+                        }
+                    ]
+                },
+                {
+                    "t": "pre",
+                    "text": "frost_date = \"2026-11-10\"",
+                    "language": "toml"
+                }
+            ],
+            "engagement": {
+                "openedAt": "2026-11-11T06:40:00Z",
+                "readFraction": 0.5,
+                "readAt": null,
+                "savedAt": null,
+                "likedAt": null
+            }
+        },
+        "2": {
+            "feedTitle": "The Kitchen Garden",
+            "title": "Leeks in November",
+            "author": null,
+            "url": "https://garden.example/leeks",
+            "publishedAt": "2026-11-11T04:30:00Z",
+            "summary": "Earth them up.",
+            "imageUrl": null,
+            "wordCount": 420,
+            "blocks": [],
+            "engagement": {
+                "openedAt": null,
+                "readFraction": 0.0,
+                "readAt": null,
+                "savedAt": "2026-11-11T06:45:00Z",
+                "likedAt": null
+            }
+        },
+        "3": {
+            "feedTitle": "The Kitchen Garden",
+            "title": "Saving seed",
+            "author": null,
+            "url": "https://garden.example/seed",
+            "publishedAt": "2026-11-11T04:30:00Z",
+            "summary": null,
+            "imageUrl": null,
+            "wordCount": 420,
+            "blocks": [
+                {
+                    "t": "p",
+                    "text": {
+                        "text": "Dry them well."
+                    }
+                }
+            ],
+            "engagement": {
+                "openedAt": null,
+                "readFraction": 0.0,
+                "readAt": null,
+                "savedAt": null,
+                "likedAt": null
+            }
+        },
+        "4": {
+            "feedTitle": "The Kitchen Garden",
+            "title": "Compost notes",
+            "author": null,
+            "url": "https://garden.example/compost",
+            "publishedAt": "2026-11-11T04:30:00Z",
+            "summary": "Turn it.",
+            "imageUrl": null,
+            "wordCount": 420,
+            "blocks": [],
+            "engagement": {
+                "openedAt": null,
+                "readFraction": 0.0,
+                "readAt": null,
+                "savedAt": null,
+                "likedAt": null
+            }
+        }
+    }
+}
