@@ -4,7 +4,8 @@
 //! - `readFraction` on leaving an article, when it got further than before;
 //! - `read` on leaving, once the app's rule is met (`ReadRule`: 70% through, or open for half
 //!   the reading time) and the phone does not already have it read;
-//! - `liked` / `saved` only when toggled here;
+//! - `liked` / `saved` only when toggled here (Likes are kept on the Kobo in `liked.json`, as
+//!   the phone's are not shown here);
 //! - `pageView` with the time a page was on screen, measured on the monotonic clock as
 //!   `PageViews.kt` does, and only while the page itself was showing;
 //! - `editionOpened` and `editionFinished` (the back page reached).
@@ -52,7 +53,7 @@ impl Recorder {
 }
 
 /// Applies unsent events to stored bundles, so what was done on the Kobo since the last sync
-/// shows (ticks, Like and Save) before the phone has merged it.
+/// shows (ticks and Save) before the phone has merged it.
 pub fn apply(bundles: &mut [Bundle], events: &[Event]) {
     for e in events {
         apply_one(bundles, e);
@@ -90,17 +91,40 @@ pub fn apply_article(a: &mut Article, e: &Event) {
         "read" => {
             g.read_at.get_or_insert_with(|| e.at.clone());
         }
-        "liked" => g.liked_at = (e.value.as_ref().and_then(Value::as_bool) == Some(true)).then(|| e.at.clone()),
         "saved" => g.saved_at = (e.value.as_ref().and_then(Value::as_bool) == Some(true)).then(|| e.at.clone()),
         _ => {}
     }
 }
 
-/// [`apply_one`] for the saved list.
-pub fn apply_saved(saved: &mut SavedList, e: &Event) {
-    if let Some(a) = e.article_id.and_then(|id| saved.article_mut(id)) {
+/// [`apply_one`] for the saved list. A Save made here puts the article at the top of the list
+/// at once (`find` gives it from a stored edition), and an unsave takes it off, so the list is
+/// right before the phone has merged either.
+pub fn apply_saved(saved: &mut SavedList, e: &Event, find: impl Fn(i64) -> Option<Article>) {
+    let Some(id) = e.article_id else { return };
+    if e.kind == "saved" {
+        let key = id.to_string();
+        if e.value.as_ref().and_then(Value::as_bool) == Some(true) {
+            if !saved.articles.contains_key(&key) {
+                let Some(a) = find(id) else { return };
+                saved.articles.insert(key, a);
+            }
+            if !saved.order.contains(&id) {
+                saved.order.insert(0, id);
+            }
+        } else {
+            saved.order.retain(|&o| o != id);
+            saved.articles.remove(&key);
+            return;
+        }
+    }
+    if let Some(a) = saved.article_mut(id) {
         apply_article(a, e);
     }
+}
+
+/// The article `id` from the first stored edition that has it, for [`apply_saved`].
+pub fn find_in(bundles: &[Bundle], id: i64) -> Option<Article> {
+    bundles.iter().find_map(|b| b.article(id)).cloned()
 }
 
 /// Times the page on screen (`PageViewMeter`): told which page shows now, returns the page that
@@ -171,5 +195,30 @@ mod tests {
         assert_eq!(m.show(Some((1, 1)), 200), None);
         assert_eq!(m.show(Some((1, 2)), 1100), Some(((1, 1), 1000)));
         assert_eq!(m.show(None, 1100), None, "no time, no event");
+    }
+
+    fn saved_event(id: i64, on: bool) -> Event {
+        Event { seq: 1, kind: "saved".into(), article_id: Some(id), edition_id: None, page: None, value: Some(serde_json::json!(on)), ms: None, at: "2026-11-11T08:00:00Z".into() }
+    }
+
+    #[test]
+    fn saving_and_unsaving_change_the_list_at_once() {
+        let mut list = SavedList::default();
+        let a = Article { title: "From the edition".into(), ..Default::default() };
+        list.order = vec![7];
+        list.articles.insert("7".into(), Article { title: "Saved on the phone".into(), ..Default::default() });
+
+        apply_saved(&mut list, &saved_event(9, true), |id| (id == 9).then(|| a.clone()));
+        assert_eq!(list.order, vec![9, 7], "newest saved first");
+        assert_eq!(list.article(9).unwrap().title, "From the edition");
+        assert!(list.article(9).unwrap().engagement.saved_at.is_some());
+
+        apply_saved(&mut list, &saved_event(7, false), |_| None);
+        assert_eq!(list.order, vec![9]);
+        assert!(list.article(7).is_none());
+
+        // An article no stored edition has cannot be listed; nothing changes.
+        apply_saved(&mut list, &saved_event(11, true), |_| None);
+        assert_eq!(list.order, vec![9]);
     }
 }

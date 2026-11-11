@@ -89,7 +89,7 @@ The phone stores a hash of the token, never the token itself. Pairing the same `
 - An edition that does not exist, or is not released yet, gets `404`.
 - `pages` and `items` mirror `edition_item`, sorted by `page` then `slot`. `kind` and `section` mean the same as in the app (`ItemKind`).
 - `blocks` is `article_content.blocksJson` as stored, in the `ContentBlocks` JSON format (`model/Content.kt`, discriminator `"t"`: `p`, `h`, `img`, `quote`, `list`, `pre`; inline spans `b`, `i`, `code`, `a`, `s`, `sup`, `sub`). It is `[]` when the article has no stored content; the Kobo then shows `summary`. Kobo readers must ignore block types and fields they don't know. As stored, fields at their default are left out: an empty `spans`, and a null `href`, `alt`, `caption`, `width`, `height`, `citation` or `language` are absent rather than `[]` or `null`. `docs/kobo-sync-fixtures/edition.json` has every block type.
-- `engagement` is the phone's current state, so the Kobo can show what is already read, liked or saved.
+- `engagement` is the phone's current state, so the Kobo can show what is already read or saved. The Kobo ignores `likedAt`: it shows only what was Liked on the Kobo itself (`data/liked.json`), never the phone's Likes.
 
 ### `GET /v1/saved`
 
@@ -172,7 +172,10 @@ fonts/                bundled fonts and their licences
 data/state.json       deviceId, token, dbId, last address, next seq, per-edition versions,
                       last sync result, clock offset from the phone's Date header
 data/editions/<id>.json
-data/saved.json       the last GET /v1/saved
+data/saved.json       the last GET /v1/saved (unsent `saved` events are applied on top when
+                      it is loaded: a Kobo Save lists the article at once, an unsave drops it)
+data/liked.json       article IDs Liked on this Kobo, oldest first, at most 2000; erased
+                      with the rest when the phone's dbId changes
 data/images/<sha256 of url>.img
 data/events.jsonl     unsent events, one JSON object per line, appended and fsynced
 data/launch.log       what launch.sh and the binary print, for diagnosing a device

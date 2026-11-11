@@ -411,6 +411,21 @@ fn walk(size: &Size) -> Vec<Step> {
     s.push(tap_on("Back"));
     s.push(tap_on("OpenArticle(9001)"));
     s.push(mark("53-saved-article"));
+    // To the end of the article, where Like and Save close it; the chrome is hidden, so these
+    // are the buttons on the page.
+    for _ in 0..40 {
+        s.push(Step::Key(Key::Forward));
+    }
+    s.push(Step::Wait(1000));
+    s.push(mark("54-article-end"));
+    s.push(tap_on("Save"));
+    s.push(mark("55-end-unsaved"));
+    s.push(tap_on("Like"));
+    s.push(mark("56-end-unliked"));
+    s.push(pull_down(size));
+    s.push(tap_on("Back"));
+    s.push(Step::Wait(1000));
+    s.push(mark("57-saved-after-unsave"));
     s
 }
 
@@ -419,7 +434,7 @@ fn screens_at_every_size() {
     for size in &SIZES {
         let o = run(&format!("{}/walk", size.name), size, &Setup::default(), walk(size));
         eprintln!("{}: {} refreshes, {} events, pictures in {}", size.name, o.refreshes.len(), o.events.len(), o.out.display());
-        assert!(o.out.join("53-saved-article.png").exists());
+        assert!(o.out.join("57-saved-after-unsave.png").exists());
         // The first frame and every change of screen flash; page turns mostly don't.
         assert_eq!(o.refreshes[0].0, Refresh::Full);
         assert!(o.refreshes.iter().filter(|r| r.0 == Refresh::Partial).count() >= 6, "{:?}", o.refreshes);
@@ -428,9 +443,14 @@ fn screens_at_every_size() {
         for k in ["pageView", "opened", "liked", "readFraction", "saved"] {
             assert!(kinds.contains(&k), "{k} in {kinds:?}");
         }
-        // Unsaving a saved article sends saved=false; it stays listed until the next sync.
-        let unsave = o.events.iter().find(|e| e["type"] == "saved").unwrap();
-        assert_eq!((unsave["articleId"].as_i64(), unsave["value"].as_bool()), (Some(9006), Some(false)));
+        // Unsaving a saved article sends saved=false, from the chrome and from the end of the article.
+        let saves: Vec<_> = o.events.iter().filter(|e| e["type"] == "saved").map(|e| (e["articleId"].as_i64(), e["value"].as_bool())).collect();
+        assert_eq!(saves, vec![(Some(9006), Some(false)), (Some(9001), Some(false))]);
+        // Liked in the chrome, then un-Liked at the end of the article from Saved; the Kobo keeps its own Likes.
+        let likes: Vec<_> = o.events.iter().filter(|e| e["type"] == "liked").map(|e| e["value"].as_bool()).collect();
+        assert_eq!(likes, vec![Some(true), Some(false)]);
+        let liked: Vec<i64> = serde_json::from_slice(&std::fs::read(Store::new(&o.home).liked_path()).unwrap()).unwrap();
+        assert!(liked.is_empty(), "{liked:?}");
         // Seq only goes up, from 1.
         let seqs: Vec<i64> = o.events.iter().map(|e| e["seq"].as_i64().unwrap()).collect();
         assert_eq!(seqs, (1..=seqs.len() as i64).collect::<Vec<_>>());

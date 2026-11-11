@@ -172,7 +172,8 @@ pub struct Engagement {
     pub read_fraction: f64,
     pub read_at: Option<String>,
     pub saved_at: Option<String>,
-    pub liked_at: Option<String>,
+    // The phone's `likedAt` is not read: the Kobo shows only what was Liked on the Kobo
+    // (`data/liked.json`), never the phone's Likes.
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]

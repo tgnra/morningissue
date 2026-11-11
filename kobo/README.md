@@ -50,15 +50,20 @@ change the screen mode.
   uses the connection Nickel had; it never turns Wi-Fi on. Without one it shows "Offline".
 - **Edition and article pages** fill the screen. Swipe down from the top edge (or tap the top
   strip) to show the header (back, title) and the footer (position, and in an article
-  **Like**, **Save** and **Aa**). A tap on the page, or 7 seconds, hides them again.
+  **Like**, **Save** and **Aa**). A tap on the page, or 7 seconds, hides them again. The
+  end of every article has **Like** and **Save** buttons too.
+- **Like** shows only what was Liked on the Kobo (kept in `data/liked.json`); Likes made
+  on the phone are not shown, and there is no list of them. Each Like is still sent to the
+  phone, which learns from it.
 - **Turning pages:** the page buttons, a swipe left or right, or a tap: the left third of an
   article goes back and the rest forward; in an edition, the outer fifths turn and a tap on
   a story opens it.
 - **Aa:** five text sizes (the page is laid out again on the same text), the front light's
   brightness, and its warmth on models with a natural light.
 - **Saved:** every article saved on the phone, newest first. Articles the phone could not
-  get the full text of say so and show the summary. Unsaving one sends that to the phone; it
-  leaves the list at the next sync.
+  get the full text of say so and show the summary. Saving an article on the Kobo puts it at
+  the top of the list at once, and unsaving takes it off at once; both are sent to the phone
+  at the next sync.
 - **Settings:** the Wi-Fi state, how to find the phone (automatically, or a typed address
   on a keypad; the port defaults to 47824), **Sync now**, inverting the page-turn buttons,
   orientation (portrait or landscape), and the last sync's result. On a model with a

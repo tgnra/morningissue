@@ -166,6 +166,8 @@ pub struct App {
     images: ImageCache,
     editions: Vec<Bundle>,
     saved: SavedList,
+    /// Articles Liked on this Kobo (`data/liked.json`), oldest first.
+    liked: Vec<i64>,
     nickel_rotation: u8,
     rotation: u8,
     follow_sensor: bool,
@@ -228,8 +230,9 @@ impl App {
         let pending = store.read_events()?;
         events::apply(&mut editions, &pending);
         for e in &pending {
-            events::apply_saved(&mut saved, e);
+            events::apply_saved(&mut saved, e, |id| events::find_in(&editions, id));
         }
+        let liked = store.load_liked();
         let recorder = Recorder::new(&store, &state)?;
         let dpi = display.dpi();
         let fonts = Fonts::load(fonts_dir, dpi)?;
@@ -249,6 +252,7 @@ impl App {
             images,
             editions,
             saved,
+            liked,
             nickel_rotation: opts.rotation % 4,
             rotation: opts.rotation % 4,
             follow_sensor: opts.follow_sensor,
@@ -381,7 +385,12 @@ impl App {
         let wall = self.clock.wall_ms();
         let e = self.recorder.record(&self.store, wall, kind, fill)?;
         events::apply_one(&mut self.editions, &e);
-        events::apply_saved(&mut self.saved, &e);
+        // The open article first: one opened from Saved may be in no stored edition.
+        let open = self.stack.iter().find_map(|v| match v {
+            View::Article(art) if Some(art.id) == e.article_id => Some(art.article.clone()),
+            _ => None,
+        });
+        events::apply_saved(&mut self.saved, &e, |id| open.clone().or_else(|| events::find_in(&self.editions, id)));
         for v in self.stack.iter_mut() {
             if let View::Article(art) = v {
                 if Some(art.id) == e.article_id {
@@ -418,16 +427,20 @@ impl App {
         ed
     }
 
-    fn layout_article(&self, a: &Article) -> Vec<Screen> {
+    fn layout_article(&self, id: i64, a: &Article) -> Vec<Screen> {
         let m = self.metrics();
         let ctx = Ctx::reading(&self.fonts, m, &self.images, self.settings.text_scale());
-        screens::article_screens(&ctx, a).screens
+        screens::article_screens(&ctx, a, (self.is_liked(id), a.engagement.saved_at.is_some())).screens
+    }
+
+    fn is_liked(&self, id: i64) -> bool {
+        self.liked.contains(&id)
     }
 
     /// The article laid out again, showing the screen with the same text at its top.
     fn relayout_article(&self, art: &mut Art) {
         let anchor = art.screens.get(art.pos).map(|s| s.anchor).unwrap_or(0.0);
-        art.screens = self.layout_article(&art.article);
+        art.screens = self.layout_article(art.id, &art.article);
         art.pos = layout::screen_for_anchor(&art.screens, anchor);
     }
 
@@ -534,13 +547,13 @@ impl App {
                 let screen = &art.screens[art.pos];
                 layout::draw(&screen.els, &self.fonts, &self.images, &mut canvas);
                 if self.chrome {
-                    let g = &art.article.engagement;
+                    let saved = art.article.engagement.saved_at.is_some();
                     let back = if matches!(art.source, Source::Saved) { "Saved" } else { "Edition" };
                     chrome_hits.extend(ui::top_bar(&ctx, &mut canvas, back, &art.article.feed_title, None));
                     let foot = Foot {
                         position: format!("{} of {}", art.pos + 1, art.screens.len()),
                         progress: (art.pos + 1) as f32 / art.screens.len() as f32,
-                        toggles: Some((g.liked_at.is_some(), g.saved_at.is_some())),
+                        toggles: Some((self.is_liked(art.id), saved)),
                         nav: false,
                     };
                     chrome_hits.extend(ui::bottom_bar(&ctx, &mut canvas, &foot));
@@ -659,7 +672,7 @@ impl App {
             },
             _ => return Ok(()),
         };
-        let screens = self.layout_article(&article);
+        let screens = self.layout_article(id, &article);
         let count = screens.len();
         let fresh = article.engagement.opened_at.is_none();
         let visit_fraction = article.engagement.read_fraction;
@@ -748,15 +761,32 @@ impl App {
         self.show(Show::Turn)
     }
 
+    /// Like or Save, from the reading chrome or the buttons at the end of the article.
     fn toggle(&mut self, like: bool) -> io::Result<()> {
         let View::Article(art) = self.top() else { return Ok(()) };
         let id = art.id;
-        let g = &art.article.engagement;
-        let on = if like { g.liked_at.is_none() } else { g.saved_at.is_none() };
+        let on = if like { !self.is_liked(id) } else { art.article.engagement.saved_at.is_none() };
+        if like {
+            self.liked.retain(|&l| l != id);
+            if on {
+                self.liked.push(id);
+            }
+            if let Err(e) = self.store.save_liked(&self.liked) {
+                eprintln!("liked: {e}");
+            }
+        }
         self.record(if like { "liked" } else { "saved" }, |e| {
             e.article_id = Some(id);
             e.value = Some(serde_json::json!(on));
         })?;
+        // The buttons at the end of the article show the new state; the text does not move.
+        let mut stack = std::mem::take(&mut self.stack);
+        if let Some(View::Article(art)) = stack.last_mut() {
+            let pos = art.pos;
+            art.screens = self.layout_article(id, &art.article);
+            art.pos = pos.min(art.screens.len() - 1);
+        }
+        self.stack = stack;
         self.chrome_at = self.clock.mono_ms();
         self.show(Show::Touch)
     }
@@ -1259,7 +1289,7 @@ impl App {
         if saved {
             self.saved = self.store.load_saved();
             for e in &pending {
-                events::apply_saved(&mut self.saved, e);
+                events::apply_saved(&mut self.saved, e, |id| events::find_in(&self.editions, id));
             }
         }
     }

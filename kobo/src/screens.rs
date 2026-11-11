@@ -1,7 +1,7 @@
 //! An edition's pages and an article, laid out for whatever size and density the panel has.
 //! The home, saved, settings and popover screens are in [`crate::ui`].
 
-use crate::canvas::{Rect, BLACK};
+use crate::canvas::{Rect, BLACK, WHITE};
 use crate::fonts::{Fonts, Style};
 use crate::images::Fit;
 use crate::layout::{paginate, paginate_balanced, Action, El, ImageCache, Metrics, Piece, Screen, Type};
@@ -550,7 +550,8 @@ pub struct ArticleLayout {
     pub screens: Vec<Screen>,
 }
 
-pub fn article_screens(ctx: &Ctx, a: &Article) -> ArticleLayout {
+/// `toggles` is whether the article is Liked and Saved, for the buttons after its last line.
+pub fn article_screens(ctx: &Ctx, a: &Article, toggles: (bool, bool)) -> ArticleLayout {
     let ty = &ctx.ty;
     let c = ctx.m.page();
     let measure = ctx.m.measure(&ty.reader);
@@ -714,7 +715,39 @@ pub fn article_screens(ctx: &Ctx, a: &Article) -> ArticleLayout {
         }
         pieces.push(end);
     }
+    // Like and Save after the last line, so the reader need not call up the chrome. The last
+    // line comes with them, so they never open a screen alone.
+    let mut anchor = 0.0;
+    if let Some(last) = pieces.last_mut() {
+        last.keep = true;
+        anchor = last.anchor;
+    }
+    let mut buttons = end_buttons(ctx, x, w, toggles, gap * 2.5);
+    buttons.anchor = anchor;
+    pieces.push(buttons);
     ArticleLayout { screens: paginate(&pieces, c) }
+}
+
+/// The Like and Save buttons that close an article, drawn as the chrome's are: filled when on.
+fn end_buttons(ctx: &Ctx, x: f32, w: f32, (liked, saved): (bool, bool), gap: f32) -> Piece {
+    let h = ctx.m.bar().round() as i32;
+    let space = ctx.m.pt(12.0).round() as i32;
+    let bw = (ctx.m.inch(1.1).round() as i32).min((w as i32 - space) / 2);
+    let x0 = (x + w / 2.0).round() as i32 - bw - space / 2;
+    let mut p = Piece::new(h as f32).gap(gap);
+    for (i, (on, label, act)) in [(liked, if liked { "Liked" } else { "Like" }, Action::Like), (saved, if saved { "Saved" } else { "Save" }, Action::Save)].into_iter().enumerate() {
+        let r = Rect::new(x0 + i as i32 * (bw + space), 0, bw, h);
+        if on {
+            p.els.push(El::Fill { r, v: BLACK });
+        } else {
+            p.els.push(El::Fill { r, v: WHITE });
+            p.els.push(El::Frame { r, t: ctx.hair() * 2, v: BLACK });
+        }
+        let t = ctx.line(label, ctx.ty.ui.color(if on { WHITE } else { BLACK }), bw as f32, Align::Center);
+        p.els.push(El::Text { para: t.clone(), x: r.x as f32, y: (h as f32 - t.height()) / 2.0 });
+        p.hits.push((r, act));
+    }
+    p
 }
 
 /// A picture as wide as it reads well, at the size the bundle gives (or its own size once

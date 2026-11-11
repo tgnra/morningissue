@@ -59,6 +59,9 @@ pub struct Event {
     pub at: String,
 }
 
+/// Likes kept in `liked.json`; older ones are dropped.
+pub const MAX_LIKED: usize = 2000;
+
 /// The reader appends events while a sync on another thread sends and drops them; both go
 /// through this lock so an append is never lost to a rewrite.
 static EVENTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -91,6 +94,10 @@ impl Store {
     }
     pub fn saved_path(&self) -> PathBuf {
         self.data().join("saved.json")
+    }
+    /// Articles Liked on this Kobo, oldest first. The phone's Likes are not shown here.
+    pub fn liked_path(&self) -> PathBuf {
+        self.data().join("liked.json")
     }
     pub fn settings_path(&self) -> PathBuf {
         self.data().join("settings.json")
@@ -192,6 +199,18 @@ impl Store {
         fs::read(self.saved_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
 
+    /// The articles Liked on this Kobo, oldest first, or none.
+    pub fn load_liked(&self) -> Vec<i64> {
+        fs::read(self.liked_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+
+    /// Keeps the newest [`MAX_LIKED`] Likes.
+    pub fn save_liked(&self, liked: &[i64]) -> io::Result<()> {
+        fs::create_dir_all(self.data())?;
+        let keep = &liked[liked.len().saturating_sub(MAX_LIKED)..];
+        atomic_write(&self.liked_path(), &serde_json::to_vec(keep).map_err(io::Error::other)?)
+    }
+
     pub fn has_image(&self, url: &str) -> bool {
         self.image_path(url).is_file()
     }
@@ -281,6 +300,8 @@ impl Store {
             let _ = fs::remove_file(self.events_path());
         }
         let _ = fs::remove_file(self.saved_path());
+        // The IDs belonged to the other database.
+        let _ = fs::remove_file(self.liked_path());
         state.next_seq = next;
         state.editions.clear();
         state.edition_order.clear();
