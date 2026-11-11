@@ -59,37 +59,32 @@ Not started.
 
 ### Feed health check and the Subscriptions desk
 
-- [ ] Health rules as a pure `engine` component, run after sync.
-- [ ] **Subscriptions desk** page: flags feeds that need attention and offers one-tap fixes. Always available from Sources (the screen exists as a placeholder), and carried as a page in the edition once a month. It never unsubscribes on its own. It shows nothing when every feed is healthy.
-- [ ] Dismissing a flag hides it for 6 months (`feed_health.flagDismissedUntil`).
+Built; see "Feed health" in `docs/how-it-works.md` for the rules as implemented. Not yet seen on a device.
 
-| Flag | Rule | Suggested action |
-| --- | --- | --- |
-| Broken | Fetch errors 7 days running, or the feed returns 410 Gone | Retry automatically, then try common feed addresses (`/feed`, `/rss`, `/atom.xml`, `/index.xml`, http/https and `www` variants, and the site's own feed link). Only ask the reader to fix or remove the feed if none work. |
-| Moved | Permanent redirect (301) | Update the address automatically, then tell the reader. |
-| Gone quiet | No posts in 90 days (not a problem) | Nothing to do. The feed moves to a Quiet group and is checked less often. |
-| Ignored | Ran in 10 or more editions over 60 days with no opens | Unsubscribe, or set the slider to Less. |
-| Noisy | 30 or more posts a week with a read rate under 2% | Move to In brief only, or set the slider to Less. |
-| Loved | High read and Like rate | Suggest Favourite. (The spec also suggested turning on notifications, which are out of scope.) |
-
-- [ ] **Quiet feeds.** A feed with no posts in 90 days moves to a Quiet group at the bottom of Sources and is checked less often, stepping down from hourly to weekly. Quiet feeds are kept on purpose.
+- [x] Health rules as a pure `engine` component (`FeedHealthRules`), run after sync.
+- [x] **Subscriptions desk** page with one-tap fixes, always available from Sources. It never unsubscribes on its own and says "All in order" when every feed is healthy.
+- [x] **Carried by the edition once a month**, as a notice on the back page of one edition per calendar month (not a page of its own), only while a feed needs attention.
+- [x] Dismissing a flag hides it for 6 months (`feed_health.flagDismissedUntil`).
+- [x] **Automatic repair** of a Broken feed before the reader is asked: retry, scheme and `www` variants, the site's own feed link, then `/feed`, `/rss`, `/atom.xml`, `/index.xml`. Tried again weekly.
+- [x] **Quiet feeds.** A feed with no posts in 90 days moves to a Quiet group at the bottom of Sources and is checked every 6 hours, then daily, every 3 days and weekly as the quiet lengthens.
 - [ ] **Welcome back.** When a quiet feed posts again, the story gets a label such as "Back after 2 years" and a comeback boost on top of the scarcity boost, so it almost always makes the front page.
-- Already in place: the `feed_health` table and `HealthFlag` enum; every fetch records success or failure (`errorStreak`, `errorSince`, `lastHttpStatus`, `lastPostAt`); a permanent redirect already updates the address and raises `MOVED` when the address really differs; feed discovery already probes the common paths.
+- Differences from the original table: there is no "In brief only" setting for a feed, so Noisy offers Less; Loved offers Favourite only (notifications are out of scope).
 
 ### Storage budget and trimming
 
-- [ ] A storage budget slider in Settings. The setting is stored already (`storageBudgetMb`, default 500, range 50 to 4000) but has no control and nothing reads it.
-- [ ] When the budget fills, trim the stored text and cached images of the oldest editions' articles first.
-  - Liked and saved posts are never trimmed.
-  - Headlines and edition rows stay, so back issues remain browsable.
-- Already in place: `ArticleDao.contentSize`, `trimmableContentIds` and `deleteContent`.
-- The budget is the answer to "how long are back issues kept?": there is no fixed period. Until this is built, nothing is ever trimmed.
+Built; see "Storage budget" in `docs/how-it-works.md`. Not yet seen on a device.
+
+- [x] A storage budget control in Settings (discrete steps, 50 MB to 4 GB) showing current usage.
+- [x] When the budget fills, the stored text of the oldest editions' articles is trimmed first, after a sync. Liked and saved posts are never trimmed; headlines, summaries and edition rows stay.
+- The budget counts stored text only. Cached images are in Coil's disk cache, which has its own fixed cap and is not managed by the budget.
 - Content stays uncompressed (see Out of scope).
 
 ### Archive export and import
 
-- [ ] Export old editions to external storage (an SD card, a cloud drive, a computer) through the Storage Access Framework.
-- [ ] Import a backup later. Import merges into the current database and skips posts it already holds, matched by feed and post ID (the unique `(feedId, guid)` index), so a reader can free space and bring everything back.
+Built; see "Archive export and import" in `docs/how-it-works.md`. The file-picker path has not been run on a device.
+
+- [x] Export the whole library (feeds, posts with text and engagement, released editions) to one versioned zip of JSON lines through the Storage Access Framework, optionally freeing space afterwards.
+- [x] Import merges into the current database: posts matched by feed address and post ID are skipped (trimmed text is put back), missing feeds are re-added with their tags, editions are matched by date and kind, and local engagement is never overwritten.
 
 ### 3D page turn
 
@@ -201,12 +196,15 @@ Dropped when the design moved from a live ranked feed to a daily edition:
 - [ ] The contents list counts In brief lines as "stories".
 - [ ] Comments in `ui/reader/ReadRule.kt`, `sync/DefaultFeedSyncer.kt` and `ScorerTest.kt` also refer to the deleted v1/v2 plan files.
 
+- [ ] **Milestone 3 health, storage and archive screens are unchecked on a device**: the Subscriptions desk, the Quiet group in Sources, the back-page desk notice, the storage budget stepper and usage bar, and archive export and import through the file picker. Their logic is unit-tested.
+- [ ] **Measuring stored text reads every body's length** (two full scans) after each sync and when Settings opens. Unmeasured on a large library.
+- [ ] **Repair onto a common path can pick the wrong feed** when the broken feed was one of several on a site (for example a category feed, and `/feed` is the whole site). The reader is told through the Moved flag.
+- [ ] **A Like or save removed after an export comes back on import**, because the archive cannot tell "never Liked" from "un-Liked since".
+
 ## Open questions
 
 - [ ] **While you were away:** editions are only built by the early job or on open. After a long gap there may be no "missed editions", only one large edition. Is the pull-out drawn from stored editions that were never opened, from the posts of the gap, or both?
 - [ ] **Evening edition:** when is it released, and is that a setting? The next morning edition must still pick up Weekly and Rare posts first seen before the evening cutoff, which the current "posts since the latest cutoff" rule would miss.
-- [ ] **Welcome back:** how large is the comeback boost, and how long must a feed have been quiet to earn it?
-- [ ] **Health flags:** what read and Like rates count as "Loved"?
-- [ ] **Storage budget:** does it count Coil's image cache, which the app does not manage directly, or only stored text?
+- [ ] **Welcome back:** how large is the comeback boost, and how long must a feed have been quiet to earn it? (Quiet is 90 days without a post; `feed_health.lastPostAt` and `FeedHealthRules.isQuiet` are there to use.)
 - [ ] **Freshness floor:** apply `minFreshness` to the candidate pool, or remove the constant?
 - [ ] **`targetSdk`:** raise to 37 to match `compileSdk`?

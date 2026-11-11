@@ -149,18 +149,27 @@ fun SourcesScreen(
                 else -> {
                     val filter = SourceFilter.valid(SourceFilter.decode(filterKey), list, now)
                     PagedList(
-                        items = list.filter { filter.matches(it, now) },
-                        key = { it.id },
-                        header = { SourcesHeader(list, filter, now, onFilter = { filterKey = it.encode() }) },
-                    ) { feed ->
-                        FeedRow(
-                            feed = feed,
-                            now = now,
-                            onOpen = { onOpenSource(feed.id) },
-                            onEdit = { editingId = feed.id },
-                            onStepChange = { scope.launch { container.feeds.setSliderStep(feed.id, it) } },
-                            onUnmute = { scope.launch { container.feeds.setMutedUntil(feed.id, null) } },
-                        )
+                        // Feeds that have not posted in 90 days sit in a Quiet group at the bottom.
+                        items = SourceRow.of(list.filter { filter.matches(it, now) }, now),
+                        key = { it.key },
+                        header = {
+                            SourcesHeader(list, filter, now, onFilter = { filterKey = it.encode() }, onOpenDesk = onOpenSubscriptionsDesk)
+                        },
+                    ) { row ->
+                        when (row) {
+                            is SourceRow.QuietHeading -> QuietHeading(row.count)
+                            is SourceRow.Source -> {
+                                val feed = row.feed
+                                FeedRow(
+                                    feed = feed,
+                                    now = now,
+                                    onOpen = { onOpenSource(feed.id) },
+                                    onEdit = { editingId = feed.id },
+                                    onStepChange = { scope.launch { container.feeds.setSliderStep(feed.id, it) } },
+                                    onUnmute = { scope.launch { container.feeds.setMutedUntil(feed.id, null) } },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -179,7 +188,13 @@ fun SourcesScreen(
 /** The count, the tag filter chips once there is something to filter by, and a line on the slider. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SourcesHeader(feeds: List<Feed>, filter: SourceFilter, now: Instant, onFilter: (SourceFilter) -> Unit) {
+private fun SourcesHeader(
+    feeds: List<Feed>,
+    filter: SourceFilter,
+    now: Instant,
+    onFilter: (SourceFilter) -> Unit,
+    onOpenDesk: () -> Unit,
+) {
     val colors = MorningIssueTheme.colors
     val tags = feeds.flatMap { it.tags }.distinctBy { it.lowercase() }.sortedBy { it.lowercase() }
     val untagged = feeds.count { it.tags.isEmpty() }
@@ -205,6 +220,22 @@ private fun SourcesHeader(feeds: List<Feed>, filter: SourceFilter, now: Instant,
             SectionLabel(pluralStringResource(R.plurals.sources_count, feeds.size, feeds.size))
         }
         Text(stringResource(R.string.sources_slider_hint), style = MorningIssueTheme.typography.caption, color = colors.inkSecondary)
+        // The Subscriptions desk is always in the overflow menu; this points at it when it has something.
+        val attention = Desk.needingAttention(feeds, now)
+        if (attention > 0) TextLink(pluralStringResource(R.plurals.sources_desk_link, attention, attention), onOpenDesk)
+    }
+}
+
+/** The heading above the feeds that have gone quiet. They are kept on purpose and checked less often. */
+@Composable
+private fun QuietHeading(count: Int) {
+    Column(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        SectionLabel(stringResource(R.string.sources_quiet_heading, count), color = MorningIssueTheme.colors.ink, heading = true)
+        Text(
+            stringResource(R.string.sources_quiet_detail),
+            style = MorningIssueTheme.typography.caption,
+            color = MorningIssueTheme.colors.inkSecondary,
+        )
     }
 }
 

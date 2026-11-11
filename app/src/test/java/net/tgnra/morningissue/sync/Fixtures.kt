@@ -53,6 +53,11 @@ internal class Routes(private val routes: MutableMap<String, () -> mockwebserver
 
     fun hits(path: String): Int = hits[path]?.get() ?: 0
 
+    fun clear() {
+        routes.clear()
+        hits.clear()
+    }
+
     override fun dispatch(request: mockwebserver3.RecordedRequest): mockwebserver3.MockResponse {
         val path = request.url.encodedPath
         hits.getOrPut(path) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet()

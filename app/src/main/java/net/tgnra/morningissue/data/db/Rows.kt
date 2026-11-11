@@ -80,3 +80,26 @@ data class FeedUrlRow(
     val id: Long,
     val url: String,
 )
+
+/** See `FeedHealthDao.runStatsSince`. */
+data class FeedRunStatsRow(
+    val feedId: Long,
+    val editions: Int,
+    val stories: Int,
+    val opened: Int,
+    val read: Int,
+    val liked: Int,
+)
+
+/** See `FeedHealthDao.postStatsSince`. */
+data class FeedPostStatsRow(
+    val feedId: Long,
+    val posts: Int,
+    val opened: Int,
+)
+
+/** A stored body and its size in characters, search-index copy included; see `ArticleDao.trimCandidates`. */
+data class ContentSizeRow(
+    val articleId: Long,
+    val size: Long,
+)

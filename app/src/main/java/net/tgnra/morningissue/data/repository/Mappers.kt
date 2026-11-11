@@ -29,6 +29,8 @@ internal fun FeedWithDetails.toModel(): Feed = Feed(
     lastSyncAt = feed.lastSyncAt,
     addedAt = feed.addedAt,
     healthFlag = health?.lastFlag,
+    flagDismissedUntil = health?.flagDismissedUntil,
+    lastPostAt = health?.lastPostAt,
 )
 
 internal fun TagEntity.toModel(): Tag = Tag(id = id, name = name, affinity = affinity)

@@ -110,6 +110,49 @@ data class RankingConfig(
     val longLengthScale: Double = 1.5,
     /** With no earlier edition, the first one covers posts first seen in this many days. */
     val firstEditionWindowDays: Long = 3,
+
+    // Feed health (engine/FeedHealthRules.kt)
+    /** Broken: fetch errors for this many days running (and at least [brokenMinErrors] failed fetches). */
+    val brokenAfterDays: Long = 7,
+    val brokenMinErrors: Int = 3,
+    /** A failed repair of a broken feed is tried again after this many days, and no sooner. */
+    val repairRetryDays: Long = 7,
+    /** At most this many broken feeds are repaired in one health check. */
+    val repairMaxPerRun: Int = 3,
+    /** Gone quiet: no posts in this many days. */
+    val quietAfterDays: Long = 90,
+    /** How often a quiet feed is checked, by how long it has been quiet. Ascending. */
+    val quietCheckSteps: List<QuietStep> = listOf(
+        QuietStep(quietDays = 90, checkEveryHours = 6),
+        QuietStep(quietDays = 180, checkEveryHours = 24),
+        QuietStep(quietDays = 365, checkEveryHours = 72),
+        QuietStep(quietDays = 730, checkEveryHours = 168),
+    ),
+    /** Ignored: printed in at least [ignoredMinEditions] editions over this window with no opens. */
+    val ignoredWindowDays: Long = 60,
+    val ignoredMinEditions: Int = 10,
+    /** Noisy: at least [noisyPostsPerWeek] posts a week over this window, with under [noisyReadRate] opened. */
+    val noisyWindowDays: Long = 28,
+    val noisyPostsPerWeek: Double = 30.0,
+    val noisyReadRate: Double = 0.02,
+    /**
+     * Loved (the flag that suggests Favourite): slider still Auto, learned affinity at least
+     * [lovedFlagAffinity], at least [lovedFlagMinStories] stories printed over the window, of
+     * which at least [lovedFlagReadRate] were read and at least [lovedFlagLikeRate] Liked.
+     */
+    val lovedFlagWindowDays: Long = 60,
+    val lovedFlagAffinity: Double = 0.7,
+    val lovedFlagMinStories: Int = 8,
+    val lovedFlagReadRate: Double = 0.5,
+    val lovedFlagLikeRate: Double = 0.1,
+    /** A dismissed flag stays hidden this long (six months). */
+    val flagDismissDays: Long = 183,
+
+    // Storage budget
+    /** Trimming brings stored text down to this share of the budget, so it does not run at every sync. */
+    val storageTrimTarget: Double = 0.9,
+    /** The newest editions (by cutoff) whose stories are never trimmed. */
+    val storageKeepEditions: Int = 2,
 ) {
     companion object {
         val Default = RankingConfig()

@@ -72,7 +72,9 @@ Two subscriptions are the same feed when their normalised URLs match (`model/Fee
 
 ### Sync
 
-`DefaultFeedSyncer` fetches every feed, six at a time, and stores the posts it has not seen before with first-seen time set to now. Syncing never builds or changes an edition.
+`DefaultFeedSyncer` fetches every feed that is due, six at a time, and stores the posts it has not seen before with first-seen time set to now. Every feed is due at every sync except quiet ones, which are checked less often (see [Feed health](#feed-health)). Syncing never builds or changes an edition.
+
+After every full sync, `MaintainedFeedSyncer` runs two pieces of housekeeping on the same background thread: the feed health check, then the trim to the storage budget (see [What is stored](#what-is-stored)). A failure in either does not fail the sync.
 
 | When | What runs |
 | --- | --- |
@@ -95,7 +97,27 @@ Parsing (`sync/FeedParser.kt`, `XmlFeedParser.kt`, `JsonFeedParser.kt`) reads RS
 - **Lead image** is taken from media tags, then an image enclosure, then the first image in the body that is not icon-sized.
 - **Body** HTML is converted to the app's block model (paragraphs, headings, images, quotes, lists, preformatted text) and stored as JSON. A plain-text summary of up to 400 characters and a word count are stored with the article.
 
-Each fetch also updates the feed's row in `feed_health`: a success clears the error streak and records the latest post date; a failure adds to the streak. Nothing reads these yet (see [Not built yet](#not-built-yet)).
+Each fetch also updates the feed's row in `feed_health`: a success clears the error streak and records the latest post date; a failure adds to the streak. The health check reads these.
+
+### Feed health
+
+`engine/FeedHealthRules.kt` (pure) decides which flag, if any, a feed carries on the Subscriptions desk. `sync/FeedHealthChecker.kt` gathers its input and stores the verdict after every full sync, and again without touching the network when the desk is opened. It never unsubscribes or changes a feed's slider.
+
+| Flag | Rule | What the desk offers |
+| --- | --- | --- |
+| Broken | Fetch errors for 7 days running (and at least 3 failed fetches), or the server answers 410 Gone; and the automatic repair has been tried and has not worked | Try again, Unsubscribe, Dismiss |
+| Moved | A permanent redirect or a repair changed the address to a really different one (not just `http`/`https` or `www.`) | OK (clears the flag), Unsubscribe |
+| Noisy | 30 or more posts a week over the last 28 days with under 2% of them opened; feed subscribed for at least 28 days; slider not already at Less or Rarely | Show less (slider to Less), Unsubscribe, Dismiss |
+| Ignored | Printed in 10 or more editions over the last 60 days without one of its stories being opened, read, saved or Liked; slider not already at Less or Rarely | Unsubscribe, Show less, Dismiss |
+| Loved | Slider still at Auto, learned affinity at least 0.7, at least 8 stories printed over the last 60 days, at least half of them read and at least a tenth Liked | Make it a favourite (slider to Favourite), Dismiss |
+| Gone quiet | No posts in 90 days (counted from when it was added, for a feed that has never posted). Not a problem | Dismiss |
+
+A feed carries one flag at a time, the first that applies in the order above. All thresholds are in `RankingConfig`.
+
+- **Dismiss** hides the flag for six months (183 days, `feed_health.flagDismissedUntil`). The dismissal covers the flag that was dismissed: if a different flag arises in that time it is shown.
+- **Automatic repair** (`sync/FeedRepairer.kt`). A feed that meets the Broken rule is repaired before it is flagged. In order: its own address once more; the same address over the other scheme and with or without `www.`; the feed the site itself declares, through feed discovery on the site's address; then `/feed`, `/rss`, `/atom.xml` and `/index.xml` on the feed's host. Every candidate is fetched and must parse as a feed, and an address another subscription already uses is never taken. If one works the feed's address is updated and the feed is flagged Moved so the reader is told. If none works the feed is flagged Broken. A failed repair is tried again after 7 days, and at most 3 feeds are repaired per health check. "Try again" on the desk runs the repair at once and fetches the feed if it works.
+- **Quiet feeds** sit in a Quiet group at the bottom of Sources and are fetched less often by full syncs: every 6 hours once quiet for 90 days, daily after 180 days, every 3 days after a year, weekly after two years. The wait is measured from the last successful fetch. When a quiet feed posts again it is fetched by every sync again. Syncing one feed directly (after adding it, or "Try again") always fetches.
+- **Once a month the edition carries the desk**: a boxed notice on the back page with the number of feeds needing attention and a link to the desk. The first time the back page of the newest edition is shown in a calendar month while at least one feed has an undismissed flag other than Gone quiet, that edition takes the month's notice and keeps it; no other edition that month shows one, and it goes when nothing needs attention any more. Which edition holds the month is kept in a small preferences file (`desk_notice`).
 
 ### Full text
 
@@ -340,18 +362,43 @@ A single Room 3 database (`data/db/`, schema version 1, exported to `app/schemas
 | `engagement` | What the reader did with a post; a row exists only once something happened | `articleId`, `openedAt`, `readFraction`, `readAt`, `savedAt`, `likedAt`, `editionsRunUnopened`, `leadCount` |
 | `edition` | One edition | `date` and `kind` (unique together), `cutoffAt`, `releaseAt`, `builtAt`, `length`, `number`, `openedAt`, `finishedAt` |
 | `edition_item` | A story's place in an edition | `editionId`, `articleId`, `page`, `section`, `slot`, `kind`, `score`, `reason` |
-| `feed_health` | Fetch record per feed | `feedId`, `lastPostAt`, `errorStreak`, `errorSince`, `lastHttpStatus`, `lastFlag`, `flagDismissedUntil` |
+| `feed_health` | Fetch record and health flag per feed | `feedId`, `lastPostAt`, `errorStreak`, `errorSince`, `lastHttpStatus`, `lastFlag`, `flagDismissedUntil`, `lastRepairAt` |
 | `article_fts` | Full-text index (FTS4) | `title`, `summary`, `author`, `body` |
 
 `edition_item.kind` is one of `LEAD`, `FRONT`, `TOP`, `SECTION`, `BRIEF`, `ARCHIVE`, `AWAY` or `INDEX`. All items on a page share a page type. `AWAY` is defined for the planned While you were away section and nothing produces it yet.
 
 Removing a feed deletes its posts, their engagement and their placements in editions.
 
-Settings are in a Preferences DataStore: reset time, edition length, theme, display mode, and whether onboarding is done. An evening-edition flag and a storage budget (default 500 MB) are also stored, but nothing reads them yet. The reader's text size is in its own preferences file.
+Settings are in a Preferences DataStore: reset time, edition length, theme, display mode, the storage budget (default 500 MB), and whether onboarding is done. An evening-edition flag is also stored, but nothing reads it yet. The reader's text size is in its own preferences file.
 
 Images are not in the database; they are in Coil's disk cache.
 
-Nothing is trimmed or deleted automatically: every post and edition is kept.
+### Storage budget
+
+The budget (`data/storage/StorageRepository.kt`) governs stored article text: the bodies in `article_content` plus their copy in the search index, measured in characters. Images are not counted; Coil's disk cache keeps to its own fixed cap. The budget is the answer to "how long are back issues kept?": there is no fixed period.
+
+After every full sync, if the text is over budget it is trimmed down to 90% of the budget:
+
+- The oldest editions' posts go first (by first-seen time, which is what assigns a post to an edition).
+- Only the body is dropped, from `article_content` and from the search index together. The post, its headline, summary and image link, its engagement and its place in its editions all stay, so back issues remain browsable and the post is still found by headline and summary.
+- Never trimmed: Liked and saved posts, the stories of the two newest editions, and posts waiting for the next edition.
+- A trimmed post opens in the reader with its summary, and the reader fetches the page again as it does for any post without a body.
+
+No post, edition or engagement is ever deleted automatically.
+
+### Archive export and import
+
+`data/archive/` writes the whole library to one file and merges such a file back. The file is a zip of four entries (`ArchiveFormat`): `manifest.json` (format name, format version 1, export time, counts), then `feeds.jsonl`, `posts.jsonl` and `editions.jsonl` with one JSON object per line, so a library of any size is written and read a line at a time. It holds every feed with its tags and slider, every post with its stored body and engagement, and every released edition with its items.
+
+Import merges:
+
+- A feed is matched by its normalised address. One that is not subscribed is added back with its tags and slider; a subscribed feed keeps its own name, tags and slider.
+- A post is matched by feed and post ID. One already held is skipped, except that a body it has lost to trimming is put back (and fetched full text replaces a feed excerpt).
+- Engagement never overwrites anything set locally: a local time stands, counters only go up, and the archive fills in what is missing. A Like or save removed after the export therefore comes back.
+- An edition is matched by date and kind; one already held is skipped. Imported editions keep their number.
+- Unknown fields, unreadable lines and unknown enum names are skipped. A file whose format version is higher than this app's is refused.
+
+"Export and free up space" trims every body that may be trimmed (the rules above, regardless of the budget) once the file has been written.
 
 ## The screens
 
@@ -381,7 +428,7 @@ Newsstand ─┬─ Paper ── Reader
 - **Front page**: the masthead (the app's name set modestly, the date, the edition number and the estimated reading time), the lead story, then the secondaries in a grid. A lead with a photo gets the photo, the headline and a two-line standfirst. Without a photo the headline grows, the standfirst runs to four lines, and heavy rules sit above and below.
 - **Inside pages**: a page heading, the page's first story with its excerpt, then the rest in the grid. Stories sit on the page divided by thin rules, with no cards or shadows.
 - **In brief**: headlines with source names, divided by hairlines.
-- **Back page**: "That's today's edition", the time of the next edition, buttons to back issues and search, then "Also in your feeds". Tapping a source name there opens its source page.
+- **Back page**: "That's today's edition", the time of the next edition, buttons to back issues and search, then "Also in your feeds". Tapping a source name there opens its source page. In one edition a month it also carries the Subscriptions desk notice (see [Feed health](#feed-health)).
 - Read stories are greyed and get a tick. Reaching the back page marks the edition as read.
 
 ### Reader (`ui/reader/`)
@@ -402,7 +449,8 @@ A month calendar of every released edition, read ones ticked, with the month's e
 - Feed detail, opened from the pencil on a row or from the source page: slider, tag editor, mute, rename, open the website, and remove with confirmation.
 - Add a feed by address; import and export OPML from the overflow menu.
 - A source page lists the feed's 200 most recent posts in date order, with its tags.
-- The Subscriptions desk screen exists as a placeholder that says the feed health check is not built.
+- Feeds that have not posted in 90 days are listed last, under a Quiet heading. When a feed needs attention the header links to the Subscriptions desk, which is always in the overflow menu.
+- **Subscriptions desk** (`SubscriptionsDeskScreen.kt`): flagged feeds grouped by flag, each group with a line of explanation and each feed with its one-tap fixes (see [Feed health](#feed-health)). Unsubscribe asks first. With nothing flagged it says "All in order".
 
 ### Saved and search
 
@@ -411,7 +459,12 @@ A month calendar of every released edition, read ones ticked, with the month's e
 
 ### Settings (`ui/settings/`)
 
-Reset time, edition length (Short, Standard, Long), theme (System, Light, Dark) and display mode (Auto, Standard, E-ink). Debug builds add buttons that load or clear invented sample data.
+Reset time, edition length (Short, Standard, Long), theme (System, Light, Dark) and display mode (Auto, Standard, E-ink).
+
+- **Storage**: the budget for stored article text, moved one step at a time (50, 100, 250, 500 MB, 1, 2, 4 GB) with Less and More, a bar and "Using 132 MB of 500 MB" beneath. Over budget it says so and offers "Trim now".
+- **Archive**: Export, Export and free up space, and Import, through the system file picker (no storage permission). The job runs in the app's scope, so it carries on if the screen is left; progress and the result ("Imported 1,240 posts, skipped 310.") show under the buttons.
+
+Debug builds add buttons that load or clear invented sample data.
 
 ## Themes, tablets and e-ink
 
@@ -456,10 +509,12 @@ Kotlin and Jetpack Compose in a single `:app` module with a single Activity. The
 ```
 net.tgnra.morningissue
   model/     plain data classes and enums shared by every layer
-  data/      db (Room 3 entities, DAOs), repositories, AffinityLearner, settings (DataStore)
-  sync/      FeedFetcher, parsers, FeedDiscovery, FullTextFetcher, OPML, FeedSyncer, SyncWorker
+  data/      db (Room 3 entities, DAOs), repositories, AffinityLearner, settings (DataStore),
+             storage (budget and trimming), archive (export and import)
+  sync/      FeedFetcher, parsers, FeedDiscovery, FullTextFetcher, OPML, FeedSyncer, SyncWorker,
+             FeedHealthChecker, FeedRepairer
   engine/    pure Kotlin, no Android imports: RankingConfig, Cadence, Scorer, Affinity,
-             EditionBuilder, EditionClock
+             EditionBuilder, EditionClock, FeedHealthRules
   edition/   RoomEditionPublisher, EarlyBuild, EarlyBuildWorker, WorkManagerEditionScheduler,
              TimeChangeReceiver
   ui/        theme, layout, navigation, components, newsstand, paper, reader, backissues,
@@ -503,5 +558,5 @@ Signing is configured in `app/build.gradle.kts` only when `KEYSTORE_FILE`, `KEYS
 
 These are described in [`todo.md`](../todo.md) with the detail needed to build them.
 
-- **Planned:** While you were away, search filters, cross-feed deduplication, the feed health check and Subscriptions desk, the storage budget, archive export and import, the 3D page turn, the Evening edition, and a benchmark for the on-open build.
+- **Planned:** While you were away, search filters, cross-feed deduplication, the Welcome back label and boost for a quiet feed that posts again, the 3D page turn, the Evening edition, and a benchmark for the on-open build.
 - **Out of scope for now:** notifications, compression of stored content, and PDF export.
