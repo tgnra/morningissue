@@ -148,6 +148,7 @@ data/state.json       deviceId, token, dbId, last address, next seq, per-edition
 data/editions/<id>.json
 data/images/<sha256 of url>.img
 data/events.jsonl     unsent events, one JSON object per line, appended and fsynced
+data/launch.log       what launch.sh and the binary print, for diagnosing a device
 ```
 
 NickelMenu config: `/mnt/onboard/.adds/nm/morningissue`.
@@ -156,9 +157,10 @@ NickelMenu config: `/mnt/onboard/.adds/nm/morningissue`.
 
 NickelMenu's main menu has an entry **Morning Issue**, which:
 
-1. Turns Wi-Fi on through Nickel (`nickel_wifi:autoconnect`), since Wi-Fi is easiest while Nickel is still running.
-2. Runs `launch.sh` with `cmd_spawn`. The script waits up to 20 seconds for an IP address, then runs `morningissue sync`. A failed sync is not fatal: the reader shows the stored editions and "Last synced …".
-3. Stops Nickel and runs `morningissue read`, which draws on the framebuffer and reads touch and page-turn buttons itself.
-4. When the reader exits, restarts Nickel the same way KOReader's launcher does.
+1. Runs `morningissue check` with `cmd_output`. It fails on a Kobo the reader cannot draw on (in v1, the Allwinner-based Elipsa and Sage), and the entry stops there with a toast, leaving Nickel running.
+2. Turns Wi-Fi on through Nickel (`nickel_wifi:autoconnect`), since Wi-Fi is easiest while Nickel is still running.
+3. Runs `launch.sh` with `cmd_spawn`. The script waits up to 20 seconds for an IP address, then runs `morningissue sync`. A failed sync is not fatal: the reader shows the stored editions and "Last synced …".
+4. Stops Nickel and runs `morningissue read`, which draws on the framebuffer and reads touch and page-turn buttons itself.
+5. When the reader exits, restarts Nickel the same way KOReader's launcher does.
 
 Events recorded while reading are sent on the next launch.
