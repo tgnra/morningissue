@@ -256,6 +256,10 @@
     <string name="display_auto">Auto</string>
     <string name="display_standard">Standard</string>
     <string name="display_eink">E-ink</string>
+    <string name="settings_images">Pictures</string>
+    <string name="settings_images_detail">Greyscale shows every picture in grey, lightly dithered for a little texture, in any theme. E-ink always does. Pictures are kept in colour, so switching back costs nothing.</string>
+    <string name="images_colour">Colour</string>
+    <string name="images_greyscale">Greyscale</string>
     <string name="settings_storage">Storage</string>
     <string name="storage_budget">Text and pictures to keep</string>
     <string name="storage_budget_detail">When this fills, the pictures of the oldest editions’ articles are dropped first, because they can be fetched again, and then those articles’ text. Liked and saved articles always keep both, and every headline and back issue is kept: a trimmed article is fetched again when you open it.</string>

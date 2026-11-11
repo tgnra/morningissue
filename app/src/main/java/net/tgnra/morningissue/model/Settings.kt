@@ -10,6 +10,8 @@ data class AppSettings(
     val editionLength: EditionLength = EditionLength.STANDARD,
     val themeMode: ThemeMode = ThemeMode.System,
     val displayMode: DisplayMode = DisplayMode.Auto,
+    /** Show every image in greyscale, dithered, whatever the theme. E-ink mode does so regardless. */
+    val greyscaleImages: Boolean = false,
     val eveningEditionEnabled: Boolean = false,
     /** Local time at which the Evening edition is released, when it is switched on. */
     val eveningEditionTime: LocalTime = DEFAULT_EVENING_TIME,

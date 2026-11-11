@@ -42,7 +42,11 @@ class MainActivity : ComponentActivity() {
                 LocalAppContainer provides container,
                 LocalPaperLayoutSpec provides layoutSpec,
             ) {
-                MorningIssueTheme(themeMode = settings.themeMode, displayMode = settings.displayMode) {
+                MorningIssueTheme(
+                    themeMode = settings.themeMode,
+                    displayMode = settings.displayMode,
+                    greyscaleImages = settings.greyscaleImages,
+                ) {
                     val darkBars = MorningIssueTheme.colors.isDark
                     DisposableEffect(darkBars) {
                         // System bar icons follow the app's theme, not the system's.

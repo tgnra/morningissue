@@ -12,11 +12,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import coil3.PlatformContext
 import coil3.compose.AsyncImage
+import coil3.compose.LocalPlatformContext
+import coil3.request.ImageRequest
+import coil3.request.transformations
+import coil3.size.Precision
+import net.tgnra.morningissue.ui.theme.LocalGreyscaleImages
 import net.tgnra.morningissue.ui.learning.ImageFrame
 import net.tgnra.morningissue.ui.theme.MorningIssueTheme
 
@@ -27,7 +33,10 @@ object ImageTreatment {
 
     /**
      * Greyscale (Rec. 709 luma) with contrast raised around mid-grey, as a 4×5 colour matrix:
-     * e-ink panels render few grey levels, so flat photos turn to mud without it.
+     * e-ink panels render few grey levels, so flat photos turn to mud without it. Images are
+     * no longer drawn through this as a filter (dithering needs the pixels, see
+     * [ToneTransformation]); it remains the statement of the arithmetic `Dither.greyscale`
+     * does, and a test holds the two together.
      */
     fun einkMatrix(contrast: Float = EINK_CONTRAST): FloatArray {
         val r = 0.2126f * contrast
@@ -42,11 +51,34 @@ object ImageTreatment {
         )
     }
 
-    private val einkFilter: ColorFilter by lazy { ColorFilter.colorMatrix(ColorMatrix(einkMatrix())) }
+    /**
+     * How images are drawn here: E-ink mode's treatment in E-ink mode, greyscale when the
+     * Settings option is on, colour otherwise.
+     */
+    val tone: ImageTone
+        @Composable @ReadOnlyComposable get() = when {
+            MorningIssueTheme.isEink -> ImageTone.EINK
+            LocalGreyscaleImages.current -> ImageTone.GREY
+            else -> ImageTone.COLOUR
+        }
 
-    /** The filter every image is drawn through; null in standard mode. */
-    val colorFilter: ColorFilter?
-        @Composable @ReadOnlyComposable get() = if (MorningIssueTheme.isEink) einkFilter else null
+    /**
+     * The request for [url] drawn in [tone]. In colour it is the plain request Coil would make
+     * for the address. In a grey tone it carries the [ToneTransformation] and asks for the
+     * bitmap at exactly the size it is shown, so that the dither lands on screen pixels; the
+     * tone is then part of the memory-cache key.
+     *
+     * @param dither off for a picture that will be drawn scaled (the full-screen viewer), where
+     *   a pattern made for one size would smear
+     */
+    fun request(context: PlatformContext, url: String?, tone: ImageTone, dither: Boolean = true): ImageRequest.Builder {
+        val builder = ImageRequest.Builder(context).data(url)
+        if (tone != ImageTone.COLOUR) {
+            builder.transformations(ToneTransformation(tone, dither))
+            if (dither) builder.precision(Precision.EXACT)
+        }
+        return builder
+    }
 
     /**
      * Whether small pictures beside a story are worth showing. E-ink drops them in favour of
@@ -58,7 +90,11 @@ object ImageTreatment {
 
 /**
  * A remote image in the paper's manner: square-cornered, flat placeholder while it loads (or
- * if it never does), no crossfade, and greyscale with raised contrast in E-ink mode.
+ * if it never does), no crossfade, and drawn in the current [ImageTreatment.tone]: greyscale
+ * and dithered when the Settings option is on, with raised contrast as well in E-ink mode.
+ *
+ * The picture comes from the image store when it is there and from the network when it is not
+ * (`StoredImageFetcher`); nothing here knows which.
  */
 @Composable
 fun PaperImage(
@@ -70,12 +106,16 @@ fun PaperImage(
 ) {
     val colors = MorningIssueTheme.colors
     val placeholder = if (colors.isEink) Modifier.border(1.dp, colors.ink) else Modifier.background(colors.hairline.copy(alpha = 0.45f))
+    val tone = ImageTreatment.tone
+    val context = LocalPlatformContext.current
+    val request = remember(context, url, tone) { ImageTreatment.request(context, url, tone).build() }
     AsyncImage(
-        model = url,
+        model = request,
         contentDescription = contentDescription,
         modifier = modifier.then(placeholder),
         contentScale = contentScale,
-        colorFilter = ImageTreatment.colorFilter,
+        // A dithered bitmap is made for these very pixels; smoothing would blur the pattern.
+        filterQuality = if (tone == ImageTone.COLOUR) DrawScope.DefaultFilterQuality else FilterQuality.None,
         onSuccess = onSize?.let { report -> { state -> report(state.result.image.width, state.result.image.height) } },
     )
 }

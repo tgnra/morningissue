@@ -50,6 +50,10 @@ class DataStoreSettingsRepository(
         dataStore.edit { it[DISPLAY_MODE] = mode.name }
     }
 
+    override suspend fun setGreyscaleImages(enabled: Boolean) {
+        dataStore.edit { it[GREYSCALE_IMAGES] = enabled }
+    }
+
     override suspend fun setEveningEditionEnabled(enabled: Boolean) {
         dataStore.edit { it[EVENING_EDITION] = enabled }
     }
@@ -78,6 +82,7 @@ class DataStoreSettingsRepository(
             editionLength = enumOr(prefs[EDITION_LENGTH], defaults.editionLength),
             themeMode = enumOr(prefs[THEME_MODE], defaults.themeMode),
             displayMode = enumOr(prefs[DISPLAY_MODE], defaults.displayMode),
+            greyscaleImages = prefs[GREYSCALE_IMAGES] ?: defaults.greyscaleImages,
             eveningEditionEnabled = prefs[EVENING_EDITION] ?: defaults.eveningEditionEnabled,
             eveningEditionTime = timeOr(prefs[EVENING_MINUTE_OF_DAY], defaults.eveningEditionTime),
             storageBudgetMb = prefs[STORAGE_BUDGET_MB] ?: defaults.storageBudgetMb,
@@ -97,6 +102,7 @@ class DataStoreSettingsRepository(
         val EDITION_LENGTH = stringPreferencesKey("edition_length")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val DISPLAY_MODE = stringPreferencesKey("display_mode")
+        val GREYSCALE_IMAGES = booleanPreferencesKey("greyscale_images")
         val EVENING_EDITION = booleanPreferencesKey("evening_edition")
         val EVENING_MINUTE_OF_DAY = intPreferencesKey("evening_minute_of_day")
         val STORAGE_BUDGET_MB = intPreferencesKey("storage_budget_mb")

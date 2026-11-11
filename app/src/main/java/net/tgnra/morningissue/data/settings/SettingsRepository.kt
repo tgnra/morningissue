@@ -23,6 +23,9 @@ interface SettingsRepository {
 
     suspend fun setDisplayMode(mode: DisplayMode)
 
+    /** Greyscale, dithered images in any theme. Has a default body so that older test doubles still compile. */
+    suspend fun setGreyscaleImages(enabled: Boolean) = Unit
+
     suspend fun setEveningEditionEnabled(enabled: Boolean)
 
     /**

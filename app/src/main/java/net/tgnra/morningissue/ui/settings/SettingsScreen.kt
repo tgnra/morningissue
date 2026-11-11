@@ -154,6 +154,16 @@ fun SettingsScreen(
                         onSelect = { scope.launch { container.settings.setDisplayMode(it) } },
                     )
                 }
+                Setting(stringResource(R.string.settings_images), stringResource(R.string.settings_images_detail)) {
+                    SegmentedChoice(
+                        options = listOf(
+                            false to stringResource(R.string.images_colour),
+                            true to stringResource(R.string.images_greyscale),
+                        ),
+                        selected = settings.greyscaleImages,
+                        onSelect = { scope.launch { container.settings.setGreyscaleImages(it) } },
+                    )
+                }
             }
             StorageSettingsSections(settings.storageBudgetMb)
             // Empty in release builds.

@@ -24,6 +24,12 @@ import net.tgnra.morningissue.ui.layout.LocalPaperLayoutSpec
  */
 val LocalDisplayMode = staticCompositionLocalOf { DisplayMode.Standard }
 
+/**
+ * The Settings option "show images in greyscale", for any theme. E-ink mode greyscales images
+ * whatever this says; image code reads `ImageTreatment.tone`, which combines the two.
+ */
+val LocalGreyscaleImages = staticCompositionLocalOf { false }
+
 /** Draws nothing on press, hover or focus; used in E-ink mode in place of ripples. */
 private object NoIndication : IndicationNodeFactory {
     override fun create(interactionSource: InteractionSource): DelegatableNode = object : Modifier.Node() {}
@@ -41,6 +47,7 @@ private object NoIndication : IndicationNodeFactory {
 fun MorningIssueTheme(
     themeMode: ThemeMode = ThemeMode.System,
     displayMode: DisplayMode = DisplayMode.Auto,
+    greyscaleImages: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val resolvedMode = EinkDevices.resolve(displayMode)
@@ -62,6 +69,7 @@ fun MorningIssueTheme(
 
     CompositionLocalProvider(
         LocalDisplayMode provides resolvedMode,
+        LocalGreyscaleImages provides greyscaleImages,
         LocalPaperColors provides colors,
         LocalPaperTypography provides typography,
     ) {
