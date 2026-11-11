@@ -30,6 +30,12 @@ pub struct Shared {
     pub refuse_prepare: Cell<u32>,
     /// How many of the next `suspend` steps the simulated kernel refuses (EBUSY).
     pub refuse_suspend: Cell<u32>,
+    /// Whether Wi-Fi is connected now. Turning it off for sleep or from the reader clears it.
+    pub wifi: Cell<bool>,
+    /// Turning Wi-Fi on powers up but joins no network.
+    pub wifi_no_network: Cell<bool>,
+    /// Every Wi-Fi job the reader ran: "on", "off", "on stopped".
+    pub radio: RefCell<Vec<String>>,
 }
 
 /// Sleep, simulated: each step is recorded in [`Shared::power`], and the kernel refuses as
@@ -52,6 +58,7 @@ impl DesktopPower {
 impl device::Power for DesktopPower {
     fn wifi_off(&mut self) {
         self.0.power.borrow_mut().push("wifi-off".into());
+        self.0.wifi.set(false);
     }
     fn prepare(&mut self) -> io::Result<()> {
         self.step("prepare", &self.0.refuse_prepare)
@@ -61,6 +68,53 @@ impl device::Power for DesktopPower {
     }
     fn resume(&mut self) {
         self.0.power.borrow_mut().push("resume".into());
+    }
+}
+
+/// How long, on the script's clock, the simulated Wi-Fi takes to come up and to go down.
+pub const RADIO_ON_MS: u64 = 3000;
+pub const RADIO_OFF_MS: u64 = 1000;
+
+/// Wi-Fi switched on and off, simulated on the script's clock: a job ends once enough
+/// scripted time has passed, and then sets [`Shared::wifi`].
+pub struct DesktopRadio {
+    pub shared: Rc<Shared>,
+    job: Option<(bool, u64)>,
+}
+
+impl DesktopRadio {
+    pub fn new(shared: Rc<Shared>) -> DesktopRadio {
+        DesktopRadio { shared, job: None }
+    }
+}
+
+impl device::Radio for DesktopRadio {
+    fn start(&mut self, on: bool) -> io::Result<()> {
+        self.stop();
+        self.job = Some((on, self.shared.mono_ms.get()));
+        Ok(())
+    }
+    fn poll(&mut self) -> Option<bool> {
+        let (on, at) = self.job?;
+        let wait = if on { RADIO_ON_MS } else { RADIO_OFF_MS };
+        if self.shared.mono_ms.get() < at + wait {
+            return None;
+        }
+        self.job = None;
+        self.shared.radio.borrow_mut().push(if on { "on" } else { "off" }.into());
+        let up = on && !self.shared.wifi_no_network.get();
+        self.shared.wifi.set(up);
+        Some(!on || up)
+    }
+    fn stop(&mut self) {
+        match self.job.take() {
+            Some((true, _)) => self.shared.radio.borrow_mut().push("on stopped".into()),
+            Some((false, _)) => {
+                self.shared.radio.borrow_mut().push("off".into());
+                self.shared.wifi.set(false);
+            }
+            None => {}
+        }
     }
 }
 

@@ -12,7 +12,7 @@
 
 use crate::canvas::{Canvas, Rect};
 use crate::config::Config;
-use crate::device::{self, Clock, Display, Input, Key, Power, RawEvent, Refresh};
+use crate::device::{self, Clock, Display, Input, Key, Power, Radio, RawEvent, Refresh};
 use crate::events::{self, ArticleVisit, PageMeter, Recorder};
 use crate::fonts::Fonts;
 use crate::gesture::{Dir, Gesture, Recognizer};
@@ -23,7 +23,7 @@ use crate::net::NetStatus;
 use crate::screens::{self, Ctx};
 use crate::settings::{self, Orientation, Settings};
 use crate::store::{State, Store};
-use crate::sync::{self, Progress};
+use crate::sync::{self, Progress, SyncError};
 use crate::time::{self, Date};
 use crate::ui::{self, Foot, SyncShow};
 use std::collections::HashSet;
@@ -64,6 +64,14 @@ const FLAG_MS: u64 = 2_000;
 const MAX_ATTEMPTS: u32 = 20;
 /// Touches this soon after waking are dropped, as are the ones queued while asleep.
 const WAKE_TOUCH_GUARD_MS: u64 = 500;
+
+// Wi-Fi turned on by the reader. "Turn on Wi-Fi and sync" in Settings runs the radio's "on"
+// job, syncs once the Kobo has an address, and turns Wi-Fi off again when that sync ends.
+// If the phone cannot be found, Wi-Fi stays on and the sync is tried again every
+// PHONE_RETRY_MS (each try also listens for the beacon), and at once when an address is
+// typed, until one gets through or Turn Wi-Fi off is tapped. Sleep (including the idle
+// timeout) ends it as always, by turning Wi-Fi off.
+const PHONE_RETRY_MS: u64 = 5_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SleepStage {
@@ -134,7 +142,26 @@ enum Show {
 
 enum SyncMsg {
     Progress(Progress),
-    Done,
+    Done(Finish),
+}
+
+/// How a sync ended, for Wi-Fi the reader turned on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Finish {
+    Ok,
+    /// The phone was not there (or the connection to it broke, or it forgot this Kobo, which
+    /// the next try fixes by pairing again): worth trying again.
+    PhoneNotFound,
+    /// Anything else: trying again would end the same way.
+    Failed,
+}
+
+fn finish_of(r: &Result<sync::SyncReport, SyncError>) -> Finish {
+    match r {
+        Ok(_) => Finish::Ok,
+        Err(SyncError::NoPhone | SyncError::Network(_) | SyncError::Unauthorized) => Finish::PhoneNotFound,
+        Err(_) => Finish::Failed,
+    }
 }
 
 pub struct Options {
@@ -148,6 +175,8 @@ pub struct Options {
     pub power: Box<dyn Power>,
     /// Asked whether the Kobo is on a network.
     pub network: Box<dyn Fn() -> NetStatus>,
+    /// Turns Wi-Fi on and off for "Turn on Wi-Fi and sync" and "Turn Wi-Fi off".
+    pub radio: Box<dyn Radio>,
     /// Start a sync as soon as the home screen is up (when online).
     pub sync_on_start: bool,
     /// Told what can be touched after every frame, for scripted tests.
@@ -186,6 +215,17 @@ pub struct App {
     wifi_off_done: bool,
     /// The connection was lost to sleep, so "Offline" says why.
     offline_since_sleep: bool,
+    radio: Box<dyn Radio>,
+    /// A Wi-Fi job is running: Some(true) turning on, Some(false) turning off.
+    wifi_job: Option<bool>,
+    /// The reader turned Wi-Fi on to sync, and turns it off when the sync is done.
+    wifi_auto: bool,
+    /// The phone was not found on that Wi-Fi: the next try is due then (monotonic ms).
+    phone_retry_at: Option<u64>,
+    /// The phone was not found on that Wi-Fi, and has not been reached since.
+    looking: bool,
+    /// Why turning Wi-Fi on did not lead to a connection, until the next try.
+    wifi_error: Option<String>,
     /// Settings > Reset was tapped and awaits Erase everything or Cancel.
     reset_armed: bool,
     /// Touches before this (monotonic ms) are dropped: they were made while waking.
@@ -265,6 +305,12 @@ impl App {
             light_off: false,
             wifi_off_done: false,
             offline_since_sleep: false,
+            radio: opts.radio,
+            wifi_job: None,
+            wifi_auto: false,
+            phone_retry_at: None,
+            looking: false,
+            wifi_error: None,
             reset_armed: false,
             ignore_touches_until: 0,
             network: opts.network,
@@ -474,6 +520,17 @@ impl App {
     // Drawing
 
     fn status(&self) -> (String, bool) {
+        match self.wifi_job {
+            Some(true) => return ("Turning Wi-Fi on\u{2026}".into(), false),
+            Some(false) => return ("Turning Wi-Fi off\u{2026}".into(), false),
+            None => {}
+        }
+        if self.looking_for_phone() {
+            return (ui::LOOKING_FOR_PHONE.into(), false);
+        }
+        if let Some(e) = self.wifi_error.as_ref().filter(|_| !self.net.online()) {
+            return (e.clone(), true);
+        }
         if self.offline_since_sleep && !self.net.online() && self.sync.is_none() {
             return (ui::OFFLINE_SINCE_SLEEP.to_string(), false);
         }
@@ -502,11 +559,14 @@ impl App {
                 let view = ui::SettingsView {
                     wifi: self.net.describe(),
                     online: self.net.online(),
+                    wifi_job: self.wifi_job,
+                    wifi_auto: self.wifi_auto,
+                    looking: self.looking_for_phone(),
                     slept: self.offline_since_sleep,
                     phone_address: self.settings.phone_address.as_deref(),
                     syncing: self.sync.is_some(),
-                    last_result: if self.sync.is_some() { self.status().0 } else { last },
-                    last_is_error: err && self.sync.is_none(),
+                    last_result: if self.sync.is_some() || self.wifi_job.is_some() || self.looking_for_phone() || self.wifi_error.is_some() { self.status().0 } else { last },
+                    last_is_error: if self.wifi_error.is_some() && self.wifi_job.is_none() && !self.net.online() { true } else { err && self.sync.is_none() && !self.looking_for_phone() },
                     invert_buttons: self.settings.invert_buttons,
                     orientation: self.orientation(),
                     sensor: self.follow_sensor,
@@ -888,9 +948,18 @@ impl App {
                 self.start_sync();
                 self.show(Show::Update)?;
             }
+            Action::WifiAndSync => {
+                self.wifi_on_and_sync();
+                self.show(Show::Update)?;
+            }
+            Action::WifiOff => {
+                self.wifi_off_now();
+                self.show(Show::Update)?;
+            }
             Action::PhoneAuto => {
                 self.settings.phone_address = None;
                 self.save_settings();
+                self.retry_phone_now();
                 self.show(Show::Touch)?;
             }
             Action::PhoneTyped => {
@@ -940,6 +1009,7 @@ impl App {
                     Ok(a) => {
                         self.settings.phone_address = Some(a);
                         self.save_settings();
+                        self.retry_phone_now();
                         self.back()?;
                     }
                     Err(e) => {
@@ -1119,7 +1189,11 @@ impl App {
         match s.stage {
             SleepStage::Screen => {
                 if !self.wifi_off_done {
-                    let was_online = (self.network)().online();
+                    // A job the reader started gives way to the full teardown.
+                    let was_on = self.wifi_job.is_some() || self.wifi_auto;
+                    self.radio.stop();
+                    self.end_wifi_session();
+                    let was_online = was_on || (self.network)().online();
                     self.power.wifi_off();
                     self.wifi_off_done = true;
                     self.offline_since_sleep = was_online;
@@ -1246,7 +1320,7 @@ impl App {
                 Err(_) => {
                     eprintln!("sync: crashed; the reader goes on with what it has");
                     let _ = std::fs::remove_file(store.home.join("data").join("panic.txt"));
-                    let _ = tx.send(SyncMsg::Done);
+                    let _ = tx.send(SyncMsg::Done(Finish::Failed));
                     return;
                 }
             };
@@ -1263,7 +1337,7 @@ impl App {
                 ),
                 Err(e) => eprintln!("sync failed: {e}"),
             }
-            let _ = tx.send(SyncMsg::Done);
+            let _ = tx.send(SyncMsg::Done(finish_of(&r)));
         });
         if let Err(e) = spawned {
             eprintln!("sync: cannot start: {e}");
@@ -1274,6 +1348,133 @@ impl App {
         self.sync_show = SyncShow::default();
         self.images.syncing.set(true);
         self.images.missing.borrow_mut().clear();
+    }
+
+    /// "Turn on Wi-Fi and sync": starts turning Wi-Fi on; [`App::poll_wifi`] syncs once it
+    /// is connected.
+    fn wifi_on_and_sync(&mut self) {
+        if self.wifi_job.is_some() {
+            return;
+        }
+        self.wifi_error = None;
+        match self.radio.start(true) {
+            Ok(()) => {
+                eprintln!("wifi: turning on to sync");
+                self.wifi_job = Some(true);
+                self.wifi_auto = true;
+                self.offline_since_sleep = false;
+            }
+            Err(e) => {
+                eprintln!("wifi: cannot turn on: {e}");
+                self.wifi_error = Some(ui::WIFI_CANNOT_START.into());
+            }
+        }
+    }
+
+    /// "Turn Wi-Fi off", whoever turned it on. A sync still running fails and is not tried
+    /// again.
+    fn wifi_off_now(&mut self) {
+        if self.wifi_job == Some(false) {
+            return;
+        }
+        self.radio.stop();
+        self.end_wifi_session();
+        self.start_wifi_off();
+    }
+
+    fn start_wifi_off(&mut self) {
+        match self.radio.start(false) {
+            Ok(()) => self.wifi_job = Some(false),
+            Err(e) => eprintln!("wifi: cannot turn off: {e}"),
+        }
+    }
+
+    /// Forgets that the reader turned Wi-Fi on to sync (the job itself is left alone).
+    fn end_wifi_session(&mut self) {
+        self.wifi_job = None;
+        self.wifi_auto = false;
+        self.phone_retry_at = None;
+        self.looking = false;
+    }
+
+    /// Wi-Fi stays on because the phone was not found, and the try under way (if any) has
+    /// not reached it yet.
+    fn looking_for_phone(&self) -> bool {
+        self.looking && !(self.sync.is_some() && self.sync_show.connected)
+    }
+
+    /// What a Wi-Fi job's end leads to.
+    fn poll_wifi(&mut self) -> io::Result<()> {
+        let Some(on) = self.wifi_job else { return Ok(()) };
+        let Some(ok) = self.radio.poll() else { return Ok(()) };
+        self.wifi_job = None;
+        self.net = (self.network)();
+        if on {
+            if self.net.online() {
+                eprintln!("wifi: connected ({})", self.net.describe());
+                self.start_sync();
+            } else {
+                eprintln!("wifi: no connection after turning on (script {}); turning off again", if ok { "succeeded" } else { "failed" });
+                self.wifi_error = Some(ui::WIFI_NO_NETWORK.into());
+                self.end_wifi_session();
+                self.start_wifi_off();
+            }
+        } else {
+            eprintln!("wifi: off");
+        }
+        if matches!(self.top(), View::Home | View::Settings) {
+            self.show(Show::Update)?;
+        }
+        Ok(())
+    }
+
+    /// After a sync on Wi-Fi the reader turned on: off again, or try again later if the phone
+    /// was not found.
+    fn after_sync(&mut self, f: Finish) {
+        if !self.wifi_auto {
+            return;
+        }
+        match f {
+            Finish::PhoneNotFound => {
+                eprintln!("wifi: phone not found; keeping Wi-Fi on and trying again");
+                // An address typed during this try is tried at once.
+                let later = self.clock.mono_ms() + PHONE_RETRY_MS;
+                self.phone_retry_at = Some(self.phone_retry_at.map_or(later, |t| t.min(later)));
+                self.looking = true;
+            }
+            Finish::Ok | Finish::Failed => {
+                eprintln!("wifi: sync done; turning Wi-Fi off");
+                self.end_wifi_session();
+                self.start_wifi_off();
+            }
+        }
+    }
+
+    /// A new address (typed, or back to automatic) is tried at once.
+    fn retry_phone_now(&mut self) {
+        if self.looking {
+            self.phone_retry_at = Some(self.clock.mono_ms());
+        }
+    }
+
+    fn retry_phone(&mut self) -> io::Result<()> {
+        let Some(at) = self.phone_retry_at else { return Ok(()) };
+        if self.sync.is_some() || self.wifi_job.is_some() || self.clock.mono_ms() < at {
+            return Ok(());
+        }
+        self.start_sync();
+        if self.sync.is_some() {
+            self.phone_retry_at = None;
+        } else {
+            // The connection dropped; keep waiting, Wi-Fi may come back.
+            self.phone_retry_at = Some(self.clock.mono_ms() + PHONE_RETRY_MS);
+        }
+        Ok(())
+    }
+
+    /// Whether the reader is turning Wi-Fi on or off, or waiting for the phone, for tests.
+    pub fn wifi_busy(&self) -> bool {
+        self.wifi_job.is_some() || self.looking
     }
 
     /// Reloads what is stored, with the events not yet sent applied on top.
@@ -1316,11 +1517,11 @@ impl App {
         }
         let mut editions = false;
         let mut saved = false;
-        let mut done = false;
+        let mut done = None;
         let mut arrived: Vec<String> = Vec::new();
         for msg in msgs {
             match msg {
-                SyncMsg::Progress(Progress::Connected { .. }) => {}
+                SyncMsg::Progress(Progress::Connected { .. }) => self.sync_show.connected = true,
                 SyncMsg::Progress(Progress::Edition(_)) => editions = true,
                 SyncMsg::Progress(Progress::Saved) => saved = true,
                 SyncMsg::Progress(Progress::ImagesQueued(urls)) => self.sync_show.images_total = urls.len(),
@@ -1333,9 +1534,13 @@ impl App {
                     self.sync_show.images_done += 1;
                     self.images.missing.borrow_mut().insert(url);
                 }
-                SyncMsg::Done => done = true,
+                SyncMsg::Done(f) => done = Some(f),
             }
         }
+        if let Some(f) = done {
+            self.after_sync(f);
+        }
+        let done = done.is_some();
         if editions || saved || done {
             self.reload(editions || done, saved || done);
         }
@@ -1391,7 +1596,7 @@ impl App {
         loop {
             let wait = match &self.sleep {
                 Some(s) => Duration::from_millis(s.at.saturating_sub(self.clock.mono_ms()).clamp(1, 1000)),
-                None if self.sync.is_some() || self.pending_flip.is_some() => Duration::from_millis(250),
+                None if self.sync.is_some() || self.pending_flip.is_some() || self.wifi_job.is_some() || self.phone_retry_at.is_some() => Duration::from_millis(250),
                 None => Duration::from_secs(1),
             };
             let ev = self.input.next(wait);
@@ -1449,7 +1654,9 @@ impl App {
                 return self.finish();
             }
             self.settle_flip()?;
+            self.poll_wifi()?;
             self.poll_sync()?;
+            self.retry_phone()?;
             let now = self.clock.mono_ms();
             if self.stale && now.saturating_sub(self.last_update) >= BATCH_MS {
                 self.show(Show::Update)?;
@@ -1485,6 +1692,9 @@ impl App {
                 self.power.resume();
             }
         }
+        // launch.sh turns Wi-Fi off after the reader; a job still running would race it.
+        self.radio.stop();
+        self.end_wifi_session();
         if self.light_off {
             self.light.on();
             self.light_off = false;

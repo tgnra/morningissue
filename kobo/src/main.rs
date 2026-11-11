@@ -1,4 +1,4 @@
-//! `morningissue sync | read | check`
+//! `morningissue sync | read | check | wifi-on | wifi-off`
 //!
 //! The home directory is the binary's own directory (`/mnt/onboard/.adds/morningissue` on the
 //! Kobo), or `MORNINGISSUE_HOME`.
@@ -34,11 +34,13 @@ const NICKEL_CONF: &str = "/mnt/onboard/.kobo/Kobo/Kobo eReader.conf";
 /// and brings Nickel back.
 const EXIT_PANIC: u8 = 70;
 
-fn wifi_power_off() -> std::io::Result<()> {
+/// Powers the Wi-Fi chip up (`true`) or down through ntx_io ioctl 208, as Nickel does on
+/// boards without the `sdio_wifi_pwr` module.
+fn wifi_power(on: bool) -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
     const CM_WIFI_CTRL: libc::c_ulong = 208;
     let f = std::fs::OpenOptions::new().read(true).write(true).open("/dev/ntx_io")?;
-    let r = unsafe { libc::ioctl(f.as_raw_fd(), CM_WIFI_CTRL as _, 0 as libc::c_ulong) };
+    let r = unsafe { libc::ioctl(f.as_raw_fd(), CM_WIFI_CTRL as _, on as libc::c_ulong) };
     if r < 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -117,19 +119,20 @@ fn main() -> ExitCode {
                 }
             }
         }
-        "wifi-off" => {
-            // Cuts the Wi-Fi chip's power the way Nickel does (ntx_io ioctl 208 with 0), for
-            // wifi-off.sh, which cannot call ioctl itself. Used after the modules are unloaded.
-            match wifi_power_off() {
+        "wifi-off" | "wifi-on" => {
+            // Cuts or restores the Wi-Fi chip's power the way Nickel does (ntx_io ioctl 208
+            // with 0 or 1), for wifi-off.sh (after the modules are unloaded) and wifi-on.sh
+            // (before they are loaded), which cannot call ioctl themselves.
+            match wifi_power(cmd == "wifi-on") {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
-                    eprintln!("wifi-off: {e}");
+                    eprintln!("{cmd}: {e}");
                     ExitCode::from(1)
                 }
             }
         }
         _ => {
-            eprintln!("usage: morningissue sync | read | check | wifi-off");
+            eprintln!("usage: morningissue sync | read | check | wifi-on | wifi-off");
             ExitCode::from(64)
         }
     }
@@ -168,7 +171,7 @@ fn read(home: &Path, config: Config) -> ExitCode {
         None => Box::new(NoLight),
     };
     let power = Box::new(kobo::KoboPower { home: home.to_path_buf() });
-    let opts = app::Options { rotation, follow_sensor: p.sensor.is_some(), light, power, network: Box::new(net::probe), sync_on_start: true, hit_probe: None };
+    let opts = app::Options { rotation, follow_sensor: p.sensor.is_some(), light, power, network: Box::new(net::probe), radio: Box::new(kobo::KoboRadio::new(home.to_path_buf())), sync_on_start: true, hit_probe: None };
     let mut app = match App::new(Box::new(fb), Box::new(input), Box::new(SystemClock::new()), store, config, &home.join("fonts"), opts) {
         Ok(a) => a,
         Err(e) => {

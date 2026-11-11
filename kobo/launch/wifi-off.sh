@@ -1,7 +1,8 @@
 #!/bin/sh
 # Turns Wi-Fi off the way a boot leaves it: no DHCP client, no wpa_supplicant, the interface
 # down, the driver unloaded and the chip unpowered. launch.sh runs it before bringing Nickel
-# back, and the reader runs it before the Kobo goes to sleep (suspending with Wi-Fi on can
+# back; the reader runs it after a sync on Wi-Fi it turned on (wifi-on.sh), for Turn Wi-Fi
+# off, and before the Kobo goes to sleep (suspending with Wi-Fi on can
 # hang several models; KOReader and Plato both turn it off first). Running it again when
 # Wi-Fi is already off does nothing harmful.
 #
@@ -43,7 +44,7 @@ case "$WIFI_MODULE" in
         [ -e "$R/dev/wmtWifi" ] && echo 0 >"$R/dev/wmtWifi"
         ;;
     moal)
-        # NXP (Libra 2, Sage, Elipsa): moal sits on mlan, and both must go.
+        # NXP (Sage, Elipsa, some Libra 2s): moal sits on mlan, and both must go.
         if grep -q "^moal " "$R/proc/modules"; then
             pause
             rmmod moal

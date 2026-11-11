@@ -52,12 +52,14 @@ mkdir -p "$APP/fonts" "$DIST/.adds/nm"
 cp "target/$TARGET/release/morningissue" "$APP/morningissue"
 cp launch/launch.sh "$APP/launch.sh"
 cp launch/wifi-off.sh "$APP/wifi-off.sh"
-chmod 755 "$APP/morningissue" "$APP/launch.sh" "$APP/wifi-off.sh"
+cp launch/wifi-on.sh "$APP/wifi-on.sh"
+chmod 755 "$APP/morningissue" "$APP/launch.sh" "$APP/wifi-off.sh" "$APP/wifi-on.sh"
 for f in fraunces.ttf fraunces_italic.ttf newsreader.ttf newsreader_italic.ttf inter.ttf; do
     cp "$ROOT/app/src/main/res/font/$f" "$APP/fonts/$f"
 done
-for f in Fraunces-OFL.txt Inter-OFL.txt Newsreader-OFL.txt; do
-    cp "$ROOT/app/src/main/assets/licenses/$f" "$APP/fonts/$f"
+# Installed as .license, not .txt: Nickel lists every .txt on the drive as a book.
+for f in Fraunces-OFL Inter-OFL Newsreader-OFL; do
+    cp "$ROOT/app/src/main/assets/licenses/$f.txt" "$APP/fonts/$f.license"
 done
 cp "$ROOT/LICENSE" "$APP/LICENSE" 2>/dev/null || true
 printf '%s\n' "$VERSION" >"$APP/VERSION"

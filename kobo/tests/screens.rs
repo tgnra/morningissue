@@ -7,7 +7,7 @@ mod fakephone;
 use fakephone::FakePhone;
 use morningissue::app::{self, App};
 use morningissue::config::Config;
-use morningissue::desktop::{self, DesktopDisplay, DesktopPower, ScriptClock, ScriptInput, Shared, Step};
+use morningissue::desktop::{self, DesktopDisplay, DesktopPower, DesktopRadio, ScriptClock, ScriptInput, Shared, Step};
 use morningissue::device::{Key, Refresh};
 use morningissue::light::FakeLight;
 use morningissue::net::NetStatus;
@@ -161,11 +161,15 @@ struct Setup {
     sensor: bool,
     /// What `data/settings.json` holds at the start.
     settings: Option<Value>,
+    /// Turning Wi-Fi on joins no network.
+    wifi_no_network: bool,
+    /// How long a sync listens for the phone's beacon.
+    beacon_seconds: u64,
 }
 
 impl Default for Setup {
     fn default() -> Setup {
-        Setup { editions: 3, saved: true, online: true, phone: None, sync_on_start: false, warmth: true, last_error: None, refuse_suspend: 0, refuse_prepare: 0, sensor: true, settings: None }
+        Setup { editions: 3, saved: true, online: true, phone: None, sync_on_start: false, warmth: true, last_error: None, refuse_suspend: 0, refuse_prepare: 0, sensor: true, settings: None, wifi_no_network: false, beacon_seconds: 10 }
     }
 }
 
@@ -239,6 +243,10 @@ struct Outcome {
     light: Vec<(char, u8)>,
     /// The sleep steps the device was asked for.
     power: Vec<String>,
+    /// The Wi-Fi jobs the reader ran.
+    radio: Vec<String>,
+    /// Wi-Fi was on when the reader left.
+    wifi_left_on: bool,
 }
 
 fn run(dir: &str, size: &Size, s: &Setup, script: Vec<Step>) -> Outcome {
@@ -270,10 +278,12 @@ fn run(dir: &str, size: &Size, s: &Setup, script: Vec<Step>) -> Outcome {
     }));
     let writes = Rc::new(RefCell::new(Vec::new()));
     let light = FakeLight { warmth: s.warmth, level: (40, 30), original: (40, 30), writes: writes.clone() };
-    let online = s.online;
-    // Wi-Fi stays up until the reader turns it off to sleep.
+    // Wi-Fi stays up until the reader turns it off (to sleep, or from Settings), and comes up
+    // when the reader turns it on.
+    shared.wifi.set(s.online);
+    shared.wifi_no_network.set(s.wifi_no_network);
     let shared4 = shared.clone();
-    let network = move || if online && !shared4.power.borrow().iter().any(|p| p == "wifi-off") { NetStatus::Online { iface: "wlan0".into(), ip: Some("192.168.1.31".into()), ssid: Some("Harbour Lane".into()) } } else { NetStatus::Offline };
+    let network = move || if shared4.wifi.get() { NetStatus::Online { iface: "wlan0".into(), ip: Some("192.168.1.31".into()), ssid: Some("Harbour Lane".into()) } } else { NetStatus::Offline };
     let shared3 = shared.clone();
     let opts = app::Options {
         rotation: size.rotation,
@@ -281,16 +291,18 @@ fn run(dir: &str, size: &Size, s: &Setup, script: Vec<Step>) -> Outcome {
         light: Box::new(light),
         power: Box::new(DesktopPower(shared.clone())),
         network: Box::new(network),
+        radio: Box::new(DesktopRadio::new(shared.clone())),
         sync_on_start: s.sync_on_start,
         hit_probe: Some(Box::new(move |hits| *shared3.hits.borrow_mut() = hits.to_vec())),
     };
-    let mut app = App::new(Box::new(display), Box::new(input), Box::new(ScriptClock(shared.clone())), Store::new(&home), Config::default(), &fonts_dir(), opts).unwrap();
+    let mut app = App::new(Box::new(display), Box::new(input), Box::new(ScriptClock(shared.clone())), Store::new(&home), Config { beacon_seconds: s.beacon_seconds, ..Config::default() }, &fonts_dir(), opts).unwrap();
     app.run().unwrap();
     contact_sheet(&out);
     let events: Vec<Value> = std::fs::read_to_string(home.join("data/events.jsonl")).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     let light = writes.borrow().clone();
     let power = shared.power.borrow().clone();
-    Outcome { out, home, refreshes: app.refreshes.clone(), events, syncs_started: app.syncs_started, light, power }
+    let radio = shared.radio.borrow().clone();
+    Outcome { out, home, refreshes: app.refreshes.clone(), events, syncs_started: app.syncs_started, light, power, radio, wifi_left_on: shared.wifi.get() }
 }
 
 /// Every picture in `dir`, scaled down onto one sheet (`contact.png`), for review.
@@ -507,6 +519,109 @@ fn offline_never_tries_to_sync() {
     let o = run("offline", &SIZES[2], &setup, vec![Step::Sleep(500), tap_on("OpenSettings"), mark("settings"), Step::Sleep(300)]);
     assert_eq!(o.syncs_started, 0);
     assert!(phone.with(|s| s.requests.is_empty()));
+}
+
+/// Real time for a sync thread to finish, in steps the reader can poll between.
+fn sleep_steps(ms: u64) -> Vec<Step> {
+    (0..ms / 100).map(|_| Step::Sleep(100)).collect()
+}
+
+/// Offline, Turn on Wi-Fi and sync turns Wi-Fi on, syncs with the phone, and turns it off
+/// again; the home screen says so at each step.
+#[test]
+fn turn_on_wifi_sync_and_turn_off() {
+    let phone = FakePhone::start("db");
+    phone.with(|s| {
+        s.tokens = vec!["t".into()];
+        s.editions = [121, 120, 119, 118].into_iter().map(|id| (id, format!("v{id}"), edition(id))).collect();
+    });
+    let size = &SIZES[2];
+    let setup = Setup { online: false, sync_on_start: true, phone: Some(phone.address.clone()), ..Default::default() };
+    let mut script = vec![Step::Sleep(300), mark("01-home-offline"), tap_on("OpenSettings"), mark("02-settings-offline"), tap_on("WifiAndSync"), mark("03-settings-turning-on")];
+    script.push(Step::Wait(desktop::RADIO_ON_MS + 500));
+    script.extend(sleep_steps(3000));
+    script.push(mark("04-settings-synced-turning-off"));
+    script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
+    script.push(mark("05-settings-off-again"));
+    script.push(Step::Key(Key::Home));
+    script.push(mark("06-home-after"));
+    let o = run("wifi-sync", size, &setup, script);
+    assert_eq!(o.radio, vec!["on", "off"]);
+    assert!(!o.wifi_left_on);
+    assert_eq!(o.syncs_started, 1);
+    assert_eq!(Store::new(&o.home).load_state().unwrap().edition_order, vec![121, 120, 119, 118]);
+}
+
+/// Taps an address into the keypad, one key at a time.
+fn type_address(addr: &str) -> Vec<Step> {
+    let mut steps: Vec<Step> = (0..21).map(|_| tap_on("KeyDelete")).collect();
+    steps.extend(addr.chars().map(|c| tap_on(&format!("KeyChar({c:?})"))));
+    steps.push(tap_on("KeyOk"));
+    steps
+}
+
+/// With no phone to be found, Wi-Fi stays on and the sync is tried again; once the address
+/// is typed the next try reaches the phone and Wi-Fi goes off. Turn Wi-Fi off ends it too.
+#[test]
+fn wifi_stays_on_until_the_phone_is_found() {
+    let phone = FakePhone::start("db");
+    phone.with(|s| s.tokens = vec!["t".into()]);
+    // Nobody listens here.
+    let nobody = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().to_string();
+    let size = &SIZES[2];
+    let setup = Setup { online: false, phone: Some(nobody.clone()), beacon_seconds: 1, ..Default::default() };
+    let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
+    script.extend(sleep_steps(2500));
+    script.push(mark("01-settings-looking"));
+    script.push(Step::Key(Key::Home));
+    script.push(mark("02-home-looking"));
+    script.push(tap_on("OpenSettings"));
+    // Still on, and tried again.
+    script.push(Step::Wait(6000));
+    script.extend(sleep_steps(2500));
+    script.push(tap_on("PhoneTyped"));
+    script.extend(type_address(&phone.address));
+    script.extend(sleep_steps(2000));
+    script.push(mark("03-settings-found"));
+    script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
+    script.push(mark("04-settings-off"));
+    let o = run("wifi-looking", size, &setup, script);
+    assert!(o.syncs_started >= 3, "{}", o.syncs_started);
+    assert_eq!(o.radio, vec!["on", "off"]);
+    assert!(!o.wifi_left_on);
+    assert!(phone.with(|s| s.requests.iter().any(|r| r.contains("/v1/manifest"))));
+
+    // Turn Wi-Fi off while looking.
+    let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
+    script.extend(sleep_steps(2500));
+    script.push(tap_on("WifiOff"));
+    script.push(mark("01-turning-off"));
+    script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
+    script.push(Step::Wait(10_000));
+    script.push(mark("02-off"));
+    let o = run("wifi-looking-off", size, &setup, script);
+    assert_eq!(o.radio, vec!["on", "off"]);
+    assert_eq!(o.syncs_started, 1);
+    assert!(!o.wifi_left_on);
+}
+
+/// Wi-Fi that joins no network is turned off again and says why; no sync is tried. Sleep
+/// in the middle of turning on stops the job and tears Wi-Fi down.
+#[test]
+fn wifi_that_cannot_connect_goes_off_again() {
+    let size = &SIZES[2];
+    let setup = Setup { online: false, wifi_no_network: true, ..Default::default() };
+    let script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500), Step::Wait(desktop::RADIO_OFF_MS + 500), mark("01-settings-no-network"), Step::Key(Key::Home), mark("02-home-no-network")];
+    let o = run("wifi-no-network", size, &setup, script);
+    assert_eq!(o.radio, vec!["on", "off"]);
+    assert_eq!(o.syncs_started, 0);
+
+    let setup = Setup { online: false, ..Default::default() };
+    let script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(500), Step::Key(Key::Power), Step::Wait(20_000), Step::Key(Key::Power), mark("01-woken")];
+    let o = run("wifi-sleep", size, &setup, script);
+    assert_eq!(o.radio, vec!["on stopped"]);
+    assert!(o.power.iter().any(|p| p == "wifi-off"), "{:?}", o.power);
+    assert_eq!(o.syncs_started, 0);
 }
 
 /// While the phone takes its time, the home screen says it is syncing.

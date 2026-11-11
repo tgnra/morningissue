@@ -5,8 +5,9 @@
 # 2. Spawn the launcher: stop Nickel, read (syncing in the background over the Wi-Fi
 #    connection Nickel already has, if any), restart Nickel.
 #
-# There is no nickel_wifi step: the reader never turns Wi-Fi on, and asking Nickel to
-# connect just before stopping it would leave a half-made connection behind.
+# There is no nickel_wifi step: asking Nickel to connect just before stopping it would leave a
+# half-made connection behind. The reader can turn Wi-Fi on itself (Settings, Turn on Wi-Fi
+# and sync) with wifi-on.sh.
 menu_item:main:Morning Issue:cmd_output:5000:quiet:/mnt/onboard/.adds/morningissue/morningissue check
   chain_success:cmd_spawn:quiet:exec /bin/sh /mnt/onboard/.adds/morningissue/launch.sh
   chain_failure:dbg_toast:Morning Issue does not support this Kobo yet

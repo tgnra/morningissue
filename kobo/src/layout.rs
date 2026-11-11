@@ -129,6 +129,9 @@ pub enum Action {
     /// Nudges a slider by this many percent.
     Nudge { warmth: bool, by: i8 },
     SyncNow,
+    /// Turns Wi-Fi on, syncs, and turns it off again.
+    WifiAndSync,
+    WifiOff,
     PhoneAuto,
     /// Opens the keypad for a typed phone address.
     PhoneTyped,

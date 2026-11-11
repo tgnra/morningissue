@@ -103,6 +103,34 @@ impl Power for NoPower {
     fn resume(&mut self) {}
 }
 
+/// Turning Wi-Fi on and off while the reader runs, without blocking the screen: one job at a
+/// time, which the reader starts and then polls. On a Kobo each job is a script
+/// (`wifi-on.sh`, `wifi-off.sh`); turning on joins a network saved in Nickel's Wi-Fi
+/// settings and gets an address.
+pub trait Radio {
+    /// Starts turning Wi-Fi on (`true`) or off. An error means the job could not start.
+    fn start(&mut self, on: bool) -> io::Result<()>;
+    /// None while the job runs; Some(whether it succeeded) once it has ended. The reader
+    /// still asks the network whether it is connected afterwards.
+    fn poll(&mut self) -> Option<bool>;
+    /// Ends a running job now: a job turning Wi-Fi on is stopped, a job turning it off is
+    /// waited for. Before sleep and on exit, which tear Wi-Fi down themselves.
+    fn stop(&mut self);
+}
+
+/// A device whose Wi-Fi the reader cannot switch.
+pub struct NoRadio;
+
+impl Radio for NoRadio {
+    fn start(&mut self, _on: bool) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "no Wi-Fi control"))
+    }
+    fn poll(&mut self) -> Option<bool> {
+        Some(false)
+    }
+    fn stop(&mut self) {}
+}
+
 pub trait Clock {
     /// Monotonic milliseconds, for durations on screen.
     fn mono_ms(&self) -> u64;

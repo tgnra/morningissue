@@ -1,6 +1,6 @@
 //! Whether the Kobo is on a network, from what the kernel says: a default route through an
-//! interface that has a carrier. The reader never turns Wi-Fi on; it uses the connection
-//! Nickel left up, and when there is none it shows "Offline" and never tries to sync.
+//! interface that has a carrier. The reader uses the connection Nickel left up; when there is
+//! none it shows "Offline" and syncs only when asked to turn Wi-Fi on (`device::Radio`).
 
 use std::path::Path;
 

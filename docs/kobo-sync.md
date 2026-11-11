@@ -166,7 +166,8 @@ Everything lives in `/mnt/onboard/.adds/morningissue/`. Nothing in it has a book
 ```
 morningissue          the binary
 launch.sh             run by NickelMenu
-wifi-off.sh           turns Wi-Fi off (run by launch.sh on exit and by the reader before sleep)
+wifi-off.sh           turns Wi-Fi off (run by launch.sh on exit, and by the reader before sleep and after a sync on Wi-Fi it turned on)
+wifi-on.sh            turns Wi-Fi on and joins a network saved in Nickel's settings (run by the reader for Turn on Wi-Fi and sync)
 config.json           optional overrides (phone address, …)
 fonts/                bundled fonts and their licences
 data/state.json       deviceId, token, dbId, last address, next seq, per-edition versions,
@@ -190,8 +191,8 @@ NickelMenu's main menu has an entry **Morning Issue**, which:
 
 1. Runs `morningissue check` with `cmd_output`. It fails on a Kobo the reader cannot draw on (in v1, the Allwinner-based Elipsa and Sage), and the entry stops there with a toast, leaving Nickel running.
 2. Runs `launch.sh` with `cmd_spawn`, which stops Nickel at once and starts `morningissue read`. The reader's home screen appears immediately with what is stored.
-3. The reader uses Nickel's Wi-Fi connection only: if Wi-Fi was connected when the entry was tapped, the launcher leaves the Wi-Fi driver, `wpa_supplicant` and the DHCP client running when it stops Nickel, and the reader syncs in the background (on start, and from **Sync now** in Settings). If there is no connection it shows "Offline" and never tries; it never turns Wi-Fi on itself.
-4. The power button, closing the sleep cover, or the idle timeout put the Kobo to sleep from inside the reader (a blank "Sleeping…" screen, Wi-Fi and the light off, then suspend to RAM); the power button or opening the cover wakes it on the same page. Wi-Fi stays off after waking, and the reader says so ("Offline since sleep") until the next launch. Only **Exit** leaves the reader.
+3. The reader uses Nickel's Wi-Fi connection only: if Wi-Fi was connected when the entry was tapped, the launcher leaves the Wi-Fi driver, `wpa_supplicant` and the DHCP client running when it stops Nickel, and the reader syncs in the background (on start, and from **Sync now** in Settings). If there is no connection it shows "Offline" and does not try on its own. **Turn on Wi-Fi and sync** in Settings runs `wifi-on.sh` (chip power, driver, `wpa_supplicant` on Nickel's configuration, DHCP) in the background, syncs once there is a default route, and runs `wifi-off.sh` when the sync ends. If the phone cannot be found (no beacon and nothing at the typed or last address, a broken connection, or a token the phone forgot), Wi-Fi stays on and the sync is tried again every 5 s, and at once when an address is typed or Find automatically is chosen, until one gets through; **Turn Wi-Fi off** ends it. Any other failure (declined, unexpected answer, storage) turns Wi-Fi off. If no network is joined, Wi-Fi is turned off again and the reader says so.
+4. The power button, closing the sleep cover, or the idle timeout put the Kobo to sleep from inside the reader (a blank "Sleeping…" screen, Wi-Fi and the light off, then suspend to RAM); the power button or opening the cover wakes it on the same page. Sleep ends a Wi-Fi session the reader started (a running `wifi-on.sh` is stopped first). Wi-Fi stays off after waking, and the reader says so ("Offline since sleep") until Turn on Wi-Fi and sync or the next launch. Only **Exit** leaves the reader.
 5. When the reader exits, or crashes, the launcher tears Wi-Fi down to the state Nickel expects after a boot (`wifi-off.sh`, shared with the reader's sleep), and restarts Nickel the same way KOReader's launcher does, with Nickel's output on `/dev/null`. A crash is logged with its exit code or signal and the reader's panic message; the reader is not restarted. The launcher's lock (`/tmp/morningissue.lock`, holding its PID) is always released, and a lock whose launcher is gone is taken over, so the menu entry always works again.
 
 Events recorded while reading are sent at the next sync, which can be in the same session.

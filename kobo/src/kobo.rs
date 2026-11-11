@@ -745,6 +745,67 @@ impl device::Power for KoboPower {
     }
 }
 
+// --- Wi-Fi on and off from the reader ---
+
+/// Runs `wifi-on.sh` or `wifi-off.sh` as a child process, so the screen stays responsive
+/// while the chip powers up, joins a network and waits for an address (up to about 40 s).
+/// The script's output goes to the reader's stderr, which is `launch.log`.
+///
+/// Each job runs in its own process group: stopping a job turning Wi-Fi on also stops the
+/// DHCP client it is waiting for. What has already daemonized (`wpa_supplicant`) is left to
+/// `wifi-off.sh`, which runs next in every path (sleep, exit, Turn Wi-Fi off).
+pub struct KoboRadio {
+    pub home: std::path::PathBuf,
+    job: Option<(bool, std::process::Child)>,
+}
+
+impl KoboRadio {
+    pub fn new(home: std::path::PathBuf) -> KoboRadio {
+        KoboRadio { home, job: None }
+    }
+}
+
+impl device::Radio for KoboRadio {
+    fn start(&mut self, on: bool) -> io::Result<()> {
+        use std::os::unix::process::CommandExt;
+        self.stop();
+        let script = self.home.join(if on { "wifi-on.sh" } else { "wifi-off.sh" });
+        eprintln!("wifi: running {}", script.display());
+        let child = std::process::Command::new("/bin/sh").arg(&script).stdin(std::process::Stdio::null()).process_group(0).spawn()?;
+        self.job = Some((on, child));
+        Ok(())
+    }
+
+    fn poll(&mut self) -> Option<bool> {
+        let (on, child) = self.job.as_mut()?;
+        match child.try_wait() {
+            Ok(None) => None,
+            Ok(Some(status)) => {
+                if !status.success() {
+                    eprintln!("wifi: {} ended with {status}", if *on { "wifi-on.sh" } else { "wifi-off.sh" });
+                }
+                self.job = None;
+                Some(status.success())
+            }
+            Err(e) => {
+                eprintln!("wifi: cannot wait for the script: {e}");
+                self.job = None;
+                Some(false)
+            }
+        }
+    }
+
+    fn stop(&mut self) {
+        let Some((on, mut child)) = self.job.take() else { return };
+        if on {
+            eprintln!("wifi: stopping wifi-on.sh");
+            // The whole group: the shell and whatever it is waiting for.
+            unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGTERM) };
+        }
+        let _ = child.wait();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

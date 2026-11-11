@@ -132,7 +132,8 @@ fi
 IFACE="${INTERFACE:-wlan0}"
 
 # Is Nickel's Wi-Fi connected? A default route through an interface with a carrier.
-# The reader never turns Wi-Fi on: no connection now means it shows Offline.
+# No connection now means the reader shows Offline; it turns Wi-Fi on (wifi-on.sh) only when
+# asked to in its Settings, and off again after the sync.
 wifi_up() {
     while read -r iface dest rest; do
         if [ "$dest" = "00000000" ] && [ "$iface" != "lo" ]; then

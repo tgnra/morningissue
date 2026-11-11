@@ -6,12 +6,13 @@ syncs with the Morning Issue app on your phone in the background over the Kobo's
 device and the launch flow are specified in [`docs/kobo-sync.md`](../docs/kobo-sync.md).
 
 It is one static binary, `morningissue`, built for `armv7-unknown-linux-musleabihf`. It has
-four subcommands:
+five subcommands:
 
 - `read` runs the reader (and its background sync).
 - `sync` fetches from the phone once, from a shell.
 - `check` names the device and fails if this version can't draw on it.
-- `wifi-off` powers the Wi-Fi chip down for `launch.sh` (ntx_io ioctl 208).
+- `wifi-off` and `wifi-on` power the Wi-Fi chip down and up for `wifi-off.sh` and
+  `wifi-on.sh` (ntx_io ioctl 208).
 
 ## Install
 
@@ -32,6 +33,8 @@ firmware 4.6 or newer.
 
 Unzip the new zip over the old files in the same way. Everything you added yourself
 (`.adds/morningissue/config.json`) and everything the reader stored (`data/`) is kept.
+Earlier versions installed the font licences as `.txt` files, which Nickel shows as
+books: delete `.adds/morningissue/fonts/*-OFL.txt`.
 
 ### Uninstall
 
@@ -46,8 +49,13 @@ change the screen mode.
   The line at the foot says "Syncing…", when the last sync ran and with which phone,
   "Offline", or why the last sync failed. Tap a cover to open it.
 - **Sync:** runs in the background as soon as the reader starts, if the Kobo is connected
-  to Wi-Fi. Editions, saved articles and pictures appear as they arrive. The reader only
-  uses the connection Nickel had; it never turns Wi-Fi on. Without one it shows "Offline".
+  to Wi-Fi. Editions, saved articles and pictures appear as they arrive. Without a
+  connection the home screen shows "Offline", and Settings has **Turn on Wi-Fi and sync**:
+  it turns Wi-Fi on (joining a network saved in the Kobo's Wi-Fi settings), syncs, and turns
+  Wi-Fi off again. If the phone can't be found, Wi-Fi stays on and the sync is tried again
+  every few seconds, and at once when an address is typed, until it gets through; **Turn
+  Wi-Fi off** (beside the sync button whenever Wi-Fi is on) ends it, and so does sleep. If
+  no network is joined, Wi-Fi goes off again and the reader says so.
 - **Edition and article pages** fill the screen. Swipe down from the top edge (or tap the top
   strip) to show the header (back, title) and the footer (position, and in an article
   **Like**, **Save** and **Aa**). A tap on the page, or 7 seconds, hides them again. The
@@ -76,8 +84,8 @@ change the screen mode.
   Kobo to sleep. The screen goes blank with "Sleeping…" small in the lower right corner, the
   light and Wi-Fi go off, and the Kobo suspends. The power button or opening the cover wakes
   it on the page it was showing; touches and page keys made while it sleeps or wakes are
-  ignored. Wi-Fi stays off after waking (the reader never turns it on), so the home screen
-  and Settings say "Offline since sleep": exit and connect in Kobo's settings to sync.
+  ignored. Wi-Fi stays off after waking, so the home screen and Settings say "Offline since
+  sleep"; **Turn on Wi-Fi and sync** in Settings syncs again.
 - **Leaving:** only **Exit**. The light goes back to Nickel's levels, Wi-Fi is turned off
   the way a boot leaves it, and Nickel restarts. If the reader crashes, the launcher logs
   why and brings Nickel back the same way; tap the menu entry again to reopen it.
@@ -143,6 +151,12 @@ Known gaps:
   land in the wrong place, set `touch` in `config.json`.
 - **Waiting for refreshes:** the Mark 7 "wait for update complete" ioctl is unreliable on
   some models (Libra 2, Libra H2O, Nia, Clara 2E), so those profiles sleep briefly instead.
+- **Wi-Fi on from the reader:** `wifi-on.sh` reverses `wifi-off.sh` after KOReader's
+  `enable-wifi.sh` and `obtain-ip.sh`: chip power, driver, `wpa_supplicant` on Nickel's
+  `/etc/wpa_supplicant/wpa_supplicant.conf`, then `dhcpcd`. Run on the Libra 2, whose
+  board (`mx6sll-ntx`) has a Realtek `8723ds` powered through `sdio_wifi_pwr`, as Nickel
+  starts it (`wpa_supplicant -D nl80211`, `dhcpcd`). The NXP `moal` path (with the
+  `nxp/wifi_mod_para*.conf` it finds in `/lib/firmware`) and the MediaTek path are unverified.
 - **Wi-Fi:** when Nickel was connected, the launcher keeps the Wi-Fi module,
   `wpa_supplicant` and `dhcpcd` running while the reader runs, and stops only `dhcpcd-dbus`.
   On exit it tears Wi-Fi down as KOReader does (`moal` and `mlan` on NXP chips, the
@@ -187,7 +201,8 @@ The script:
 
 - builds the binary;
 - lays out `kobo/dist/.adds/…` as on the device;
-- copies the fonts and their OFL licences from `app/`;
+- copies the fonts and their OFL licences from `app/` (as `.license` files, since Nickel
+  lists any `.txt` as a book);
 - fails if any NickelMenu label contains ':';
 - writes `kobo/dist/morningissue-kobo-$VERSION.zip`.
 
@@ -223,7 +238,9 @@ cd kobo && cargo test
   popover, with and without warmth; a background sync against the fake phone (a new
   edition and pictures arriving while reading); no sync attempt offline; orientation (portrait
   and landscape, each upside down, a brief tilt ignored, no sensor, the old setting); and
-  inverted buttons. It writes every screen, plus a `contact.png` sheet, to
+  inverted buttons; and Turn on Wi-Fi and sync (Wi-Fi on, a sync, Wi-Fi off; staying on
+  while the phone can't be found until an address is typed or Turn Wi-Fi off is tapped; a
+  network that can't be joined; sleep while Wi-Fi is coming on). It writes every screen, plus a `contact.png` sheet, to
   `kobo/target/screens/<size>/<run>/`.
 - `tests/launch.rs` runs `launch/launch.sh` against a fake root with busybox-like stubs:
   Exit, a panic and a signal all bring Nickel back with its output on `/dev/null` and free
@@ -236,4 +253,5 @@ cd kobo && cargo test
 ## Licences
 
 Morning Issue is MIT-licensed. Fraunces, Newsreader and Inter are under the SIL Open Font
-License. Their licences are installed next to the fonts in `.adds/morningissue/fonts/`.
+License. Their licences are installed next to the fonts in `.adds/morningissue/fonts/`, as
+`*-OFL.license`.
