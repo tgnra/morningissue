@@ -455,6 +455,12 @@ class WithinFeedModel internal constructor(
     /** Null when no direction could be built or checked (no vectors, or too few). */
     val text: TextTaste?,
 ) {
+    /** Nothing was learned: every post gets exactly 1.0 whatever its traits. */
+    val isEmpty: Boolean get() = feeds.isEmpty() && text == null
+
+    /** Whether a candidate's vector can change its W: there is a text taste and it predicts something. */
+    val usesText: Boolean get() = text != null && text.slope > 0.0
+
     /** What was learned about a feed; null when it has no labelled posts. */
     fun feed(feedId: Long): FeedTaste? = feeds[feedId]
 

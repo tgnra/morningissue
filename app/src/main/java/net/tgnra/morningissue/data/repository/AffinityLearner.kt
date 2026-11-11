@@ -43,8 +43,24 @@ class AffinityLearner(
     suspend fun learn(at: Instant, pendingEditionId: Long?): LearnedAffinities = learn(at, setOfNotNull(pendingEditionId))
 
     /** As above, with every edition that has not been superseded yet (see `EditionDao.getPending`). */
-    suspend fun learn(at: Instant, pendingEditionIds: Set<Long>): LearnedAffinities {
-        val since = at.minus(Duration.ofDays(config.affinityWindowDays))
+    suspend fun learn(at: Instant, pendingEditionIds: Set<Long>): LearnedAffinities = learn(evidence(at, pendingEditionIds), at)
+
+    /** The first instant whose runs and engagement are read when learning as of [at]. */
+    fun windowStart(at: Instant): Instant = at.minus(Duration.ofDays(config.affinityWindowDays))
+
+    /**
+     * What the reader did with each post over the learning window, by article ID: the one
+     * record both feed affinity and within-feed ranking (`WithinFeedLearner`) learn from, so
+     * the two cannot disagree about what counts.
+     *
+     * - A post is in it when it was printed (not merely indexed) in an edition released since
+     *   [windowStart], or the reader opened, read, saved or Liked it since then (from a source
+     *   page, search or an edition older than the window).
+     * - An untouched story of an edition in [pendingEditionIds] is left out: that edition has
+     *   not been superseded, so the story does not count as ignored yet.
+     */
+    suspend fun evidence(at: Instant, pendingEditionIds: Set<Long>): Map<Long, ArticleEvidence> {
+        val since = windowStart(at)
         val evidence = HashMap<Long, ArticleEvidence>()
         for (run in editionDao.getRunsSince(since)) {
             val touched = run.openedAt != null || run.readAt != null || run.savedAt != null || run.likedAt != null
@@ -53,14 +69,17 @@ class AffinityLearner(
                 ?: ArticleEvidence(run.feedId, emptyList(), run.openedAt, run.readAt, run.savedAt, run.likedAt)
             evidence[run.articleId] = known.copy(ranAt = known.ranAt + run.ranAt)
         }
-        // Posts read from a source page, search or an edition older than the window.
         for (row in engagementDao.engagedSince(since)) {
             if (row.articleId !in evidence) {
                 evidence[row.articleId] =
                     ArticleEvidence(row.feedId, emptyList(), row.openedAt, row.readAt, row.savedAt, row.likedAt)
             }
         }
+        return evidence
+    }
 
+    /** Learns as of [at] from [evidence] (see the function above) without storing anything. */
+    suspend fun learn(evidence: Map<Long, ArticleEvidence>, at: Instant): LearnedAffinities {
         val feedTags = HashMap<Long, MutableList<Long>>()
         feedDao.getAll().forEach { feedTags[it.id] = ArrayList() }
         tagDao.getAllLinks().forEach { feedTags[it.feedId]?.add(it.tagId) }

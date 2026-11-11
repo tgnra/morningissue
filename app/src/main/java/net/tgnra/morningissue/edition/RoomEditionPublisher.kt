@@ -18,6 +18,7 @@ import net.tgnra.morningissue.data.db.EditionItemEntity
 import net.tgnra.morningissue.data.db.FeedWithDetails
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.repository.AffinityLearner
+import net.tgnra.morningissue.data.repository.WithinFeedLearner
 import net.tgnra.morningissue.data.settings.SettingsRepository
 import net.tgnra.morningissue.engine.Affinity
 import net.tgnra.morningissue.engine.LearnedAffinities
@@ -28,6 +29,7 @@ import net.tgnra.morningissue.engine.EditionClock
 import net.tgnra.morningissue.engine.EditionDraft
 import net.tgnra.morningissue.engine.FeedProfile
 import net.tgnra.morningissue.engine.RankingConfig
+import net.tgnra.morningissue.engine.Scorer
 import net.tgnra.morningissue.model.AppSettings
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
@@ -70,7 +72,9 @@ private val traceCookies = AtomicInteger()
  * mute runs out their posts are still held over.
  *
  * **Learning.** Feed and tag affinity are relearned first (see `AffinityLearner`), counting the
- * edition being superseded, and stored together with the new edition.
+ * edition being superseded, and stored together with the new edition. Within-feed ranking
+ * (`WithinFeedLearner`) is learned from the same evidence for every kind of build and stored
+ * nowhere: it reaches the edition through each story's score and reason line.
  *
  * **Nothing to build.** No edition is stored unless at least one post first seen since the
  * previous cutoff is printed (there are none, or they are all muted, older than `maxAgeDays`
@@ -98,9 +102,9 @@ class RoomEditionPublisher(
     private val articleDao = database.articleDao()
     private val feedDao = database.feedDao()
     private val engagementDao = database.engagementDao()
-    private val builder = EditionBuilder(config)
     private val affinity = Affinity(config)
     private val learner = AffinityLearner(database, config)
+    private val withinFeed = WithinFeedLearner(database, config)
 
     /** One build at a time in this process; the transaction in [build] guards the rest. */
     private val mutex = Mutex()
@@ -193,7 +197,8 @@ class RoomEditionPublisher(
         // count as ignored. An Extra edition supersedes nothing.
         val pending = editionDao.getPending()
         val supersedes = kind != EditionKind.EXTRA
-        val learned = learner.learn(now, if (supersedes) emptySet() else pending.mapTo(HashSet()) { it.id })
+        val evidence = learner.evidence(now, if (supersedes) emptySet() else pending.mapTo(HashSet()) { it.id })
+        val learned = learner.learn(evidence, now)
         val details = feedDao.getAllWithDetails()
         val tagAffinity = HashMap<String, Double>()
         details.forEach { feed -> feed.tags.forEach { tagAffinity[it.name] = learned.tags[it.id] ?: it.affinity } }
@@ -206,6 +211,14 @@ class RoomEditionPublisher(
         val heldOver = if (kind == EditionKind.MORNING) heldOver(feeds, alreadyRun, pending, after, releaseAt, newIds) else emptyList()
         val heldOverIds = heldOver.mapTo(HashSet()) { it.articleId }
         val away = if (kind == EditionKind.MORNING) awayPool(now) else null
+        val shadows = alreadyRun.filter { it.article.id !in heldOverIds && it.article.feedId in feedsById }.map { it.toCandidate() }
+
+        // Within-feed ranking: learned from the same evidence as affinity, as of the release
+        // time, then given the traits of every post this build scores.
+        val taste = withinFeed.learn(evidence, learner.windowStart(now), at = releaseAt)
+        val scored = fresh + heldOver + shadows + away?.candidates.orEmpty()
+        val traits = withinFeed.traitsOf(scored.map { it.articleId }, taste)
+        val builder = EditionBuilder(config, Scorer(config, withinFeedSource = taste.source(traits)))
 
         val draft = builder.build(
             candidates = fresh + heldOver,
@@ -214,7 +227,7 @@ class RoomEditionPublisher(
             releaseAt = releaseAt,
             tagAffinity = tagAffinity,
             kind = kind,
-            alreadyRun = alreadyRun.filter { it.article.id !in heldOverIds && it.article.feedId in feedsById }.map { it.toCandidate() },
+            alreadyRun = shadows,
             away = away,
         )
         if (draft.printed.none { it.articleId in newIds }) return@withWriteTransaction null
