@@ -10,15 +10,16 @@ This describes the app as the code on this branch behaves today. Work that is pl
 4. [Feeds, sync and cadence](#feeds-sync-and-cadence)
 5. [Scoring](#scoring)
 6. [Affinity learning](#affinity-learning)
-7. [How an edition is assembled](#how-an-edition-is-assembled)
-8. [Timing](#timing)
-9. [Carry-over and From the archive](#carry-over-and-from-the-archive)
-10. [What is stored](#what-is-stored)
-11. [The screens](#the-screens)
-12. [Themes, tablets and e-ink](#themes-tablets-and-e-ink)
-13. [Architecture](#architecture)
-14. [Building, testing and releasing](#building-testing-and-releasing)
-15. [Not built yet](#not-built-yet)
+7. [Ranking posts within a feed](#ranking-posts-within-a-feed)
+8. [How an edition is assembled](#how-an-edition-is-assembled)
+9. [Timing](#timing)
+10. [Carry-over and From the archive](#carry-over-and-from-the-archive)
+11. [What is stored](#what-is-stored)
+12. [The screens](#the-screens)
+13. [Themes, tablets and e-ink](#themes-tablets-and-e-ink)
+14. [Architecture](#architecture)
+15. [Building, testing and releasing](#building-testing-and-releasing)
+16. [Not built yet](#not-built-yet)
 
 ## The idea
 
@@ -59,6 +60,8 @@ Everything runs on the device. There is no account and no server; the only netwo
 | Printed | Placed on a page of the edition, as opposed to listed in the back-page index. |
 | Index | "Also in your feeds" on the back page: every candidate that was not printed, headlines only. |
 | Untouched | Never opened, read, saved or Liked. |
+| Signals | What is stored about a post besides its text and is read by within-feed ranking: its categories, its traits and its embedding. |
+| Category | A label the feed itself files a post under (`<category>`). Not a tag: tags are the reader's, on feeds. |
 
 ## Feeds, sync and cadence
 
@@ -72,9 +75,9 @@ Two subscriptions are the same feed when their normalised URLs match (`model/Fee
 
 ### Sync
 
-`DefaultFeedSyncer` fetches every feed that is due, six at a time, and stores the posts it has not seen before with first-seen time set to now. Every feed is due at every sync except quiet ones, which are checked less often (see [Feed health](#feed-health)). Syncing never builds or changes an edition.
+`DefaultFeedSyncer` fetches every feed that is due, six at a time, and stores the posts it has not seen before with first-seen time set to now, each with its categories and traits (see [Post signals](#post-signals)). Every feed is due at every sync except quiet ones, which are checked less often (see [Feed health](#feed-health)). Syncing never builds or changes an edition.
 
-After every full sync, `MaintainedFeedSyncer` runs two pieces of housekeeping on the same background thread: the feed health check, then the trim to the storage budget (see [What is stored](#what-is-stored)). A failure in either does not fail the sync.
+After every full sync, `MaintainedFeedSyncer` runs three pieces of housekeeping on the same background thread, in this order: the feed health check, the signals upkeep (traits and embeddings for posts that lack them, see [Post signals](#post-signals)), then the trim to the storage budget (see [What is stored](#what-is-stored)). The upkeep comes before the trim because the trim removes the text that embeddings are computed from. A failure in one does not fail the sync or stop the others.
 
 | When | What runs |
 | --- | --- |
@@ -96,6 +99,7 @@ Parsing (`sync/FeedParser.kt`, `XmlFeedParser.kt`, `JsonFeedParser.kt`) reads RS
 - **Title** falls back to the opening words of the text for untitled posts.
 - **Lead image** is taken from media tags, then an image enclosure, then the first image in the body that is not icon-sized.
 - **Body** HTML is converted to the app's block model (paragraphs, headings, images, quotes, lists, preformatted text) and stored as JSON. A plain-text summary of up to 400 characters and a word count are stored with the article.
+- **Categories and attachments** are read for [Post signals](#post-signals): RSS `<category>`, Atom `<category term>` (with its `label`), JSON Feed `tags`; RSS `<enclosure>`, Atom `link rel="enclosure"` and JSON Feed attachments.
 
 Each fetch also updates the feed's row in `feed_health`: a success clears the error streak and records the latest post date; a failure adds to the streak. The health check reads these.
 
@@ -118,6 +122,45 @@ A feed carries one flag at a time, the first that applies in the order above. Al
 - **Automatic repair** (`sync/FeedRepairer.kt`). A feed that meets the Broken rule is repaired before it is flagged. In order: its own address once more; the same address over the other scheme and with or without `www.`; the feed the site itself declares, through feed discovery on the site's address; then `/feed`, `/rss`, `/atom.xml` and `/index.xml` on the feed's host. Every candidate is fetched and must parse as a feed, and an address another subscription already uses is never taken. If one works the feed's address is updated and the feed is flagged Moved so the reader is told. If none works the feed is flagged Broken. A failed repair is tried again after 7 days, and at most 3 feeds are repaired per health check. "Try again" on the desk runs the repair at once and fetches the feed if it works.
 - **Quiet feeds** sit in a Quiet group at the bottom of Sources and are fetched less often by full syncs: every 6 hours once quiet for 90 days, daily after 180 days, every 3 days after a year, weekly after two years. The wait is measured from the last successful fetch. When a quiet feed posts again it is fetched by every sync again. Syncing one feed directly (after adding it, or "Try again") always fetches.
 - **Once a month the edition carries the desk**: a boxed notice on the back page with the number of feeds needing attention and a link to the desk. The first time the back page of the newest edition is shown in a calendar month while at least one feed has an undismissed flag other than Gone quiet, that edition takes the month's notice and keeps it; no other edition that month shows one, and it goes when nothing needs attention any more. Which edition holds the month is kept in a small preferences file (`desk_notice`).
+
+### Post signals
+
+Three things are stored about each post for [ranking within a feed](#ranking-posts-within-a-feed). None of them is shown to the reader.
+
+- **Categories** (`article_category`). The feed's own labels for the post, at most 12 per post. A category's key is its name with whitespace squashed, lowercased and cut to 64 characters; the feed's spelling is kept as the label. Categories exist only in the feed document, so they are stored at sync and carried by the archive.
+- **Traits** (`article_traits`, computed by `model/ArticleTraitRules`):
+  - the number of links and of images in the body;
+  - whether the body has code (a preformatted block or inline code);
+  - the kind of attachment: audio or video by the stated media type, else by the file extension; an image attachment counts as none, because it is the lead image; anything else is "other". With several attachments the first audio or video wins;
+  - whether it is a **link post**: its own link leaves the feed's site, or its body is at most 120 words and links to exactly one address off the site;
+  - its **title prefix**: the text before the first `": "`, `" | "` or spaced dash in the title, lowercased, when it is at most 3 words and 40 characters ("Links: week 12" gives `links`).
+  Each row records the version of the rules it was computed under (`ArticleTraitRules.VERSION`, now 1). Raising the version makes every row stale and the backfill recomputes them.
+- **Embedding** (`article_embedding`). A 256-dimension vector of the post's title, summary and opening text, stored as 256 bytes. See [The embedder](#the-embedder).
+
+Who writes them:
+
+- **Sync** stores categories and traits with each new post, in the same transaction. For a post it already holds it fills in what is missing: categories and traits for posts stored before these tables existed, and an attachment kind the backfill could not know. Once a post has them it is passed over, at the cost of one read per fetched feed.
+- **`TraitsBackfill`** (`data/signals/`) computes traits for every post that has no row under the current rules, from what is stored: the title, the link, the feed's site address and the stored body. It cannot know the attachment (a recomputed row keeps the one it had) or the categories.
+- **`EmbeddingBackfill`** embeds every post that has no row under the current model, newest first, 500 posts to a transaction.
+- **`SignalsUpkeep`** runs the two in that order. It runs after every full sync, and once five seconds after the app starts, on the app's background scope and never on the main thread. Only one pass runs at a time: a call that arrives during a pass does not wait and does not start another, and the running pass goes round once more when it finishes. Both passes are idempotent, stop between batches when cancelled and keep the batches they finished. A pass with nothing to do is two reads and does not load the embedder.
+
+So a library upgraded from database version 1, or brought in by an archive import, gets its traits and embeddings without the reader doing anything, and its categories at the first sync after the upgrade (the migration clears every feed's `ETag` and `Last-Modified` so that sync fetches each feed in full).
+
+Posts fetched by a single-feed sync (after adding a feed, or for an Extra edition) get categories and traits at once but are embedded by the next pass, not before the Extra edition is printed.
+
+### The embedder
+
+`embedding/StaticEmbedder.kt` turns a text into a vector without running a neural network. The model is a static embedding: a table with one vector per word piece, and a text's vector is the average of its pieces' vectors, scaled to length 1.
+
+- **The table** is `minishlab/potion-base-8M` (MIT licence), a model2vec distillation of `BAAI/bge-base-en-v1.5`: 29,528 uncased word pieces by 256 dimensions, 8 bits a value. It ships in the APK as the asset `embedding/potion-base-8m.bin` (7.9 MB, stored uncompressed), built by `tools/embedding/build_asset.py`. No ML library is used.
+- **Loading.** `EmbedderAsset` memory-maps the asset the first time an embedding is needed, off the main thread, once per process. Mapped, the vectors cost no Java heap; the vocabulary takes about 1 MB.
+- **The text** (`EmbeddableText`) is the title, then the summary, then the opening of the body, cut to 200 words. A summary that is the body's own opening is not repeated.
+- **Model ID.** Stored vectors carry `StaticEmbedder.MODEL_ID` (now 1). A vector written under another ID counts as missing and is replaced, so changing the table or the tokenizer means raising the ID.
+- **Posts without a vector.** Every post the embedding pass reads gets a row, so it is not read again. When no vector can be stored the row holds a one-byte mark in place of the 256 bytes, and the ranking treats it as no vector:
+  - mark 0: the embedder knows none of the post's words (no text, only emoji or digits);
+  - mark 1: the text is mostly not in Latin script.
+- **Non-Latin text.** The model is English. It knows Cyrillic, Greek, Arabic, Hebrew, kana and CJK only as single characters, so the vector of such a text encodes its script and not its subject. A text is not embedded when more than half of its letters are in a script other than Latin (`EmbeddableText.MAX_NON_LATIN_SHARE`). Digits, punctuation and emoji are not counted. Such posts are ranked on categories and traits only. Other languages in Latin script are embedded; their vectors are weak but not systematically wrong.
+- A post is embedded once. It is not embedded again when its full text is fetched later.
 
 ### Full text
 
@@ -145,7 +188,7 @@ Posts sharing a timestamp count once. A feed with fewer than 5 distinct timestam
 Every candidate post gets a score from multiplied factors (`engine/Scorer.kt`). All constants live in `engine/RankingConfig.kt`.
 
 ```
-score = A × F × S × P × C
+score = A × F × S × P × C × W
 ```
 
 Multiplying means any factor near zero sinks the post: affinity cannot rescue stale news, and a post the reader has finished never returns.
@@ -157,6 +200,7 @@ Multiplying means any factor near zero sinks the post: affinity cannot rescue st
 | S, scarcity | `min(1.8, 1 + 0.15 × log2(1 + medianInterval / 24 h))` | About 1.00 for a firehose, 1.15 for a daily feed, 1.45 for a weekly one, 1.74 for a monthly one. |
 | P, seen penalty | `0.5 ^ editionsRunUnopened`; 0 once the post is read | Halves for each edition the post was printed in without being opened. |
 | C, comeback boost | 1.5 for a feed's first post after 90 quiet days; otherwise 1 | See [Welcome back](#welcome-back). |
+| W, within-feed weight | 0.7 to 1.4; 1 when nothing is known | How this post compares with its own feed's other posts for this reader. See [Ranking posts within a feed](#ranking-posts-within-a-feed). |
 
 The slider turns learned affinity into the value used in A:
 
@@ -177,7 +221,7 @@ Half-life by tier:
 | Weekly | 7 days | 10 days (the ceiling) |
 | Rare | 30 days | 10 days (the ceiling) |
 
-Worked examples, all untouched posts scored at release time:
+Worked examples, all untouched posts scored at release time, with W at 1:
 
 | Post | Affinity | Age at release | A | F | S | Score |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -191,7 +235,7 @@ The week-old post from the blog you love beats this morning's news.
 
 **Freshness floor.** A new post whose F has dropped below 0.05 (`RankingConfig.minFreshness`) is not printed. That is about 52 hours for a firehose and six and a half days for a daily feed; Weekly and Rare feeds reach the 30-day age limit first. The post is still listed in the back-page index. Held-over posts are exempt, as are the newest posts of each feed in an Extra edition.
 
-Each printed story also stores a one-line reason (`Scorer.reason`), for example "You read most posts from Daring Fireball", "Rare post: this blog publishes about once a month" or "New from The Verge since the last edition". The line is stored in `edition_item.reason` and shown by "Why is this here?" in the story menu.
+Each printed story also stores a one-line reason (`Scorer.reason`), for example "You read most posts from Daring Fireball", "Rare post: this blog publishes about once a month", "You usually read Planet's posts about space" or "New from The Verge since the last edition". The line names whichever of affinity, scarcity and W pulls hardest. It is stored in `edition_item.reason` and shown by "Why is this here?" in the story menu.
 
 ### Welcome back
 
@@ -261,16 +305,123 @@ An unopened story only counts against its feed once its edition has been superse
 
 The slider is not part of learning. It is applied on top, in `Affinity.effective`.
 
+## Ranking posts within a feed
+
+Feed and tag affinity say how much the reader cares about a feed. They cannot tell two posts of one feed apart. W does: it is learned from which of a feed's posts the reader opens and which they leave (`engine/WithinFeed.kt`, pure; `data/repository/WithinFeedLearner.kt` reads the stored signals for it).
+
+**This is unproven.** It has not been tested against real reading history. Every constant below is a guess, which is why W is held between 0.7 and 1.4: a wrong guess reorders a feed's posts without sinking or crowning them. See `todo.md`.
+
+### The label
+
+The evidence is the evidence affinity learning uses, gathered once by `AffinityLearner.evidence` and handed to both: the same 180-day window, the same 30-day half-life, and the same rule that an untouched story of an edition not yet superseded does not count. For each post, `positive` and `exposure` are computed as in [Affinity learning](#affinity-learning). Then, per feed:
+
+```
+feed rate r = Σ positive / Σ exposure        over the feed's posts with evidence
+residual    = positive − exposure × r        per post; sums to 0 over a feed
+```
+
+A post's label is its residual: how much better or worse it did than its feed's average. A feed the reader always opens does not make all its posts look good.
+
+### Keys
+
+Each post carries keys built from its signals:
+
+| Key | From |
+| --- | --- |
+| Category | One per category of the post |
+| Length | Its word count: brief (up to 150 words), short (up to 500), medium (up to 1,500), long. No key when the post has no stored body |
+| Attachment | Audio, video or other, when it has one |
+| Link post | When it is one |
+| Code | When the body has code |
+| Title prefix | When the title has one |
+
+A missing trait is no key. The image and link counts are stored but no key is built from them. The word count is that of the text stored when the post is scored: the feed's own text for a new post, the fetched page once full text has been fetched (see `todo.md` for what that does to the length key). For each feed and key:
+
+```
+lift = Σ residual over the feed's posts carrying the key / (10 + Σ exposure of those posts)
+```
+
+This is the key's rate above or below the feed's, shrunk towards the feed's own rate by a prior of 10 pseudo-exposures (`withinFeedKeyPriorStrength`). A key carried by every labelled post of its feed has a lift of exactly 0.
+
+A feed's keys are trusted by `E / (E + 12)`, where `E` is the feed's decayed exposure (`withinFeedFeedPriorPosts`): half strength at a dozen recent labelled posts, three quarters at three dozen.
+
+### Text taste
+
+Keys are learned per feed. Text is learned across all feeds, so that few labels go further. Each labelled post with a vector pulls a direction towards itself by its residual:
+
+```
+direction = Σ residual × (v / |v|)
+```
+
+Because residuals sum to zero within a feed, a feed's general subject cancels out.
+
+A direction can always be found that separates the posts it was built from, so it is never judged on them. The labelled posts are split in two halves by a hash of the article ID, a direction is built from each half, and each is tried on the other half:
+
+```
+z(post) = (cos(post, other half's direction) − mean) / deviation     over that half
+slope   = max(0, Σ z × residual / Σ exposure)
+```
+
+`slope` is how many "posts read" one deviation of closeness to the taste is worth. It is about 0 for a reader who engages at random, and it is floored at 0. For a candidate:
+
+```
+text lift = slope × mean of its z under the two directions
+```
+
+The text lift is trusted by `n / (n + 200)`, where `n` is the decayed exposure of all labelled posts with a vector (`withinFeedTextPriorPosts`): half strength at about a week of editions. It does not wait for the candidate's own feed to have a record.
+
+### Combining
+
+Each signal of a candidate has an effect `gain × trust × lift`, with `gain` = 1.0 (`withinFeedGain`).
+
+```
+ln W = (largest positive effect, or 0) + (most negative effect, or 0)
+W    = clamp(exp(ln W), 0.7, 1.4)
+```
+
+Only the strongest signal on each side counts. A podcast episode is often marked three ways (a category, an audio attachment, a title prefix); adding the three would count one fact three times. A candidate with no evidence either way gets exactly 1.
+
+`Scorer` applies W whatever the slider says. Wherever posts compete on score W has its say: the ranking, which of a feed's posts takes its front-page place, Top stories, sections, In brief, From the archive and While you were away. Two rules ignore it: the freshness floor goes by F alone, and of two feeds' copies of one story the copy from the higher-affinity feed is kept.
+
+### The reason line
+
+"Why is this here?" names the within-feed signal when W is at least 1.15 (`withinFeedReasonMinWeight`) and pulls harder than both affinity and scarcity:
+
+| Signal | Line |
+| --- | --- |
+| Category | "You usually read Planet's posts about space" |
+| Length | "You usually read long posts from Planet" |
+| Attachment | "You usually open audio posts from Planet" |
+| Link post | "You usually read link posts from Planet" |
+| Code | "You usually read posts with code from Planet" |
+| Title prefix | "You usually read "links" posts from Planet" |
+| Text | "Similar to posts you have Liked", or "Similar to posts you have read" when no Liked post shaped the taste |
+
+A key's line is only used when the reader engages with that feed's posts carrying the key at least half the time. A W below 1 never gives a reason. The category is named by its lowercased key, not the feed's spelling.
+
+### When it runs
+
+The model is learned inside every build, of every kind (scheduled, on-open, Evening, Extra), and is stored nowhere:
+
+1. The evidence is gathered once and used for affinity.
+2. The model is learned from that evidence as of the edition's release time, with the signals of every post in it read in one query.
+3. The signals of every post the build scores are read: new posts, held-over posts, the already-printed posts kept for deduplication and the While you were away pool.
+4. The builder scores with that model.
+
+Nothing is read when there is no evidence (a first edition). Candidates' vectors are not read when the text taste has no slope.
+
+**Cost.** Measured on a desktop JVM against an in-memory database with 3,000 labelled posts and 1,000 candidates, all with two categories, traits and a vector (`WithinFeedBuildCostTest`): step 2 took a median of 30 ms and step 3 a median of 7 ms, in a build that took 171 ms in all. Reading the vectors made no measurable difference to either read; the cost is in the rows. It has not been measured on a phone, and the macrobenchmark seeds no reading history, so it does not measure it either.
+
 ## How an edition is assembled
 
 `edition/RoomEditionPublisher.kt` gathers the candidates and `engine/EditionBuilder.kt`, a pure function, lays them out. The whole build runs in one database transaction. This section describes the morning edition; the [Evening](#the-evening-edition) and [Extra](#the-extra-edition) editions differ where their sections say.
 
-1. **Relearn affinity**, counting the editions being superseded.
+1. **Relearn affinity**, counting the editions being superseded, and learn the within-feed model from the same evidence (see [Ranking posts within a feed](#ranking-posts-within-a-feed)).
 2. **Build the candidate pool.**
    - New posts: everything first seen after the previous morning edition's cutoff, up to now, except stories that an Evening or Extra edition printed in between. With no earlier edition, the last 3 days.
    - Held-over posts: for each loved Weekly or Rare feed, its 5 newest untouched posts from before the previous cutoff.
    - Left out: posts of feeds muted at release time, and new posts published more than 30 days before release (a newly added feed's back catalogue). Held-over posts are exempt from the age limit.
-3. **Score** every candidate at the release time and rank them. Ties go to the newer post.
+3. **Score** every candidate at the release time, W included, and rank them. Ties go to the newer post.
 4. **Deduplicate** stories syndicated across feeds. See [Cross-feed deduplication](#cross-feed-deduplication).
 5. **Apply carry-over and the freshness floor.** See [Carry-over and From the archive](#carry-over-and-from-the-archive) and [Scoring](#scoring).
 6. **Front page.** The best 5 stories, at most one per feed. The highest score leads, with or without an image.
@@ -426,7 +577,7 @@ A held-over post competes for the regular pages on its score, with these limits:
 
 ## What is stored
 
-A single Room 3 database (`data/db/`, schema version 1, exported to `app/schemas/`) on the platform's own SQLite.
+A single Room 3 database (`data/db/`, schema version 2, exported to `app/schemas/`) on the platform's own SQLite.
 
 | Table | Holds | Key columns |
 | --- | --- | --- |
@@ -440,10 +591,23 @@ A single Room 3 database (`data/db/`, schema version 1, exported to `app/schemas
 | `edition_item` | A story's place in an edition | `editionId`, `articleId`, `page`, `section`, `slot`, `kind`, `score`, `reason` |
 | `feed_health` | Fetch record and health flag per feed | `feedId`, `lastPostAt`, `errorStreak`, `errorSince`, `lastHttpStatus`, `lastFlag`, `flagDismissedUntil`, `lastRepairAt` |
 | `article_fts` | Full-text index (FTS4) | `title`, `summary`, `author`, `body` |
+| `article_category` | A feed's category for a post | `articleId`, `key` (the two are the primary key), `label` |
+| `article_traits` | A post's structural traits | `articleId`, `traitsVersion`, `linkCount`, `imageCount`, `hasCode`, `enclosure`, `isLinkPost`, `titlePrefix` |
+| `article_embedding` | A post's text vector, or the mark that it has none | `articleId`, `model`, `vector` |
 
 `edition_item.kind` is one of `LEAD`, `FRONT`, `TOP`, `SECTION`, `BRIEF`, `ARCHIVE`, `AWAY` or `INDEX`. All items on a page share a page type. `edition.kind` is `MORNING`, `EVENING` or `EXTRA`.
 
-Removing a feed deletes its posts, their engagement and their placements in editions.
+`article_traits.enclosure` is one of `NONE`, `AUDIO`, `VIDEO` or `OTHER`. The last three tables are described under [Post signals](#post-signals).
+
+Removing a feed deletes its posts, their engagement, their signals and their placements in editions.
+
+### Schema changes
+
+Every change to the schema raises the database version and ships a migration (`data/db/Migrations.kt`), so a database from any released version is upgraded with its data in place. A migration is never edited once a release has shipped it. New tables are filled for older databases: by the migration itself where it can be done in SQL, otherwise by an idempotent backfill that runs in the background after the upgrade. `MigrationTest` builds each old version from its exported schema, runs the migrations and compares the result with the current schema.
+
+| Version | Change | How older databases are filled |
+| --- | --- | --- |
+| 2 | Adds `article_category`, `article_traits` and `article_embedding` | Traits by `TraitsBackfill` and embeddings by `EmbeddingBackfill`, run by `SignalsUpkeep` after app start and after each sync. Categories exist only in the feeds, so the migration clears every feed's `ETag` and `Last-Modified`; the next sync fetches each feed in full and files the posts it already holds. Posts no longer in their feed stay without categories. |
 
 Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, the storage budget (default 500 MB), and whether onboarding is done. The reader's text size is in its own preferences file.
 
@@ -464,12 +628,13 @@ No post, edition or engagement is ever deleted automatically.
 
 ### Archive export and import
 
-`data/archive/` writes the whole library to one file and merges such a file back. The file is a zip of four entries (`ArchiveFormat`): `manifest.json` (format name, format version 1, export time, counts), then `feeds.jsonl`, `posts.jsonl` and `editions.jsonl` with one JSON object per line, so a library of any size is written and read a line at a time. It holds every feed with its tags and slider, every post with its stored body and engagement, and every released edition with its items.
+`data/archive/` writes the whole library to one file and merges such a file back. The file is a zip of four entries (`ArchiveFormat`): `manifest.json` (format name, format version 1, export time, counts), then `feeds.jsonl`, `posts.jsonl` and `editions.jsonl` with one JSON object per line, so a library of any size is written and read a line at a time. It holds every feed with its tags and slider, every post with its stored body and engagement, and every released edition with its items. A post's line also carries the two signals only its feed could supply again: `categories` (key and label) and `enclosure` (the attachment kind). Both fields were added without raising the format version; a file written before them imports as posts without categories. Traits and embeddings are not in the file.
 
 Import merges:
 
 - A feed is matched by its normalised address. One that is not subscribed is added back with its tags and slider; a subscribed feed keeps its own name, tags and slider.
 - A post is matched by feed and post ID. One already held is skipped, except that a body it has lost to trimming is put back (and fetched full text replaces a feed excerpt).
+- Categories are added to a post that has none, and an attachment kind to a post that has none recorded. Traits and embeddings of imported posts are rebuilt by the next signals upkeep.
 - Engagement never overwrites anything set locally: a local time stands, counters only go up, and the archive fills in what is missing. A Like or save removed after the export therefore comes back.
 - An edition is matched by date and kind; one already held is skipped. Imported editions keep their number.
 - Unknown fields, unreadable lines and unknown enum names are skipped. A file whose format version is higher than this app's is refused.
@@ -595,22 +760,26 @@ Kotlin and Jetpack Compose in a single `:app` module with a single Activity. The
 ```
 net.tgnra.morningissue
   model/     plain data classes and enums shared by every layer
-  data/      db (Room 3 entities, DAOs), repositories, AffinityLearner, settings (DataStore),
-             storage (budget and trimming), archive (export and import)
+  data/      db (Room 3 entities, DAOs, migrations), repositories, AffinityLearner,
+             WithinFeedLearner, settings (DataStore), storage (budget and trimming),
+             archive (export and import), signals (TraitsBackfill, EmbeddingBackfill,
+             SignalsUpkeep)
+  embedding/ pure Kotlin apart from EmbedderAsset: StaticEmbedder, WordPieceTokenizer,
+             EmbeddableText
   sync/      FeedFetcher, parsers, FeedDiscovery, FullTextFetcher, OPML, FeedSyncer, SyncWorker,
              FeedHealthChecker, FeedRepairer
   engine/    pure Kotlin, no Android imports: RankingConfig, Cadence, Scorer, Affinity,
-             EditionBuilder, EditionClock, FeedHealthRules
+             WithinFeed, EditionBuilder, EditionClock, FeedHealthRules
   edition/   RoomEditionPublisher, EarlyBuild, EarlyBuildWorker, WorkManagerEditionScheduler,
              TimeChangeReceiver
   ui/        theme, layout, navigation, components, newsstand, paper, reader, backissues,
              sources, saved, search, settings, onboarding
 ```
 
-- **Dependency injection** is hand-written. `AppContainer.kt` holds one instance per process of everything the UI and workers depend on. `SyncModule` and `EditionModule` wire their own layers.
+- **Dependency injection** is hand-written. `AppContainer.kt` holds one instance per process of everything the UI and workers depend on, including the embedder asset and the signals upkeep. `SyncModule` and `EditionModule` wire their own layers.
 - **Data flow.** Sync and the reader only write to the database. The publisher reads it, runs the pure engine and stores a frozen edition. The UI observes repositories as Flows and never touches DAOs.
 - **The engine is pure.** It takes plain data and an instant, so every ranking and layout rule is unit-tested on the JVM.
-- **Background work** is WorkManager: two periodic sync requests and one one-off early build.
+- **Background work** is WorkManager: two periodic sync requests and one one-off early build. The signals upkeep is not a job of its own: it runs inside each full sync and once on the app's own scope after process start.
 
 | Concern | Choice |
 | --- | --- |
@@ -635,9 +804,9 @@ You need JDK 21 and the Android SDK (platform 37).
 ./gradlew :macrobenchmark:connectedBenchmarkAndroidTest   # the on-open build benchmark; replaces the installed app and its data
 ```
 
-**Benchmark.** The `:macrobenchmark` module measures the budget "the on-open fallback build takes under 300 ms on a low-end phone". It runs against the app's `benchmark` build type: the release build made profileable and signed with the debug key, plus a seeding receiver (`app/src/benchmark`) that only the shell can call. Each iteration stores 1,000 unread posts from 40 feeds and no edition, starts the app cold and measures the trace section `MorningIssue.onOpenEditionBuild`, which wraps the build in `RoomEditionPublisher.ensureCurrentEdition`. Results are written under `macrobenchmark/build/outputs/connected_android_test_additional_output/`. Numbers from an emulator are only indicative, and it has not yet been run on a phone. To run it without Gradle, install `app-benchmark.apk` and `macrobenchmark-benchmark.apk` and start `net.tgnra.morningissue.macrobenchmark/androidx.test.runner.AndroidJUnitRunner` with `am instrument -w` (add `-e androidx.benchmark.suppressErrors EMULATOR` on an emulator).
+**Benchmark.** The `:macrobenchmark` module measures the budget "the on-open fallback build takes under 300 ms on a low-end phone". It runs against the app's `benchmark` build type: the release build made profileable and signed with the debug key, plus a seeding receiver (`app/src/benchmark`) that only the shell can call. Each iteration stores 1,000 unread posts from 40 feeds, with their traits and embeddings, and no edition or reading history, starts the app cold and measures the trace section `MorningIssue.onOpenEditionBuild`, which wraps the build in `RoomEditionPublisher.ensureCurrentEdition`. Results are written under `macrobenchmark/build/outputs/connected_android_test_additional_output/`. Numbers from an emulator are only indicative, and it has not yet been run on a phone. To run it without Gradle, install `app-benchmark.apk` and `macrobenchmark-benchmark.apk` and start `net.tgnra.morningissue.macrobenchmark/androidx.test.runner.AndroidJUnitRunner` with `am instrument -w` (add `-e androidx.benchmark.suppressErrors EMULATOR` on an emulator).
 
-Unit tests are in `app/src/test`: the engine (scoring, cadence, affinity, edition building, sections, carry-over, the clock), the publisher and early build against an in-memory database and `work-testing`, the sync layer against saved feed fixtures and a mock web server, and the pure parts of the UI.
+Unit tests are in `app/src/test`: the engine (scoring, cadence, affinity, within-feed ranking, edition building, sections, carry-over, the clock), the publisher and early build against an in-memory database and `work-testing`, the sync layer against saved feed fixtures and a mock web server, the embedder against the real asset and reference vectors from the original model, the migrations against the exported schemas, and the pure parts of the UI. The debug sample data has traits and embeddings (the upkeep runs after it is loaded) but no categories.
 
 **Releases.** `master` is the default branch. Pushing a tag that starts with `v` (for example `v0.1.0`) runs `.github/workflows/release.yml`, which runs the unit tests, builds a signed release APK and attaches it to a GitHub release for that tag. The version name is the tag without its `v`. Running the workflow by hand builds the APK as a workflow artifact without publishing a release.
 
@@ -648,5 +817,6 @@ Signing is configured in `app/build.gradle.kts` only when `KEYSTORE_FILE`, `KEYS
 These are described in [`todo.md`](../todo.md) with the detail needed to build them.
 
 - **Planned:** nothing from the three milestones is left unbuilt. The smaller gaps against the original spec are in `todo.md`.
+- **Built, not proven:** ranking posts within a feed (the W factor) has not been validated on real reading history or run on a device. The open items are in `todo.md`.
 - **Engine built, screen missing:** the Extra edition has no button, the comeback label is not shown as a badge, and the While you were away page has no "12 posts from 7 feeds" summary line.
 - **Out of scope for now:** notifications, compression of stored content, and PDF export.

@@ -134,49 +134,35 @@ Specified but not built, and not assigned to a milestone.
   - dismiss rate by position (there is no dismiss now; "printed near the front and not opened" is the nearest equivalent);
   - session depth (now: how far through an edition the reader gets).
 
-## Idea, not yet proven: ranking posts within a feed
+## Ranking posts within a feed
 
-Today a post's score uses its feed's affinity and its tags' affinity, so two posts from one feed
-on the same day differ only by age. The reader may love some of a feed's posts and skip others.
-Nothing below is built: there is no engagement history yet to show that it would work.
+Built and wired into every edition build; how it works is under "Ranking posts within a feed", "Post signals" and "The embedder" in `docs/how-it-works.md`. It is **not proven**: it has been tested on simulated readers and never on real reading history, and nothing has run on a device.
 
-**The label (what "liked this post" means).** Per post that ran in an edition, relative to that
-feed's own baseline so that a feed the reader always opens does not make every post look good:
+- [x] **The label**: a post's engagement against its own feed's rate, from the same evidence as feed affinity (opens, reads, Saves, Likes, and runs unopened in superseded editions).
+- [x] **Feed categories** parsed from RSS, Atom and JSON Feed and stored per post (`article_category`).
+- [x] **Structural traits** per post (`article_traits`): link and image counts, code, attachment kind, link post, title prefix; computed at sync and by `TraitsBackfill`.
+- [x] **Text embeddings** per post (`article_embedding`) from a bundled static model (`potion-base-8M`, 7.9 MB asset, no ML library), computed by `EmbeddingBackfill`. This replaced the EmbeddingGemma idea: no download, and fast enough to embed a whole library in the background.
+- [x] **The W factor**: per-feed lifts for category, length, attachment, link post, code and title prefix, plus a text taste learned across feeds and checked out of sample; capped to 0.7 to 1.4 and shrunk to 1 until there is evidence; named in "Why is this here?" when it is the strongest pull.
+- [x] **Database version 2** with a migration, and background upkeep that fills the new tables for an upgraded library (after each sync and once after app start).
+- [x] **Posts in non-Latin scripts** get no vector, because the English model would encode their script; they are ranked on categories and traits.
+- Considered and not built: a small generative model asked to rank (foreground-only or over a gigabyte, slow, hard to explain) and gradient-boosted trees (they memorise posts at this number of labels).
 
-- Positive: Like (strongest), Save, read to the end, opened and read past the read threshold.
-- Weak negative: ran in an edition and was not opened while another story on the same page was.
-- Negative: opened and abandoned quickly (small read fraction, a few seconds of dwell).
-- No label: ran in an edition the reader never opened, or sat below the fold of a page never reached.
+Open:
 
-All of these are already recorded in `engagement` except dwell time and "another story on the
-same page was opened", which can be derived from `edition_item`.
-
-**Options for predicting the label for a new post, cheapest first.**
-
-- [ ] *Per-feed category affinity.* Many feeds mark posts with `<category>`. Parse and store them
-  (they are dropped today), then learn an affinity per (feed, category) with the same shrinkage
-  prior as tag affinity. Small, explainable in "Why is this here?", hard to overfit. Does nothing
-  for feeds without categories.
-- [ ] *Embeddings plus a small linear model.* A frozen text-embedding model turns title and
-  opening text into a vector; a regularised logistic model (or simply similarity to the mean of
-  Liked and read posts minus the mean of skipped ones) predicts the label. Candidate: the
-  text-only EmbeddingGemma variant through LiteRT (about 165 MB, so an optional download, not in
-  the APK; roughly 0.2 s a post on a phone CPU by Google's figures, unmeasured here). Embedding
-  runs in the charging sync job; a day's posts take seconds, a first backlog of 1,000 a few minutes.
-- [ ] *A small generative model asked to rank.* Not recommended. Gemini Nano through ML Kit only
-  runs while the app is in the foreground and only on some flagship phones (no Boox), so it cannot
-  run on the charger; a bundled model is over a gigabyte and slow, and its ranking is hard to explain.
-- Gradient-boosted trees were considered and rejected: with tens to hundreds of labels per reader
-  and sparse text features they memorise posts. On a few dense features they add little over the
-  linear model.
-
-**Before building any of it.**
-
-- [ ] Export labels from a few weeks of real use and test offline: train on the first weeks,
-  predict the last, and compare against the current score on "was the opened post ranked above
-  the unopened ones from the same feed". Only ship an option that clearly beats today's ranking.
-- [ ] Cap the effect: a within-feed multiplier of about 0.7 to 1.4 on the existing score, shrunk
-  to 1 until a feed has a few dozen labelled posts, and shown in "Why is this here?".
+- [ ] **Validate offline on real labels. This was skipped.** Export labels from a few weeks of real use, train on the first weeks, predict the last, and compare against the score without W on "was the opened post ranked above the unopened ones from the same feed". Tune or remove whatever does not clearly beat the old ranking. Every constant under "W" in `RankingConfig` is a guess until this is done. There is no label export yet; the archive file holds what is needed (engagement, editions, categories) except traits and vectors, which can be rebuilt.
+- [ ] **Run it on a device.** Nothing here has: the migration of a real version 1 library, the upkeep's first pass over tens of thousands of posts (embedding ran at about 20,000 posts a second on a desktop JVM; the database writes are the cost, in transactions of 500), memory-mapping the asset out of the APK, and the build cost below.
+- [ ] **Build cost on a phone.** On a desktop JVM, loading signals and learning added a median of 37 ms (30 ms to learn from 3,000 labelled posts, 7 ms to read 1,000 candidates) to a 171 ms on-open build; the vectors themselves made no measurable difference. It grows with the number of stories printed in the last 180 days. The macrobenchmark seeds no reading history, so it does not measure this: give the seeder past editions with engagement and run it. If it is too slow, the options are a shorter window for W than for affinity, or learning the model at sync and storing it.
+- [ ] **The length key is biased by full-text fetching.** `article.wordCount` is the feed's excerpt when a post is scored and the fetched page afterwards. In a feed that only gives excerpts, opened posts therefore end up "long" and unopened ones stay "brief", so new posts (all "brief") can be marked down as a group. The early build fetches full text for every printed story, which hides most of it; editions built on open do not. Fix: store the feed's own word count beside the traits and build the length key from that (a schema change).
+- [ ] **Traits are not recomputed when full text is fetched later**, and a post is embedded once, from the text stored at the time. Code, links and images in the fetched page are missed until the trait rules' version is raised.
+- [ ] **Weekly and rare feeds gain little from keys.** Their decayed exposure levels off near 7 posts, so their keys never get past about a third of full strength. Only the text taste, which is pooled across feeds, can order their posts.
+- [ ] **The embedding model is English-only.** Other Latin-script languages are embedded but their vectors are mostly noise; non-Latin scripts are not embedded at all. A text that mixes scripts is judged by letter count, and one ideograph counts as one letter, so a Japanese post with many English names can pass.
+- [ ] **`media:content` audio and video are not treated as attachments.** Only `<enclosure>`, Atom enclosure links and JSON Feed attachments are, so some video and podcast feeds have no attachment key.
+- [ ] **Category names in reason lines are the lowercased keys** ("posts about space"), not the feed's spelling. The label is stored; the engine is only given the key.
+- [ ] **Categories of old posts come back only from the feed.** After the upgrade, posts that have dropped out of their feed's document never get categories.
+- [ ] **Posts from a single-feed sync are embedded late.** After adding a feed, and before an Extra edition, posts have categories and traits but no vector until the next full sync or app start.
+- [ ] **A marked post is never retried.** A post marked as unembeddable (no known words, or non-Latin) stays marked until the model ID changes, even if better text is fetched for it.
+- [ ] **The debug sample data has no categories**, so it shows length, code, link-post and text signals only.
+- [ ] Tuning: the image and link counts are stored and unused; decide after validation whether they earn a key.
 
 ## Later
 
