@@ -20,6 +20,17 @@ pub enum Panel {
     Probe,
 }
 
+/// How the front light is driven; see [`light_for`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LightSpec {
+    None,
+    /// `ioctl(/dev/ntx_io, 241, percent)`.
+    NtxIo,
+    /// A backlight class directory with `brightness` and `max_brightness`, and the warmth
+    /// files to try, each with whether 0 means warmest.
+    Sysfs { brightness: &'static str, warmth: &'static [(&'static str, bool)] },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct TouchQuirk {
     /// Raw X is the screen's Y and the other way round (true on every Kobo).
@@ -52,6 +63,8 @@ pub struct Profile {
     pub wait_reliable: bool,
     /// Colour (Kaleido) panel: grey output must skip the colour filter processing.
     pub kaleido: bool,
+    /// How the front light is driven.
+    pub light: LightSpec,
     /// Checked on a real device.
     pub verified: bool,
 }
@@ -62,7 +75,7 @@ const SWAP_MY: TouchQuirk = TouchQuirk { swap_xy: true, mirror_x: false, mirror_
 
 #[allow(clippy::too_many_arguments)]
 const fn p(id: u16, name: &'static str, codename: &'static str, panel: Panel, dpi: f32, size: (i32, i32), page_keys: bool, gyro: bool, touch: TouchQuirk, rotation_map: [u8; 4], wait_reliable: bool) -> Profile {
-    Profile { id, name, codename, panel, dpi, size, page_keys, gyro, follow_sensor: false, touch, rotation_map, wait_reliable, kaleido: false, verified: false }
+    Profile { id, name, codename, panel, dpi, size, page_keys, gyro, follow_sensor: false, touch, rotation_map, wait_reliable, kaleido: false, light: LightSpec::None, verified: false }
 }
 
 /// Every model NickelMenu 0.6 runs on (firmware 4.6 or newer), which is every Kobo from the
@@ -110,15 +123,52 @@ pub fn table() -> Vec<Profile> {
             390 | 393 => prof.kaleido = true,
             _ => {}
         }
+        prof.light = light_for(prof.id);
     }
     t
+}
+
+/// The front light's interface, by product ID.
+///
+/// Sources: KOReader `frontend/device/kobo/device.lua` (`frontlight_settings`, the
+/// `ntx_io` 241 ioctl, `nl_inverted`), `frontend/device/sysfs_light.lua`, koreader-base
+/// `ffi/kobolight.lua`, and Plato `crates/core/src/frontlight/`. Both projects probe the warmth
+/// file at run time because one model ships with different LED drivers (the Libra 2 has an
+/// AW99703 or an LM3630A), so the warmth paths are a list tried in order.
+///
+/// | Models | Brightness | Warmth | Confidence |
+/// |---|---|---|---|
+/// | Libra 2 | `mxc_msp430.0/brightness` 0–100 | `aw99703-bl_FL1/color` or `lm3630a_led/color`, 0–10, inverted | high (both sources agree), unverified |
+/// | Clara HD, Libra H2O, Clara 2E, Elipsa 2E, Clara BW/Colour, Libra Colour | the same | the same probe | medium |
+/// | Forma | the same | `tlc5947_bl/color` 0–10, inverted | medium |
+/// | Glo, Aura HD, Aura, H2O, Glo HD, Aura 2, Nia | `ntx_io` ioctl 241, 0–100 | none | medium |
+/// | Aura One, Aura H2O 2 | the white LM3630A channel only; warmth needs a software mix of red and green channels, not done | none | low |
+/// | Touch, Mini, Touch 2.0 | no light | | high |
+pub fn light_for(id: u16) -> LightSpec {
+    const MSP430: &str = "/sys/class/backlight/mxc_msp430.0";
+    const AW: (&str, bool) = ("/sys/class/leds/aw99703-bl_FL1/color", true);
+    const LM: (&str, bool) = ("/sys/class/backlight/lm3630a_led/color", true);
+    const TLC: (&str, bool) = ("/sys/class/backlight/tlc5947_bl/color", true);
+    match id {
+        310 | 320 | 340 | 372 => LightSpec::None,
+        330 | 350 | 360 | 370 | 371 | 375 | 379 | 382 => LightSpec::NtxIo,
+        373 | 381 => LightSpec::Sysfs { brightness: "/sys/class/backlight/lm3630a_led1b", warmth: &[] },
+        374 | 378 => LightSpec::Sysfs { brightness: "/sys/class/backlight/lm3630a_ledb", warmth: &[] },
+        377 | 380 => LightSpec::Sysfs { brightness: MSP430, warmth: &[TLC, AW, LM] },
+        // The Sage's AW99703 is not inverted; it cannot be drawn on in v1 anyway.
+        383 => LightSpec::Sysfs { brightness: MSP430, warmth: &[("/sys/class/leds/aw99703-bl_FL1/color", false)] },
+        _ => LightSpec::Sysfs { brightness: MSP430, warmth: &[AW, LM, TLC] },
+    }
 }
 
 /// The safe profile for a product ID nobody has listed: the panel driver is probed, touch
 /// uses the commonest transform, the density is guessed from the resolution, and the
 /// sensor is ignored (manual rotation still works).
 pub fn generic(id: u16) -> Profile {
-    p(id, "Kobo (unknown model)", "unknown", Panel::Probe, 0.0, (0, 0), true, false, SWAP_MX, [0, 1, 2, 3], false)
+    let mut g = p(id, "Kobo (unknown model)", "unknown", Panel::Probe, 0.0, (0, 0), true, false, SWAP_MX, [0, 1, 2, 3], false);
+    // Every recent model: probed, and left alone when the files are not there.
+    g.light = light_for(0);
+    g
 }
 
 pub fn by_id(id: u16) -> Profile {

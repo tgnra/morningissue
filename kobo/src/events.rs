@@ -9,7 +9,7 @@
 //!   `PageViews.kt` does, and only while the page itself was showing;
 //! - `editionOpened` and `editionFinished` (the back page reached).
 
-use crate::model::{read_minutes, Bundle};
+use crate::model::{read_minutes, Article, Bundle, SavedList};
 use crate::store::{Event, Store};
 use crate::time;
 use serde_json::Value;
@@ -69,24 +69,37 @@ pub fn apply_one(bundles: &mut [Bundle], e: &Event) {
     }
     let Some(aid) = e.article_id else { return };
     for b in bundles.iter_mut() {
-        let Some(a) = b.article_mut(aid) else { continue };
-        let g = &mut a.engagement;
-        match e.kind.as_str() {
-            "opened" => {
-                g.opened_at.get_or_insert_with(|| e.at.clone());
-            }
-            "readFraction" => {
-                if let Some(v) = e.value.as_ref().and_then(Value::as_f64) {
-                    g.read_fraction = g.read_fraction.max(v.clamp(0.0, 1.0));
-                }
-            }
-            "read" => {
-                g.read_at.get_or_insert_with(|| e.at.clone());
-            }
-            "liked" => g.liked_at = (e.value.as_ref().and_then(Value::as_bool) == Some(true)).then(|| e.at.clone()),
-            "saved" => g.saved_at = (e.value.as_ref().and_then(Value::as_bool) == Some(true)).then(|| e.at.clone()),
-            _ => {}
+        if let Some(a) = b.article_mut(aid) {
+            apply_article(a, e);
         }
+    }
+}
+
+/// Applies an event to one article's engagement, if it is about that article's state.
+pub fn apply_article(a: &mut Article, e: &Event) {
+    let g = &mut a.engagement;
+    match e.kind.as_str() {
+        "opened" => {
+            g.opened_at.get_or_insert_with(|| e.at.clone());
+        }
+        "readFraction" => {
+            if let Some(v) = e.value.as_ref().and_then(Value::as_f64) {
+                g.read_fraction = g.read_fraction.max(v.clamp(0.0, 1.0));
+            }
+        }
+        "read" => {
+            g.read_at.get_or_insert_with(|| e.at.clone());
+        }
+        "liked" => g.liked_at = (e.value.as_ref().and_then(Value::as_bool) == Some(true)).then(|| e.at.clone()),
+        "saved" => g.saved_at = (e.value.as_ref().and_then(Value::as_bool) == Some(true)).then(|| e.at.clone()),
+        _ => {}
+    }
+}
+
+/// [`apply_one`] for the saved list.
+pub fn apply_saved(saved: &mut SavedList, e: &Event) {
+    if let Some(a) = e.article_id.and_then(|id| saved.article_mut(id)) {
+        apply_article(a, e);
     }
 }
 

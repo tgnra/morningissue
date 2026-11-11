@@ -59,6 +59,12 @@ pub struct Event {
     pub at: String,
 }
 
+/// The reader appends events while a sync on another thread sends and drops them; both go
+/// through this lock so an append is never lost to a rewrite.
+static EVENTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Whole-state writes from the two threads, one at a time.
+static STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub struct Store {
     pub home: PathBuf,
 }
@@ -121,6 +127,7 @@ impl Store {
     }
 
     pub fn save_state(&self, state: &State) -> io::Result<()> {
+        let _guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
         self.ensure_dirs()?;
         let bytes = serde_json::to_vec_pretty(state).map_err(io::Error::other)?;
         atomic_write(&self.state_path(), &bytes)
@@ -183,6 +190,7 @@ impl Store {
 
     /// Appends one event and fsyncs it.
     pub fn append_event(&self, event: &Event) -> io::Result<()> {
+        let _guard = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
         self.ensure_dirs()?;
         let path = self.events_path();
         let mut file = OpenOptions::new().create(true).append(true).read(true).open(&path)?;
@@ -209,6 +217,7 @@ impl Store {
 
     /// Drops events up to and including `acked`, keeping later ones.
     pub fn drop_events_through(&self, acked: i64) -> io::Result<()> {
+        let _guard = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
         let events = self.read_events()?;
         if !events.iter().any(|e| e.seq <= acked) {
             return Ok(());
@@ -230,7 +239,10 @@ impl Store {
                 fs::remove_dir_all(&dir)?;
             }
         }
-        let _ = fs::remove_file(self.events_path());
+        {
+            let _guard = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = fs::remove_file(self.events_path());
+        }
         let _ = fs::remove_file(self.saved_path());
         state.next_seq = next;
         state.editions.clear();
