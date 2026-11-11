@@ -58,16 +58,21 @@ class AffinityLearner(
      *   page, search or an edition older than the window).
      * - An untouched story of an edition in [pendingEditionIds] is left out: that edition has
      *   not been superseded, so the story does not count as ignored yet.
+     * - A run the reader did not see is left out: the page holding the story was never on
+     *   screen for `pageSeenMinMillis` in all (`EditionRunRow.seen`). Untouched, the story
+     *   then says nothing; touched, its engagement still counts, with the exposure under it
+     *   from the engagement itself (`Affinity.tally`'s `max`). Editions from before page views
+     *   were recorded count every run as seen, as before.
      */
     suspend fun evidence(at: Instant, pendingEditionIds: Set<Long>): Map<Long, ArticleEvidence> {
         val since = windowStart(at)
         val evidence = HashMap<Long, ArticleEvidence>()
-        for (run in editionDao.getRunsSince(since)) {
+        for (run in editionDao.getRunsSince(since, config.pageSeenMinMillis)) {
             val touched = run.openedAt != null || run.readAt != null || run.savedAt != null || run.likedAt != null
-            if (run.editionId in pendingEditionIds && !touched) continue
+            if (!touched && (run.editionId in pendingEditionIds || !run.seen)) continue
             val known = evidence[run.articleId]
                 ?: ArticleEvidence(run.feedId, emptyList(), run.openedAt, run.readAt, run.savedAt, run.likedAt)
-            evidence[run.articleId] = known.copy(ranAt = known.ranAt + run.ranAt)
+            evidence[run.articleId] = if (run.seen) known.copy(ranAt = known.ranAt + run.ranAt) else known
         }
         for (row in engagementDao.engagedSince(since)) {
             if (row.articleId !in evidence) {
@@ -81,9 +86,13 @@ class AffinityLearner(
     /** Learns as of [at] from [evidence] (see the function above) without storing anything. */
     suspend fun learn(evidence: Map<Long, ArticleEvidence>, at: Instant): LearnedAffinities {
         val feedTags = HashMap<Long, MutableList<Long>>()
-        feedDao.getSubscribed().forEach { feedTags[it.id] = ArrayList() }
+        val intervals = HashMap<Long, Double?>()
+        for (feed in feedDao.getSubscribed()) {
+            feedTags[feed.id] = ArrayList()
+            intervals[feed.id] = feed.medianIntervalHrs
+        }
         tagDao.getAllLinks().forEach { feedTags[it.feedId]?.add(it.tagId) }
-        return affinity.learn(evidence.values, feedTags, at, tagIds = tagDao.getAll().map { it.id })
+        return affinity.learn(evidence.values, feedTags, at, tagIds = tagDao.getAll().map { it.id }, feedIntervalHours = intervals)
     }
 
     /** Writes the values that changed. */

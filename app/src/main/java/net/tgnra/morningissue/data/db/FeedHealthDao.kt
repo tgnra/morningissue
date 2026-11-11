@@ -6,6 +6,7 @@ import androidx.room3.Transaction
 import androidx.room3.Upsert
 import java.time.Instant
 import kotlinx.coroutines.flow.Flow
+import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.model.HealthFlag
 
 @Dao
@@ -52,7 +53,16 @@ abstract class FeedHealthDao {
     /**
      * Per feed, what its printed (non-index) stories did in editions released in
      * `[since, now]`; input to the Ignored and Loved rules. Feeds with no printed story are absent.
+     *
+     * Only runs the reader saw (`EditionDao.SEEN`: the page on screen for at least
+     * [seenMinMillis] in all, or an edition from before page views) count towards `editions`
+     * and `stories`, plus every story they touched wherever it was printed. A feed printed on
+     * pages nobody looked at is not Ignored, and a Loved feed's read rate is not diluted by
+     * stories that were never seen.
      */
+    open suspend fun runStatsSince(since: Instant, now: Instant, seenMinMillis: Long = RankingConfig.Default.pageSeenMinMillis): List<FeedRunStatsRow> =
+        runStats(since, now, seenMinMillis)
+
     @Query(
         "SELECT a.feedId AS feedId, COUNT(DISTINCT i.editionId) AS editions, COUNT(DISTINCT i.articleId) AS stories, " +
             "COUNT(DISTINCT CASE WHEN g.openedAt IS NOT NULL OR g.readAt IS NOT NULL OR g.savedAt IS NOT NULL " +
@@ -61,9 +71,11 @@ abstract class FeedHealthDao {
             "COUNT(DISTINCT CASE WHEN g.likedAt IS NOT NULL THEN i.articleId END) AS liked " +
             "FROM edition_item i JOIN edition e ON e.id = i.editionId JOIN article a ON a.id = i.articleId " +
             "JOIN feed f ON f.id = a.feedId LEFT JOIN engagement g ON g.articleId = i.articleId " +
-            "WHERE i.kind != 'INDEX' AND e.releaseAt >= :since AND e.releaseAt <= :now AND f.status = 'SUBSCRIBED' GROUP BY a.feedId",
+            "WHERE i.kind != 'INDEX' AND e.releaseAt >= :since AND e.releaseAt <= :now AND f.status = 'SUBSCRIBED' " +
+            "AND (${EditionDao.SEEN} OR g.openedAt IS NOT NULL OR g.readAt IS NOT NULL OR g.savedAt IS NOT NULL OR g.likedAt IS NOT NULL) " +
+            "GROUP BY a.feedId",
     )
-    abstract suspend fun runStatsSince(since: Instant, now: Instant): List<FeedRunStatsRow>
+    protected abstract suspend fun runStats(since: Instant, now: Instant, seenMinMillis: Long): List<FeedRunStatsRow>
 
     /** Per feed, the posts first seen since [since] and how many of them were opened; input to Noisy. */
     @Query(

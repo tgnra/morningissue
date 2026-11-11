@@ -5,6 +5,7 @@ import androidx.room3.Query
 import androidx.room3.Transaction
 import java.time.Instant
 import kotlinx.coroutines.flow.Flow
+import net.tgnra.morningissue.engine.RankingConfig
 
 @Dao
 abstract class EngagementDao {
@@ -55,9 +56,10 @@ abstract class EngagementDao {
     @Query(
         "UPDATE engagement SET editionsRunUnopened = editionsRunUnopened + 1 WHERE openedAt IS NULL " +
             "AND readAt IS NULL AND savedAt IS NULL AND likedAt IS NULL " +
-            "AND articleId IN (SELECT articleId FROM edition_item WHERE editionId = :editionId AND kind != 'INDEX')",
+            "AND articleId IN (SELECT i.articleId FROM edition_item i JOIN edition e ON e.id = i.editionId " +
+            "WHERE i.editionId = :editionId AND i.kind != 'INDEX' AND ${EditionDao.SEEN})",
     )
-    protected abstract suspend fun bumpUnopenedForEdition(editionId: Long)
+    protected abstract suspend fun bumpUnopenedForEdition(editionId: Long, seenMinMillis: Long)
 
     /** Records the first open; later calls keep the original time. */
     @Transaction
@@ -102,12 +104,15 @@ abstract class EngagementDao {
 
     /**
      * Adds one to `editionsRunUnopened` for every printed (non-index) story of [editionId] that
-     * the reader has not touched: never opened, and not marked read, saved or Liked from the
-     * long-press menu either. Call once per edition, when it is superseded by the next build.
+     * the reader saw and has not touched: never opened, and not marked read, saved or Liked
+     * from the long-press menu either. "Saw" is the rule of `EditionDao.SEEN`: the story's page
+     * was on screen for at least [seenMinMillis] in all, or the edition predates page views. A
+     * story on a page the reader never looked at has not been passed over, so its seen penalty
+     * does not grow. Call once per edition, when it is superseded by the next build.
      */
     @Transaction
-    open suspend fun countUnopenedRun(editionId: Long) {
+    open suspend fun countUnopenedRun(editionId: Long, seenMinMillis: Long = RankingConfig.Default.pageSeenMinMillis) {
         ensureForEdition(editionId)
-        bumpUnopenedForEdition(editionId)
+        bumpUnopenedForEdition(editionId, seenMinMillis)
     }
 }

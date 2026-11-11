@@ -89,6 +89,7 @@ class WithinFeedLearner(
                 imageCount = current?.imageCount ?: 0,
                 linkCount = current?.linkCount ?: 0,
                 titlePrefix = current?.titlePrefix,
+                traitsKnown = current != null,
                 embedding = StoredEmbedding.vectorOf(signals.embedding),
             )
         }

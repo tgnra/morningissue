@@ -29,8 +29,21 @@ data class RankingConfig(
     // Affinity learning
     val neutralAffinity: Double = 0.5,
     val affinityHalfLifeDays: Double = 30.0,
-    /** Pseudo-impressions at neutral affinity (Bayesian prior). */
+    /**
+     * Pseudo-exposures of the prior (Bayesian), n₀: a tag's always, a feed's at most. A feed's
+     * own n₀ is scaled to its cadence by [affinityPriorShare], between
+     * [affinityMinPriorStrength] and this; a feed whose cadence is not measured yet uses this.
+     */
     val affinityPriorStrength: Double = 10.0,
+    /**
+     * A feed's n₀ is this share of the decayed exposure it can reach,
+     * `postsPerDay × affinityHalfLifeDays / ln 2` (a post a day: 43; a week: 6.2; a month: 1.4),
+     * so that its own record outweighs the prior by the same `1 / share` at steady state
+     * whatever its cadence. At 0.25 a daily feed keeps n₀ = 10, as before the prior was scaled.
+     */
+    val affinityPriorShare: Double = 0.25,
+    /** A feed's n₀ never drops below one pseudo-exposure: one post never decides on its own. */
+    val affinityMinPriorStrength: Double = 1.0,
     val openWeight: Double = 1.0,
     val readWeight: Double = 2.0,
     val saveWeight: Double = 2.0,
@@ -46,6 +59,14 @@ data class RankingConfig(
      * their weight is under 2%.
      */
     val affinityWindowDays: Long = 180,
+
+    /**
+     * A printed story only counts as exposure (and, untouched, as ignored) when the edition
+     * page holding it was on screen for at least this long in all, in milliseconds: an unseen
+     * page is not an ignore. Opening a story counts whatever the page time. Editions from
+     * before page views were recorded count every story as seen (`edition.pageViewsTracked`).
+     */
+    val pageSeenMinMillis: Long = 5_000,
 
     // Read detection
     val readScrollFraction: Float = 0.7f,
@@ -103,8 +124,9 @@ data class RankingConfig(
     /** In brief only takes posts scoring at least this. */
     val briefMinScore: Double = 0.1,
     /**
-     * Top stories diversity: a story's score counts times this for every story from the same
-     * feed already on the page (v1's greedy diversification). 1.0 switches it off.
+     * Same-feed diversity on every page after the front page (Top stories, each section, In
+     * brief): a story's score counts times this, for placement only, for every story from the
+     * same feed already on the page (v1's greedy diversification). 1.0 switches it off.
      */
     val sameFeedPagePenalty: Double = 0.7,
     /** Short and Long editions scale the per-page limits by these factors. */
@@ -187,10 +209,17 @@ data class RankingConfig(
 
     // W: within-feed ranking (engine/WithinFeed.kt). Unproven: every value below is a guess
     // to be tuned against exported labels, not a measurement.
-    /** W never pulls a post's score below this share of what it was. */
-    val withinFeedMinWeight: Double = 0.7,
-    /** W never lifts a post's score above this multiple. */
-    val withinFeedMaxWeight: Double = 1.4,
+    /**
+     * W never pulls a post's score below this share of what it was, whatever the signal. Only
+     * a text taste whose two halves agree fully can come near it; see [withinFeedTextMaxEffect].
+     */
+    val withinFeedMinWeight: Double = 0.5,
+    /** W never lifts a post's score above this multiple; see [withinFeedMinWeight]. */
+    val withinFeedMaxWeight: Double = 2.0,
+    /** A per-feed key alone never pulls a post below this share. */
+    val withinFeedKeyMinWeight: Double = 0.7,
+    /** A per-feed key alone never lifts a post above this multiple. */
+    val withinFeedKeyMaxWeight: Double = 1.4,
     /**
      * `ln W = gain × trust × lift`, with `lift` in "posts read above the feed's rate". At 1.0
      * a fully trusted signal worth a third of a read post more than its feed's average
@@ -199,7 +228,11 @@ data class RankingConfig(
     val withinFeedGain: Double = 1.0,
     /**
      * Pseudo-exposures at the feed's own rate that a (feed, key) starts with; the same as
-     * [affinityPriorStrength], kept apart so the two can be tuned separately.
+     * [affinityPriorStrength], kept apart so the two can be tuned separately. Not scaled to
+     * how often the key turns up (as a feed's affinity prior is scaled to its cadence): it is
+     * what keeps a key seen on one or two posts of a busy feed from reaching the key cap on a
+     * single read. The cost: a key on about seven posts a month (a link blog's own articles)
+     * rests near ×1.25 rather than at ×1.4.
      */
     val withinFeedKeyPriorStrength: Double = 10.0,
     /**
@@ -208,11 +241,28 @@ data class RankingConfig(
      */
     val withinFeedFeedPriorPosts: Double = 12.0,
     /**
-     * The text taste is trusted by `n / (n + this)`, `n` the decayed exposure of all labelled
-     * posts that have a vector: half strength at 200 of them. An edition prints a few dozen
-     * stories, so that is about a week of papers; a handful of labels moves nothing.
+     * The text taste is trusted by how well each half's direction predicts the other half:
+     * `t² / (t² + this²)` per half, multiplied over both, with `t` the half's statistic of "no
+     * taste". At 2 (roughly two standard errors) one half is believed a half when its
+     * prediction is two standard errors from nothing, 0.86 at five and 0.96 at ten. A handful
+     * of labels, a random reader and a split whose halves disagree all stay near 0.
      */
-    val withinFeedTextPriorPosts: Double = 200.0,
+    val withinFeedTextConfidenceT: Double = 2.0,
+    /**
+     * And by `n / (n + this)`, `n` the decayed exposure of the posts with a vector: half at 50
+     * (two or three editions' worth of printed stories), 0.86 at 300. The agreement above is a
+     * normal approximation, and on a dozen labels a perfect split happens by chance; this keeps
+     * a handful of unanimous labels nearly neutral. Once there are hundreds it hardly matters,
+     * and agreement decides.
+     */
+    val withinFeedTextPriorPosts: Double = 50.0,
+    /**
+     * The most the text taste can add to (or take from) `ln W`, reached only as its trust
+     * nears 1 and its lift grows: `ln 2`, so a text taste whose two halves agree fully can
+     * double or halve a post's score, enough to beat a day of freshness in a daily feed
+     * (`0.5 ^ (24 / 36) ≈ 0.63`).
+     */
+    val withinFeedTextMaxEffect: Double = 0.6931471805599453,
     /**
      * "Why is this here?" names the within-feed signal only from this W up, and then only
      * when it pulls harder than the feed's affinity and its scarcity.

@@ -2,6 +2,7 @@ package net.tgnra.morningissue.engine
 
 import java.time.Duration
 import java.time.Instant
+import kotlin.math.ln
 import net.tgnra.morningissue.model.CadenceTier
 import net.tgnra.morningissue.model.SliderStep
 import org.junit.Assert.assertEquals
@@ -261,5 +262,58 @@ class AffinityTest {
         assertFalse(affinity.holdsPostsOver(feed(CadenceTier.FIREHOSE, slider = SliderStep.FAVOURITE)))
         assertFalse(affinity.holdsPostsOver(feed(CadenceTier.WEEKLY, value = 0.5)))
         assertFalse(affinity.holdsPostsOver(feed(CadenceTier.WEEKLY, slider = SliderStep.LESS)))
+    }
+
+    // The prior scaled to cadence
+
+    @Test
+    fun thePriorIsScaledToWhatAFeedsCadenceCanReach() {
+        val config = RankingConfig.Default
+        // Reachable decayed exposure: posts a day × 30 / ln 2.
+        fun reachable(intervalHours: Double) = 24.0 / intervalHours * config.affinityHalfLifeDays / ln(2.0)
+
+        // A daily feed reaches about 43 and keeps the full ten; anything faster is capped there.
+        assertEquals(10.0, affinity.priorStrength(24.0), 1e-9)
+        assertEquals(10.0, affinity.priorStrength(0.5), 0.0)
+        assertEquals(10.0, affinity.priorStrength(0.0), 0.0)
+        // A weekly feed's n₀ is the same share of the 6.2 it can reach.
+        assertEquals(config.affinityPriorShare * reachable(168.0), affinity.priorStrength(168.0), 1e-12)
+        assertTrue(affinity.priorStrength(168.0) < 3.0)
+        // A monthly feed reaches 1.4; it never drops below one pseudo-exposure.
+        assertEquals(maxOf(config.affinityMinPriorStrength, config.affinityPriorShare * reachable(720.0)), affinity.priorStrength(720.0), 1e-12)
+        assertEquals(config.affinityMinPriorStrength, affinity.priorStrength(10_000.0), 0.0)
+        // Unmeasured cadence: the full prior, so a new feed is not judged on its first posts.
+        assertEquals(config.affinityPriorStrength, affinity.priorStrength(null), 0.0)
+        assertEquals(config.affinityPriorStrength, affinity.priorStrength(Double.NaN), 0.0)
+    }
+
+    @Test
+    fun aSlowFeedReadEveryTimeBecomesLovedAndOneIgnoredEveryTimeSinks() {
+        // One post every 30 days for half a year, each read (or each ignored) as it came out.
+        fun monthly(read: Boolean) = (0L..5L).map { ran(opened = read, read = read, at = daysAgo(it * 30)) }
+        fun learn(evidence: List<ArticleEvidence>, interval: Double?) =
+            affinity.learn(evidence, mapOf(1L to emptyList()), now, feedIntervalHours = mapOf(1L to interval)).feeds.getValue(1L)
+
+        val loved = learn(monthly(read = true), 720.0)
+        val ignored = learn(monthly(read = false), 720.0)
+        assertTrue("loved $loved", loved >= RankingConfig.Default.lovedAffinity)
+        assertTrue("ignored $ignored", ignored < 0.25)
+        // With the old flat prior of ten the same record barely moved it.
+        val flat = learn(monthly(read = true), null)
+        assertTrue("flat $flat", flat < 0.65)
+        // A daily feed's prior is unchanged.
+        val daily = (0L..9L).map { ran(opened = true, read = true, at = daysAgo(it)) }
+        assertEquals(learn(daily, null), learn(daily, 24.0), 1e-9)
+    }
+
+    @Test
+    fun theTagPriorWeighsLessForASlowFeed() {
+        // The feed's tag is held low by a busy feed the reader ignores.
+        val busy = (0L..39L).map { ran(feedId = 2, at = daysAgo(it / 2)) }
+        val slow = (0L..2L).map { ran(opened = true, read = true, at = daysAgo(it * 30)) }
+        val feedTags = mapOf(1L to listOf(7L), 2L to listOf(7L))
+        val asDaily = affinity.learn(busy + slow, feedTags, now, feedIntervalHours = mapOf(1L to 24.0)).feeds.getValue(1L)
+        val asMonthly = affinity.learn(busy + slow, feedTags, now, feedIntervalHours = mapOf(1L to 720.0)).feeds.getValue(1L)
+        assertTrue("$asMonthly vs $asDaily", asMonthly > asDaily + 0.2)
     }
 }

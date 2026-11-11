@@ -83,9 +83,10 @@ class WithinFeedLengthBiasTest {
             val opened = addExcerpt(feed, "post-${guid++}", seenAt)
             addExcerpt(feed, "post-${guid++}", seenAt)
             // Built on open, so nothing is fetched for the stories the reader leaves.
-            publisher.ensureCurrentEdition()!!
+            // The reader turns through the whole paper ...
+            db.viewPages(publisher.ensureCurrentEdition()!!, clock.now)
 
-            // The reader opens one of the two and finishes it; the reader screen fetches its page.
+            // ... opens one of the two and finishes it; the reader screen fetches its page.
             clock.now = clock.now.plus(Duration.ofHours(1))
             articles.markOpened(opened)
             db.articleDao().storeContent(opened, body(PAGE_WORDS), words(PAGE_WORDS), PAGE_WORDS, ContentSource.FETCHED, clock.now)

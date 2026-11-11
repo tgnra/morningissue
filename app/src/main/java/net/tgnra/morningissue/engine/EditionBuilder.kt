@@ -360,45 +360,72 @@ class EditionBuilder(
     }
 
     /**
-     * Step 5a. The next best stories regardless of tag, on up to `topStoriesPages` pages. Each
-     * slot goes to the best remaining story after its score is multiplied by
-     * `sameFeedPagePenalty` for every story of the same feed already on that page, so one busy
-     * feed cannot take a whole page while others have something to offer; with a single feed
-     * the page still fills.
+     * Step 5a. The next best stories regardless of tag, on up to `topStoriesPages` pages, each
+     * filled by [fillPage].
      */
     private fun fillTopStories(ranked: List<Ranked>, limits: EditionLimits, layout: Layout): List<Ranked> {
         if (ranked.isEmpty()) return ranked
-        // Within a feed the best remaining story is always the head of its queue.
-        val queues = LinkedHashMap<Long, ArrayDeque<Ranked>>()
-        ranked.forEach { queues.getOrPut(it.feed.id) { ArrayDeque() }.addLast(it) }
+        val queues = FeedQueues(ranked)
         val picked = ArrayList<Ranked>()
-
         repeat(limits.topStoriesPages) {
             if (queues.isEmpty()) return@repeat
             val page = layout.newPage()
-            val onPage = HashMap<Long, Int>()
-            var slot = 0
-            while (slot < limits.topStoriesPerPage && queues.isNotEmpty()) {
-                var best: Ranked? = null
-                var bestScore = -1.0
-                for ((feedId, queue) in queues) {
-                    val head = queue.first()
-                    val adjusted = head.score.value * penalty(onPage[feedId] ?: 0)
-                    if (adjusted > bestScore || (adjusted == bestScore && head.rank < best!!.rank)) {
-                        best = head
-                        bestScore = adjusted
-                    }
-                }
-                val choice = best!!
-                val queue = queues.getValue(choice.feed.id)
-                queue.removeFirst()
-                if (queue.isEmpty()) queues.remove(choice.feed.id)
-                onPage.merge(choice.feed.id, 1, Int::plus)
-                layout.place(choice, page, slot++, ItemKind.TOP)
-                picked += choice
+            fillPage(queues, limits.topStoriesPerPage).forEachIndexed { slot, item ->
+                layout.place(item, page, slot, ItemKind.TOP)
+                picked += item
             }
         }
         return ranked.without(picked)
+    }
+
+    /**
+     * The stories still to place, one queue per feed in rank order: within a feed the best
+     * remaining story is always the head of its queue.
+     */
+    private class FeedQueues(ranked: List<Ranked>) {
+        val byFeed = LinkedHashMap<Long, ArrayDeque<Ranked>>()
+
+        init {
+            ranked.forEach { byFeed.getOrPut(it.feed.id) { ArrayDeque() }.addLast(it) }
+        }
+
+        fun isEmpty(): Boolean = byFeed.isEmpty()
+
+        fun take(feedId: Long): Ranked {
+            val queue = byFeed.getValue(feedId)
+            val head = queue.removeFirst()
+            if (queue.isEmpty()) byFeed.remove(feedId)
+            return head
+        }
+    }
+
+    /**
+     * Same-feed diversity (`sameFeedPagePenalty`), for every page after the front page, which
+     * takes one story per feed outright. Up to [slots] stories, taken from [queues]; each slot
+     * goes to the best remaining story after its score is multiplied by `sameFeedPagePenalty`
+     * for every story of the same feed already on the page. One busy feed cannot take a whole
+     * page while others have something to offer, and with a single feed the page still fills.
+     * The penalty only orders: it never changes a stored score or a threshold.
+     */
+    private fun fillPage(queues: FeedQueues, slots: Int): List<Ranked> {
+        val onPage = HashMap<Long, Int>()
+        val picked = ArrayList<Ranked>(slots)
+        while (picked.size < slots && !queues.isEmpty()) {
+            var best: Ranked? = null
+            var bestScore = -1.0
+            for ((feedId, queue) in queues.byFeed) {
+                val head = queue.first()
+                val adjusted = head.score.value * penalty(onPage[feedId] ?: 0)
+                if (best == null || adjusted > bestScore || (adjusted == bestScore && head.rank < best.rank)) {
+                    best = head
+                    bestScore = adjusted
+                }
+            }
+            val choice = queues.take(best!!.feed.id)
+            onPage.merge(choice.feed.id, 1, Int::plus)
+            picked += choice
+        }
+        return picked
     }
 
     private fun penalty(sameFeedOnPage: Int): Double {
@@ -412,10 +439,14 @@ class EditionBuilder(
      * stories, ranked within the tag, then General for feeds without tags.
      *
      * - **Which section.** A story of a feed with several tags goes to the tag with the
-     *   highest tag affinity (ties: name order). Stories are placed best first, so when that
-     *   section is already full the story spills to its next tag's section if there is still
-     *   room there, which is exactly when it makes that section's cut. If all its sections
+     *   highest tag affinity (ties: name order). When that section is already full the story
+     *   spills to its next tag's section if there is still room there. If all its sections
      *   are full it stays out and falls to In brief or the index; it does not go to General.
+     * - **Same-feed diversity.** As on Top stories ([fillPage]): stories are placed one at a
+     *   time, each time the best remaining story after its score is multiplied by
+     *   `sameFeedPagePenalty` for every story of the same feed already in the section it would
+     *   go to. A firehose filed under a tag shares that tag's page with the tag's other feeds
+     *   instead of filling it; alone under its tag it still fills it.
      * - **Thin sections.** A tag with fewer than `sectionMinStories` stories gets no page; its
      *   stories move to their other tag, or to General when they have none left. Thin tags
      *   are dissolved one at a time, highest tag affinity first, and the placement redone, so
@@ -467,7 +498,11 @@ class EditionBuilder(
         return ranked.without(picked)
     }
 
-    /** One placement pass over [ranked], best first, with [live] the tags that may have a page. */
+    /**
+     * One placement pass over [ranked] with [live] the tags that may have a page. Every story
+     * of a feed has the same tags, so a feed's next story always goes to the feed's first
+     * section with room, and only the head of each feed's queue competes for a place.
+     */
     private fun assignToSections(
         ranked: List<Ranked>,
         live: List<String>,
@@ -475,26 +510,59 @@ class EditionBuilder(
         tagsOf: (FeedProfile) -> List<String>,
     ): Map<String, List<Ranked>> {
         val sections = HashMap<String, MutableList<Ranked>>()
-        for (item in ranked) {
-            val wanted = tagsOf(item.feed).filter { it in live }
-            // Untagged, or every tag of the feed has been dissolved.
-            val choices = wanted.ifEmpty { listOf(GENERAL_SECTION) }
-            val section = choices.firstOrNull { (sections[it]?.size ?: 0) < size } ?: continue
-            sections.getOrPut(section) { ArrayList() } += item
+        // Stories of each feed already in each section, for the same-feed penalty.
+        val counts = HashMap<String, HashMap<Long, Int>>()
+        val queues = FeedQueues(ranked)
+        val choicesByFeed = HashMap<Long, List<String>>()
+        fun sectionFor(feed: FeedProfile): String? {
+            val choices = choicesByFeed.getOrPut(feed.id) {
+                // Untagged, or every tag of the feed has been dissolved: General.
+                tagsOf(feed).filter { it in live }.ifEmpty { listOf(GENERAL_SECTION) }
+            }
+            return choices.firstOrNull { (sections[it]?.size ?: 0) < size }
+        }
+        while (!queues.isEmpty()) {
+            var best: Ranked? = null
+            var bestSection: String? = null
+            var bestScore = -1.0
+            val full = ArrayList<Long>()
+            for ((feedId, queue) in queues.byFeed) {
+                val head = queue.first()
+                val section = sectionFor(head.feed)
+                if (section == null) {
+                    // Every section of this feed is full: none of its stories can be placed.
+                    full += feedId
+                    continue
+                }
+                val adjusted = head.score.value * penalty(counts[section]?.get(feedId) ?: 0)
+                if (best == null || adjusted > bestScore || (adjusted == bestScore && head.rank < best.rank)) {
+                    best = head
+                    bestSection = section
+                    bestScore = adjusted
+                }
+            }
+            full.forEach { queues.byFeed.remove(it) }
+            if (best == null) break
+            queues.take(best.feed.id)
+            sections.getOrPut(bestSection!!) { ArrayList() } += best
+            counts.getOrPut(bestSection) { HashMap() }.merge(best.feed.id, 1, Int::plus)
         }
         return sections
     }
 
-    /** Step 6. Remaining Firehose and Daily posts scoring at least `briefMinScore`, best first. */
+    /**
+     * Step 6. Remaining Firehose and Daily posts scoring at least `briefMinScore`, on one page
+     * filled by [fillPage], so one busy feed shares In brief with the others. The threshold
+     * is held against the story's own score, not the penalised one.
+     */
     private fun fillInBrief(ranked: List<Ranked>, limits: EditionLimits, layout: Layout): List<Ranked> {
-        val picked = ArrayList<Ranked>(limits.briefLines)
-        for (item in ranked) {
-            if (picked.size == limits.briefLines) break
-            // Ranked by score, so nothing after the first post under the threshold can qualify.
-            if (item.score.value < config.briefMinScore) break
-            if (item.feed.tier == CadenceTier.FIREHOSE || item.feed.tier == CadenceTier.DAILY) picked += item
-        }
-        if (picked.isEmpty()) return ranked
+        // Ranked by score, so nothing after the first post under the threshold can qualify.
+        val eligible = ranked.asSequence()
+            .takeWhile { it.score.value >= config.briefMinScore }
+            .filter { it.feed.tier == CadenceTier.FIREHOSE || it.feed.tier == CadenceTier.DAILY }
+            .toList()
+        if (eligible.isEmpty()) return ranked
+        val picked = fillPage(FeedQueues(eligible), limits.briefLines)
         val page = layout.newPage()
         picked.forEachIndexed { slot, item -> layout.place(item, page, slot, ItemKind.BRIEF) }
         return ranked.without(picked)

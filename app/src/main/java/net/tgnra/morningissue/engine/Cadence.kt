@@ -69,6 +69,18 @@ object Cadence {
         }
     }
 
+    /**
+     * The interval scoring uses for a feed: its measured median, or while that is not known
+     * yet, its tier's typical interval (`firehoseTypicalIntervalHours` and the three after it).
+     */
+    fun intervalHours(medianIntervalHours: Double?, tier: CadenceTier, config: RankingConfig = RankingConfig.Default): Double =
+        medianIntervalHours?.takeIf { it >= 0.0 && it.isFinite() } ?: when (tier) {
+            CadenceTier.FIREHOSE -> config.firehoseTypicalIntervalHours
+            CadenceTier.DAILY -> config.dailyTypicalIntervalHours
+            CadenceTier.WEEKLY -> config.weeklyTypicalIntervalHours
+            CadenceTier.RARE -> config.rareTypicalIntervalHours
+        }
+
     /** Linear interpolation between closest ranks; [sorted] is ascending and not empty. */
     private fun percentile(sorted: List<Double>, fraction: Double): Double {
         val rank = fraction * (sorted.size - 1)

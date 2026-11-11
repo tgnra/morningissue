@@ -173,6 +173,36 @@ data class EditionEntity(
     val openedAt: Instant? = null,
     /** When the reader first reached the back page; drives the "read" tick on covers. */
     val finishedAt: Instant? = null,
+    /**
+     * Whether the reader's page views of this edition are recorded (`edition_page_view`), so
+     * that a story counts as ignored only when its page was on screen long enough. True for
+     * every edition the publisher builds from version 4 on. False for an edition built before
+     * the upgrade to version 4 (the migration's default) or brought in by an archive import:
+     * there is no view data for it, and every printed story of it counts as seen, as it
+     * always did. This flag is the cut-over between the two rules; see `docs/how-it-works.md`.
+     */
+    @ColumnInfo(defaultValue = "0") val pageViewsTracked: Boolean = false,
+)
+
+/**
+ * How long one page of an edition has been on screen, summed over every time it was shown
+ * (`ui/paper/PageViews.kt`). [page] is the 1-based page number of `edition_item.page`. A row
+ * exists once the page has been shown at all; an edition page with no row was never shown.
+ */
+@Entity(
+    tableName = "edition_page_view",
+    primaryKeys = ["editionId", "page"],
+    foreignKeys = [
+        ForeignKey(entity = EditionEntity::class, parentColumns = ["id"], childColumns = ["editionId"], onDelete = ForeignKey.CASCADE),
+    ],
+)
+data class EditionPageViewEntity(
+    val editionId: Long,
+    val page: Int,
+    /** Total time on screen, in milliseconds. */
+    val msVisible: Long,
+    /** When the page was first shown. */
+    val firstSeenAt: Instant,
 )
 
 /** A story's place in an edition. See `ItemKind` for the page contract. */

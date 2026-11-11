@@ -106,6 +106,33 @@ object Migrations {
         }
     }
 
+    /**
+     * Version 4 adds page views: the table `edition_page_view` (how long each page of an
+     * edition was on screen) and the column `edition.pageViewsTracked`. A printed story then
+     * counts as ignored only when its page was on screen for at least `pageSeenMinMillis`.
+     *
+     * - `edition_page_view` starts empty. Version 3 recorded nothing about pages, so there is
+     *   nothing to fill it from.
+     * - `pageViewsTracked` is the cut-over. Every edition of a version 3 database gets 0 (its
+     *   default): with no view data its printed stories go on counting as seen, as they always
+     *   did, so the affinity, within-feed ranking, seen penalty and feed-health flags learned
+     *   before the upgrade do not change on upgrade. The publisher sets it to 1 on every
+     *   edition it builds from now on. A flag per edition rather than one migration timestamp,
+     *   so that the rule does not depend on the clock: an edition built before the upgrade and
+     *   read after it is judged entirely by the old rule, and one built after it entirely by
+     *   the new.
+     */
+    val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+        override suspend fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("ALTER TABLE `edition` ADD COLUMN `pageViewsTracked` INTEGER NOT NULL DEFAULT 0")
+            connection.execSQL(
+                "CREATE TABLE IF NOT EXISTS `edition_page_view` (`editionId` INTEGER NOT NULL, `page` INTEGER NOT NULL, " +
+                    "`msVisible` INTEGER NOT NULL, `firstSeenAt` INTEGER NOT NULL, PRIMARY KEY(`editionId`, `page`), " +
+                    "FOREIGN KEY(`editionId`) REFERENCES `edition`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+            )
+        }
+    }
+
     /** Every step, for `RoomDatabase.Builder.addMigrations`. */
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 }

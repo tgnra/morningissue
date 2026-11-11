@@ -161,6 +161,30 @@ class WithinFeedTest {
         check(WithinFeedSignalKind.LINK_POST, "", PostTraits(1, isLinkPost = true), PostTraits(1))
         check(WithinFeedSignalKind.CODE, "", PostTraits(1, hasCode = true), PostTraits(1))
         check(WithinFeedSignalKind.TITLE_PREFIX, "links", PostTraits(1, titlePrefix = "links"), PostTraits(1))
+        // A binary trait the post is known not to have is a key of its own.
+        check(WithinFeedSignalKind.LINK_POST, WithinFeed.NOT, PostTraits(1, traitsKnown = true), PostTraits(1, isLinkPost = true, traitsKnown = true))
+        check(WithinFeedSignalKind.CODE, WithinFeed.NOT, PostTraits(1, traitsKnown = true), PostTraits(1, hasCode = true, traitsKnown = true))
+    }
+
+    @Test
+    fun aLinkBlogsOwnPiecesAreLiftedNotOnlyItsLinksPushedDown() {
+        // A link blog: three link posts for every piece of its own, and the reader reads its
+        // own pieces and skips the links. The feed's rate is a quarter, the reader's habit.
+        val own = PostTraits(1, traitsKnown = true)
+        val link = PostTraits(1, isLinkPost = true, traitsKnown = true)
+        val posts = List(10) { labelled(own, read = true) } + List(30) { labelled(link, read = false) }
+        val model = learner.learn(posts, now)
+
+        val ownWeight = model.weight(own)
+        val linkWeight = model.weight(link)
+        assertTrue(ownWeight.multiplier > 1.2)
+        assertEquals(WithinFeed.NOT, ownWeight.signal!!.label)
+        assertTrue(linkWeight.multiplier < 1.0)
+        // The few own pieces stand out from the feed more than the many links do.
+        assertTrue(ln(ownWeight.multiplier) > -ln(linkWeight.multiplier))
+
+        // Traits from before the trait columns were filled say nothing about what a post is not.
+        assertSame(WithinFeedWeight.Neutral, model.weight(PostTraits(1)))
     }
 
     @Test
@@ -318,7 +342,9 @@ class WithinFeedTest {
 
         assertEquals(16, text.dimension)
         assertEquals(320.0, text.labelled, 1e-9)
-        assertEquals(320.0 / 520.0, text.trust, 1e-12)
+        // Every label agrees with the clusters: trust is close to what the label count allows.
+        val byCount = 320.0 / (320.0 + RankingConfig.Default.withinFeedTextPriorPosts)
+        assertTrue("trust ${text.trust} of $byCount", text.trust > 0.9 * byCount && text.trust <= byCount)
         assertTrue(text.fromLikes)
         // The clusters sit about one deviation either side of the middle, and a read post is
         // worth about half a post read more than its feed's average.
@@ -377,7 +403,7 @@ class WithinFeedTest {
         val vector = FloatArray(16) { towards[it] + aside[it] }
         val scaled = FloatArray(vector.size) { vector[it] * 4f }
 
-        assertTrue(w(model, PostTraits(1, embedding = vector)) in 1.05..1.39)
+        assertTrue(w(model, PostTraits(1, embedding = vector)) in 1.05..1.6)
         assertEquals(w(model, PostTraits(1, embedding = vector)), w(model, PostTraits(1, embedding = scaled)), 1e-6)
     }
 
@@ -387,17 +413,40 @@ class WithinFeedTest {
         val some = learner.learn(clusters(perFeed = 6), now)
         val many = learner.learn(clusters(perFeed = 30), now)
 
-        assertEquals(16.0 / 216.0, few.text!!.trust, 1e-12)
-        assertEquals(48.0 / 248.0, some.text!!.trust, 1e-12)
-        assertEquals(240.0 / 440.0, many.text!!.trust, 1e-12)
+        val prior = RankingConfig.Default.withinFeedTextPriorPosts
+        // Sixteen unanimous labels: believed less than a quarter, however clean the split.
+        assertTrue(few.text!!.trust < 16.0 / (16.0 + prior))
+        assertTrue(some.text!!.trust < 48.0 / (48.0 + prior))
+        assertTrue("trust ${many.text!!.trust}", many.text!!.trust > 0.9 * 240.0 / (240.0 + prior))
         val candidate = textPost(1, 0)
         val weights = listOf(few, some, many).map { w(it, candidate) }
         assertEquals(weights.sorted(), weights)
         assertTrue(weights.first() > 1.0 && weights.first() < 1.1)
+        // Plenty of consistent labels can do more than any single key: past the key cap.
+        assertTrue(weights.last() > RankingConfig.Default.withinFeedKeyMaxWeight)
 
-        // The threshold is a config constant.
-        val eager = WithinFeed(RankingConfig(withinFeedTextPriorPosts = 0.0)).learn(clusters(perFeed = 2), now)
+        // Both shrinkages are config constants.
+        val eager = WithinFeed(RankingConfig(withinFeedTextPriorPosts = 0.0, withinFeedTextConfidenceT = 0.0)).learn(clusters(perFeed = 2), now)
         assertEquals(1.0, eager.text!!.trust, 0.0)
+    }
+
+    @Test
+    fun aReaderWhoOpensAtRandomTeachesTheTextTasteNothing() {
+        // The same clusters, read at random: half of each read, whatever it is about.
+        val coin = Random(11)
+        val posts = (1..4L).flatMap { feedId -> List(80) { labelled(textPost(feedId, it % 2), read = coin.nextBoolean()) } }
+        val model = learner.learn(posts, now)
+
+        assertTrue("trust ${model.text!!.trust}", model.text.trust < 0.2)
+        for (axis in 0..2) assertTrue(w(model, textPost(1, axis)) in 0.95..1.05)
+    }
+
+    @Test
+    fun halvesThatDisagreeAreNotBelieved() {
+        // Each half's direction predicts the opposite of the other half: no taste, however many labels.
+        assertEquals(0.0, WithinFeed.agreement(covariance = -5.0, spread = 1.0, t0 = 2.0), 0.0)
+        assertEquals(0.5, WithinFeed.agreement(covariance = 2.0, spread = 1.0, t0 = 2.0), 1e-12)
+        assertEquals(100.0 / 104.0, WithinFeed.agreement(covariance = 10.0, spread = 1.0, t0 = 2.0), 1e-12)
     }
 
     @Test

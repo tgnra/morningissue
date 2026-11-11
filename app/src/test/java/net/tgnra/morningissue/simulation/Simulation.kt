@@ -42,6 +42,9 @@ class ItemRecord(
     val signal: WithinFeedSignalKind?,
     val signalLabel: String?,
     val topic: String?,
+    /** The page the story is on, and its section's name on a section page. */
+    val page: Int = 0,
+    val section: String? = null,
 ) {
     var opened = false
     var read = false
@@ -113,6 +116,10 @@ class SimulationResult(
  *   edition through `RoomEditionRepository` (which records the visit), goes through its
  *   pages in order and opens, reads, Likes and saves stories through `RoomArticleRepository`,
  *   the clock moving on by the minutes each takes. Every change relearns affinity, as in the app.
+ *   Each page it looks at is recorded as on screen for as long as the persona spends on it
+ *   ([Persona.pageMillis]), as the paper screen records it: a front-page-only visit shows
+ *   the front page alone, a missed day shows nothing, and a page turned past in a second or
+ *   two is not seen, so its stories do not count as ignored.
  * - **A second sync** at 17:00, so posts are first seen through the day. (The app syncs every
  *   two hours. How finely first-seen times are spread does not change which edition a post is
  *   in, since every post first seen between two builds is new in the second; and freshness is
@@ -185,6 +192,9 @@ class Simulation(
             }
 
             val reader = Random(seed * 7_919 + persona.name.hashCode())
+            // How long pages stay up, drawn apart from [reader] so that the story decisions
+            // are the same draws whatever the page times are.
+            val glances = Random(seed * 104_729 + persona.name.hashCode())
             val records = ArrayList<DayRecord>(days)
             // Wall time of the early build (sync and build), the W snapshot, the reading and the later syncs.
             val phases = LongArray(4)
@@ -226,6 +236,8 @@ class Simulation(
                             signal = weight?.signal?.kind,
                             signalLabel = weight?.signal?.label,
                             topic = persona.topic(post),
+                            page = row.item.page,
+                            section = row.item.section,
                         )
                     }
                 }
@@ -241,40 +253,48 @@ class Simulation(
                     val current = db.editionDao().getLatestReleased(clock.now)
                     if (current != null) {
                         editions.markEditionOpened(current.id)
-                        if (visit == Visit.FULL) {
-                            val byArticle = if (current.id == editionId) items.associateBy { it.articleId } else emptyMap()
-                            val edition = editions.getEdition(current.id)!!
-                            for (page in edition.pages) {
-                                for (story in page.stories) {
-                                    // The same draws for every story, so one decision does not shift the rest.
-                                    val open = reader.nextDouble()
-                                    val read = reader.nextDouble()
-                                    val like = reader.nextDouble()
-                                    val save = reader.nextDouble()
-                                    val minutes = 1 + reader.nextInt(3)
-                                    if (story.isOpened) continue
-                                    val post = postOf(story.articleId)
-                                    val interest = persona.interest(day, post)
-                                    if (open >= interest.open * persona.pageFactor(story.kind)) continue
-                                    val record = byArticle[story.articleId]
-                                    clock.now = clock.now.plus(Duration.ofMinutes(minutes.toLong()))
-                                    articles.markOpened(story.articleId)
-                                    record?.opened = true
-                                    if (read < interest.read) {
-                                        clock.now = clock.now.plus(Duration.ofMinutes(story.readMinutes.coerceAtLeast(1).toLong()))
-                                        articles.setReadFraction(story.articleId, 0.95f)
-                                        record?.read = true
-                                        if (like < interest.like) {
-                                            articles.setLiked(story.articleId, true)
-                                            record?.liked = true
-                                        }
-                                    }
-                                    if (save < interest.save) {
-                                        articles.setSaved(story.articleId, true)
-                                        record?.saved = true
+                        val edition = editions.getEdition(current.id)!!
+                        val byArticle = if (current.id == editionId) items.associateBy { it.articleId } else emptyMap()
+                        // A front-page-only visit looks at the front page and closes the paper.
+                        for (page in if (visit == Visit.FULL) edition.pages else edition.pages.take(1)) {
+                            // The page is up while its headlines are scanned; time spent in an
+                            // opened story is not page time, so it is recorded first.
+                            val glance = persona.pageMillis(page, glances)
+                            clock.now = clock.now.plus(Duration.ofMillis(glance.millis))
+                            editions.recordPageView(current.id, page.number, glance.millis)
+                            if (visit != Visit.FULL) continue
+                            for (story in page.stories) {
+                                // The same draws for every story, so one decision does not shift the rest.
+                                val open = reader.nextDouble()
+                                val read = reader.nextDouble()
+                                val like = reader.nextDouble()
+                                val save = reader.nextDouble()
+                                val minutes = 1 + reader.nextInt(3)
+                                // A page turned past is not read.
+                                if (story.isOpened || glance.turnedPast) continue
+                                val post = postOf(story.articleId)
+                                val interest = persona.interest(day, post)
+                                if (open >= interest.open * persona.pageFactor(story.kind)) continue
+                                val record = byArticle[story.articleId]
+                                clock.now = clock.now.plus(Duration.ofMinutes(minutes.toLong()))
+                                articles.markOpened(story.articleId)
+                                record?.opened = true
+                                if (read < interest.read) {
+                                    clock.now = clock.now.plus(Duration.ofMinutes(story.readMinutes.coerceAtLeast(1).toLong()))
+                                    articles.setReadFraction(story.articleId, 0.95f)
+                                    record?.read = true
+                                    if (like < interest.like) {
+                                        articles.setLiked(story.articleId, true)
+                                        record?.liked = true
                                     }
                                 }
+                                if (save < interest.save) {
+                                    articles.setSaved(story.articleId, true)
+                                    record?.saved = true
+                                }
                             }
+                        }
+                        if (visit == Visit.FULL) {
                             clock.now = clock.now.plus(Duration.ofMinutes(1))
                             editions.markEditionFinished(current.id)
                         }

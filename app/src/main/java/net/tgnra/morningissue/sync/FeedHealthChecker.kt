@@ -51,8 +51,8 @@ class FeedHealthChecker(
         val now = clock.instant()
         val feeds = feedDao.getSubscribed()
         val health = healthDao.getAll().associateBy { it.feedId }
-        val ignored = healthDao.runStatsSince(now.minus(Duration.ofDays(config.ignoredWindowDays)), now).associateBy { it.feedId }
-        val loved = healthDao.runStatsSince(now.minus(Duration.ofDays(config.lovedFlagWindowDays)), now).associateBy { it.feedId }
+        val ignored = healthDao.runStatsSince(now.minus(Duration.ofDays(config.ignoredWindowDays)), now, config.pageSeenMinMillis).associateBy { it.feedId }
+        val loved = healthDao.runStatsSince(now.minus(Duration.ofDays(config.lovedFlagWindowDays)), now, config.pageSeenMinMillis).associateBy { it.feedId }
         val posts = healthDao.postStatsSince(now.minus(Duration.ofDays(config.noisyWindowDays))).associateBy { it.feedId }
 
         var flagged = 0

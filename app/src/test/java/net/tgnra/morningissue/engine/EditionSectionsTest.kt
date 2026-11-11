@@ -115,16 +115,23 @@ class EditionSectionsTest {
         assertTrue(story.articleId !in techFirst.getValue("Personal"))
     }
 
+    /** [count] feeds tagged [tag] with one post each, the first [firstAge] hours old and each next one an hour older. */
+    private fun oneEach(tag: String, count: Int, firstAge: Double, tier: CadenceTier = CadenceTier.WEEKLY): Pair<List<FeedProfile>, List<Candidate>> {
+        val feeds = (1..count).map { feed("$tag $it", tag, tier = tier) }
+        return feeds to feeds.mapIndexed { i, f -> post(f, firstAge + i) }
+    }
+
     @Test
     fun aFullSectionSpillsTheStoryToItsOtherTag() {
-        val personal = feed("Personal only", "Personal")
+        // Six feeds of their own fill Personal (one feed's six would share it: see
+        // aBusyFeedSharesItsSectionWithTheTagsOtherFeeds).
+        val (personal, six) = oneEach("Personal", 6, firstAge = 1.0)
         val both = feed("Both", "Tech", "Personal")
         val tech = feed("Tech only", "Tech")
-        val six = (1..6).map { post(personal, it.toDouble()) }
         val spilled = post(both, 10.0)
         val techStory = post(tech, 20.0)
 
-        val draft = build(six + spilled + techStory, listOf(personal, both, tech), mapOf("Tech" to 0.6, "Personal" to 0.8))
+        val draft = build(six + spilled + techStory, personal + listOf(both, tech), mapOf("Tech" to 0.6, "Personal" to 0.8))
 
         assertEquals(
             listOf("Personal" to six.map { it.articleId }, "Tech" to ids(spilled, techStory)),
@@ -134,15 +141,13 @@ class EditionSectionsTest {
 
     @Test
     fun aSpilledStoryMustMakeTheCutInItsOtherSection() {
-        val personal = feed("Personal only", "Personal")
+        val (personal, personalSix) = oneEach("Personal", 6, firstAge = 1.0)
         val both = feed("Both", "Tech", "Personal")
-        val tech = feed("Tech only", "Tech")
+        val (tech, techSix) = oneEach("Tech", 6, firstAge = 2.0)
         val plain = feed("Plain")
         val affinity = mapOf("Tech" to 0.6, "Personal" to 0.8)
-        val personalSix = (1..6).map { post(personal, it.toDouble()) }
-        val techSix = (2..7).map { post(tech, it.toDouble()) }
         val general = listOf(post(plain, 1.0), post(plain, 2.0))
-        val feeds = listOf(personal, both, tech, plain)
+        val feeds = personal + both + tech + plain
 
         // Worse than everything in both of its sections: it is not printed in either, and it
         // does not fall back to General.
@@ -161,6 +166,55 @@ class EditionSectionsTest {
         assertEquals(techSix.take(5).map { it.articleId } + strong.articleId, techPage)
         assertEquals(ItemKind.INDEX, made.kindOf(techSix[5]))
         assertEquals(personalSix.map { it.articleId }, made.sections().toMap().getValue("Personal"))
+    }
+
+    @Test
+    fun aBusyFeedSharesItsSectionWithTheTagsOtherFeeds() {
+        // A Favourite firehose filed under News: every one of its twenty posts (about 0.97 to
+        // 0.87) outscores the four daily News feeds' posts (about 0.62).
+        val wire = feed("Wire", "News").copy(tier = CadenceTier.FIREHOSE, medianIntervalHours = 0.5, sliderStep = SliderStep.FAVOURITE)
+        val (others, otherPosts) = oneEach("News", 4, firstAge = 10.0, tier = CadenceTier.DAILY)
+        val wirePosts = (0 until 20).map { post(wire, 0.5 + it * 0.1) }
+
+        val draft = build(wirePosts + otherPosts, others + wire)
+        val news = draft.sections().toMap().getValue("News")
+
+        // The wire's second story counts ×0.7 (0.68, still ahead), its third ×0.49 (0.47,
+        // behind every other feed): the page is shared, still full, and the wire still opens it.
+        assertEquals(wirePosts.take(2).map { it.articleId } + otherPosts.map { it.articleId }, news)
+        // Without the penalty the wire would have taken the whole page.
+        val unpenalised = EditionBuilder(RankingConfig(frontPageSecondaries = 0, topStoriesPages = 0, sameFeedPagePenalty = 1.0))
+        val leadFeed = feed("Lead").copy(sliderStep = SliderStep.FAVOURITE)
+        val before = unpenalised.build(wirePosts + otherPosts + post(leadFeed, 0.0), others + wire + leadFeed, EditionLength.STANDARD, release)
+        assertEquals(wirePosts.take(6).map { it.articleId }, before.sections().toMap().getValue("News"))
+    }
+
+    @Test
+    fun aSectionWithOneFeedStillFills() {
+        val only = feed("Only", "Solo")
+        val posts = (0 until 10).map { post(only, 1.0 + it) }
+
+        val solo = build(posts, listOf(only)).sections().toMap().getValue("Solo")
+
+        assertEquals(posts.take(6).map { it.articleId }, solo)
+    }
+
+    @Test
+    fun theSameFeedPenaltyDoesNotSendAStoryPastItsTags() {
+        // A busy feed tagged Tech and Personal, whose posts outscore everything: once both its
+        // sections are full its stories stay out of General, penalty or not.
+        val busy = feed("Busy", "Tech", "Personal")
+        val busyPosts = (0 until 20).map { post(busy, 0.1 + it * 0.1) }
+        val plain = feed("Plain")
+        val general = listOf(post(plain, 30.0), post(plain, 31.0))
+
+        val draft = build(busyPosts + general, listOf(busy, plain), mapOf("Tech" to 0.6, "Personal" to 0.8))
+        val sections = draft.sections().toMap()
+
+        assertEquals(listOf("Personal", "Tech", "General"), draft.sections().map { it.first })
+        assertEquals(busyPosts.take(6).map { it.articleId }, sections.getValue("Personal"))
+        assertEquals(busyPosts.drop(6).take(6).map { it.articleId }, sections.getValue("Tech"))
+        assertEquals(general.map { it.articleId }, sections.getValue("General"))
     }
 
     @Test

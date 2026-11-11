@@ -118,6 +118,8 @@ class WithinFeedEndToEndTest {
             upkeep.run()
 
             editions += publisher.ensureCurrentEdition()!!
+            // The reader turns through the whole paper.
+            db.viewPages(editions.last(), clock.now)
 
             // Every day but the last the reader opens and finishes the space story, and nothing else.
             if (day != days.last) {
@@ -186,7 +188,7 @@ class WithinFeedEndToEndTest {
             val read = addPost(planet, seenAt, spaceTitles[day % spaceTitles.size] + ", day $day", "Space")
             addPost(planet, seenAt, sportTitles[day % sportTitles.size] + ", day $day", "Sport")
             upkeep.run()
-            publisher.ensureCurrentEdition()!!
+            db.viewPages(publisher.ensureCurrentEdition()!!, clock.now)
             clock.now = clock.now.plus(Duration.ofHours(1))
             articles.markOpened(read)
             articles.setReadFraction(read, 0.9f)

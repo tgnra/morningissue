@@ -113,11 +113,11 @@ Each fetch also updates the feed's row in `feed_health`: a success clears the er
 | Broken | Fetch errors for 7 days running (and at least 3 failed fetches), or the server answers 410 Gone; and the automatic repair has been tried and has not worked | Try again, Unsubscribe, Dismiss |
 | Moved | A permanent redirect or a repair changed the address to a really different one (not just `http`/`https` or `www.`) | OK (clears the flag), Unsubscribe |
 | Noisy | 30 or more posts a week over the last 28 days with under 2% of them opened; feed subscribed for at least 28 days; slider not already at Less or Rarely | Show less (slider to Less), Unsubscribe, Dismiss |
-| Ignored | Printed in 10 or more editions over the last 60 days without one of its stories being opened, read, saved or Liked; slider not already at Less or Rarely | Unsubscribe, Show less, Dismiss |
-| Loved | Slider still at Auto, learned affinity at least 0.7, at least 8 stories printed over the last 60 days, at least half of them read and at least a tenth Liked | Make it a favourite (slider to Favourite), Dismiss |
+| Ignored | Printed on a page the reader saw in 10 or more editions over the last 60 days without one of its stories being opened, read, saved or Liked; slider not already at Less or Rarely | Unsubscribe, Show less, Dismiss |
+| Loved | Slider still at Auto, learned affinity at least 0.7, at least 8 stories printed over the last 60 days on a page the reader saw (or touched wherever they ran), at least half of them read and at least a tenth Liked | Make it a favourite (slider to Favourite), Dismiss |
 | Gone quiet | No posts in 90 days (counted from when it was added, for a feed that has never posted). Not a problem | Dismiss |
 
-A feed carries one flag at a time, the first that applies in the order above. All thresholds are in `RankingConfig`.
+A feed carries one flag at a time, the first that applies in the order above. All thresholds are in `RankingConfig`. "A page the reader saw" is the rule of [Affinity learning](#signals): on screen for 5 seconds in all, or in an edition from before page views were recorded. A feed is not Ignored because the reader was away. Noisy counts posts, not printings, so it is unchanged.
 
 - **Dismiss** hides the flag for six months (183 days, `feed_health.flagDismissedUntil`). The dismissal covers the flag that was dismissed: if a different flag arises in that time it is shown.
 - **Automatic repair** (`sync/FeedRepairer.kt`). A feed that meets the Broken rule is repaired before it is flagged. In order: its own address once more; the same address over the other scheme and with or without `www.`; the feed the site itself declares, through feed discovery on the site's address; then `/feed`, `/rss`, `/atom.xml` and `/index.xml` on the feed's host. Every candidate is fetched and must parse as a feed, and an address another subscription already uses is never taken. If one works the feed's address is updated and the feed is flagged Moved so the reader is told. If none works the feed is flagged Broken. A failed repair is tried again after 7 days, and at most 3 feeds are repaired per health check. "Try again" on the desk runs the repair at once and fetches the feed if it works.
@@ -198,10 +198,10 @@ Multiplying means any factor near zero sinks the post: affinity cannot rescue st
 | --- | --- | --- |
 | A, affinity weight | `0.3 + 0.7 × affinity` | `affinity` is the feed's learned affinity after the slider. The 0.3 floor keeps disliked feeds from vanishing. |
 | F, freshness | `0.5 ^ (age / h)`, with `h = clamp(1.5 × medianInterval, 12 h, 240 h)` | `age` is measured at the edition's release time, not when the reader opens it. A post dated after release counts as brand new. |
-| S, scarcity | `min(1.8, 1 + 0.15 × log2(1 + medianInterval / 24 h))` | About 1.00 for a firehose, 1.15 for a daily feed, 1.45 for a weekly one, 1.74 for a monthly one. |
+| S, scarcity | `1 + (S₀ − 1) × (2 × min(1, affinity / 0.5) − 1)`, with `S₀ = min(1.8, 1 + 0.15 × log2(1 + medianInterval / 24 h))` | `S₀` is about 1.00 for a firehose, 1.15 for a daily feed, 1.45 for a weekly one, 1.74 for a monthly one. It is paid in full from neutral affinity up; below neutral it shrinks, to nothing at 0.25 and to `2 − S₀` at 0 (0.55 for a weekly feed). See below. |
 | P, seen penalty | `0.5 ^ editionsRunUnopened`; 0 once the post is read | Halves for each edition the post was printed in without being opened. |
 | C, comeback boost | 1.5 for a feed's first post after 90 quiet days; otherwise 1 | See [Welcome back](#welcome-back). |
-| W, within-feed weight | 0.7 to 1.4; 1 when nothing is known | How this post compares with its own feed's other posts for this reader. See [Ranking posts within a feed](#ranking-posts-within-a-feed). |
+| W, within-feed weight | 0.5 to 2.0 (a key alone 0.7 to 1.4); 1 when nothing is known | How this post compares with its own feed's other posts for this reader. See [Ranking posts within a feed](#ranking-posts-within-a-feed). |
 
 The slider turns learned affinity into the value used in A:
 
@@ -228,11 +228,13 @@ Worked examples, all untouched posts scored at release time, with W at 1:
 | --- | --- | --- | --- | --- | --- | --- |
 | Favourite weekly blog | 0.9 | 7 days | 0.93 | 0.62 | 1.45 | **0.83** |
 | News site (firehose), neutral | 0.5 | 3 h | 0.65 | 0.84 | 1.00 | 0.55 |
-| Daily newsletter, so-so | 0.3 | 6 h | 0.51 | 0.89 | 1.15 | 0.52 |
+| Daily newsletter, so-so | 0.3 | 6 h | 0.51 | 0.89 | 1.03 | 0.47 |
 | News site (firehose), neutral | 0.5 | 12 h | 0.65 | 0.50 | 1.00 | 0.33 |
 | Daily newsletter, neutral | 0.5 | 3 days | 0.65 | 0.25 | 1.15 | 0.19 |
 
 The week-old post from the blog you love beats this morning's news.
+
+**Scarcity is earned.** Scarcity is a bet that a post the reader rarely gets is worth more to them. A feed nobody knows anything about yet, and every feed the reader likes, get the whole bonus. A feed whose posts the reader keeps leaving loses it: the bonus shrinks in proportion below neutral affinity and turns into a drag below 0.25. Without that a slow feed the reader never opens kept the front page on its rarity and its long half-life (a weekly podcast nobody listened to was on the front page with every episode; see [Affinity learning](#the-calculation)). A firehose, with `S₀` = 1, is unaffected. The so-so daily newsletter above, at affinity 0.3, keeps a fifth of its bonus.
 
 **Freshness floor.** A new post whose F has dropped below 0.05 (`RankingConfig.minFreshness`) is not printed. That is about 52 hours for a firehose and six and a half days for a daily feed; Weekly and Rare feeds reach the 30-day age limit first. The post is still listed in the back-page index. Held-over posts are exempt, as are the newest posts of each feed in an Extra edition.
 
@@ -256,7 +258,7 @@ The publisher looks the gap up from article timestamps (`ArticleDao.lastKnownPos
 
 ## Affinity learning
 
-Affinity is learned from what the reader does with printed stories (`engine/Affinity.kt`, `data/repository/AffinityLearner.kt`). There is no scroll tracking, skip or dismiss: the exposure is "the story was printed in an edition", and being printed without being opened is the only negative signal.
+Affinity is learned from what the reader does with printed stories (`engine/Affinity.kt`, `data/repository/AffinityLearner.kt`). There is no skip or dismiss: the exposure is "the story was printed on a page the reader saw", and being seen without being opened is the only negative signal.
 
 ### Signals
 
@@ -266,7 +268,11 @@ Affinity is learned from what the reader does with printed stories (`engine/Affi
 | Read | Scrolled through at least 70% of the body, or kept open for at least half its estimated reading time (230 words a minute, at least one minute) | 2 |
 | Save | The Save button at the end of the article | 2 |
 | Like | The Like button at the end of the article | 3 |
-| Ran unopened | The story was printed and never touched | Exposure with no credit |
+| Ran unopened | The story was printed on a page the reader saw, and never touched | Exposure with no credit |
+
+**Seen.** The paper records how long each page of an edition is on screen (`edition_page_view`; see [Paper](#paper-uipaper)). A page counts as seen once it has been on screen for 5 seconds in all (`pageSeenMinMillis`), over one visit or several. A story on a page the reader never reached, or flicked past, has not been passed over: its run is no exposure, for affinity, for the within-feed labels, for `editionsRunUnopened` (and so P) and for the Ignored and Loved flags. A week away therefore says nothing about taste. Engagement always counts, wherever the story ran. The rule goes by pages, not stories: a page holds a handful of stories that fit on one screen or close to it, and a story-level rule would need the paper to track which cards were scrolled into view and for how long, for little gain. The rule only ever removes evidence, so where it errs, it errs towards learning nothing.
+
+**The cut-over.** Before version 4 of the database nothing was recorded about pages. Each edition carries `pageViewsTracked`: the migration sets it to 0 for every existing edition, and every edition built afterwards gets 1. An untracked edition is judged entirely by the old rule (every printed story counts as seen), so the history learned before the upgrade stays as it was; a tracked one only counts the pages the reader saw. A flag per edition, rather than an upgrade time, cannot be confused by a clock change, and an edition built before the upgrade but read after it is not half judged by each rule. Imported editions (see [Archive export and import](#archive-export-and-import)) are untracked.
 
 ### The calculation
 
@@ -282,17 +288,23 @@ exposure = max( sum of w over the editions it ran in, largest w of its engagemen
 
 `positive` is in units of "a post opened and read": an open alone is worth a third, a read post 1, a read and Liked post 2. A Like or Save is therefore extra credit that can make up for a post that was ignored. A post read outside an edition (from a source page, search or an old back issue) counts as one exposure at the time it was read.
 
-With a prior of 10 pseudo-exposures:
+With a prior of `n₀` pseudo-exposures:
 
 ```
 tag affinity  = (10 × 0.5   + positive over its feeds) / (10 + exposure over its feeds)
-feed affinity = (10 × prior + positive)                / (10 + exposure)
+feed affinity = (n₀ × prior + positive)                / (n₀ + exposure)
 prior         = mean affinity of the feed's tags, or 0.5 for an untagged feed
+n₀            = clamp(0.25 × reachable, 1, 10)
+reachable     = (24 h / medianInterval) × 30 / ln 2
 ```
 
-Both are clamped to 0..1. A feed with no evidence sits on its prior. Ten read posts in a row lift an untagged feed to 0.75; ten ignored ones drop it to 0.25.
+Both are clamped to 0..1. A feed with no evidence sits on its prior.
 
-**Tag borrowing** is that prior: a new or rarely seen feed starts at the average of its tags' affinity, and its own record takes over smoothly as exposures accumulate.
+**The prior follows the cadence.** `reachable` is the decayed exposure a feed's record levels off at: about 43 for a feed that posts daily, 6.2 for a weekly one, 1.4 for a monthly one. With a prior of 10 for every feed, as before, a weekly or monthly feed's own record could never outweigh its prior however consistently the reader treated it: a monthly blog read nearly every time stayed near 0.3 and was never loved, and a weekly podcast never opened sank to 0.03 but kept the front page through scarcity. With `n₀` a quarter of `reachable` (`affinityPriorShare`), every feed's record outweighs its prior four to one at steady state, whatever its cadence. Daily and faster feeds keep `n₀` = 10, a weekly feed gets about 1.6, and a monthly one the floor of 1 (`affinityMinPriorStrength`), so that one post never decides on its own. A feed whose cadence is not measured yet keeps 10. For a daily feed, ten read posts in a row lift an untagged feed to 0.75; ten ignored ones drop it to 0.25.
+
+The cost is noise: a slow feed is judged on its few posts. For a reader who opens stories at random, a weekly feed's affinity has a standard error of about 0.11 and a monthly one's about 0.18, against 0.04 for a daily feed (see the random reader of the [ranking simulation](#building-testing-and-releasing)).
+
+**Tag borrowing** is that prior: a new or rarely seen feed starts at the average of its tags' affinity, and its own record takes over smoothly as exposures accumulate. A slow feed borrows for fewer posts, so its tags neither hold up a slow feed the reader ignores nor hold down one they read every time.
 
 ### When it runs
 
@@ -302,7 +314,7 @@ Nothing is kept as a running total. Each pass recomputes every feed and tag from
 - when a story's opened, read, saved or Liked state changes;
 - when tags or subscriptions change.
 
-An unopened story only counts against its feed once its edition has been superseded by the next build. Today's paper does not count against a feed while it can still be read.
+An unopened story only counts against its feed once its edition has been superseded by the next build, and only if its page was seen. Today's paper does not count against a feed while it can still be read.
 
 The slider is not part of learning. It is applied on top, in `Affinity.effective`.
 
@@ -310,7 +322,7 @@ The slider is not part of learning. It is applied on top, in `Affinity.effective
 
 Feed and tag affinity say how much the reader cares about a feed. They cannot tell two posts of one feed apart. W does: it is learned from which of a feed's posts the reader opens and which they leave (`engine/WithinFeed.kt`, pure; `data/repository/WithinFeedLearner.kt` reads the stored signals for it).
 
-**This is unproven.** It has not been tested against real reading history. Every constant below is a guess, which is why W is held between 0.7 and 1.4: a wrong guess reorders a feed's posts without sinking or crowning them. See `todo.md`.
+**This is unproven.** It has not been tested against real reading history. Every constant below is a guess, which is why a key is held between 0.7 and 1.4 and W as a whole between 0.5 and 2.0: a wrong guess reorders a feed's posts without sinking or crowning them, and only a text taste whose two halves agree on plenty of labels can go past a key's bounds. See `todo.md`.
 
 ### The label
 
@@ -332,17 +344,17 @@ Each post carries keys built from its signals:
 | Category | One per category of the post |
 | Length | The word count of the feed's own text: brief (up to 150 words), short (up to 500), medium (up to 1,500), long. No key when the feed gave no text |
 | Attachment | Audio, video or other, when it has one |
-| Link post | When it is one |
-| Code | When the body has code |
+| Link post | When it is one; "not a link post" when it is known not to be |
+| Code | When the body has code; "no code" when it is known to have none |
 | Title prefix | When the title has one |
 
-A missing trait is no key. The image and link counts are stored but no key is built from them. The length is `article.feedWordCount`, the number of words in the text the feed itself gave. It is set when the post is stored and fetching the full text never changes it, so a post the reader opened and one they did not are measured alike. (`article.wordCount`, which the reading time uses, becomes the fetched page's count. Read from that column, an excerpt-only feed's opened posts looked long and its new posts brief, and the new posts were marked down together.) For each feed and key:
+A missing trait is no key, except for the two yes-or-no traits, which have a key either way once the post's traits are known (`PostTraits.traitsKnown`; not before the traits backfill has reached the post). A link blog whose own pieces the reader reads is then told apart by a key on those few pieces, not only by a small lift down on the many links: a key carried by nine posts in ten sits close to the feed's own rate and says little.  The image and link counts are stored but no key is built from them. The length is `article.feedWordCount`, the number of words in the text the feed itself gave. It is set when the post is stored and fetching the full text never changes it, so a post the reader opened and one they did not are measured alike. (`article.wordCount`, which the reading time uses, becomes the fetched page's count. Read from that column, an excerpt-only feed's opened posts looked long and its new posts brief, and the new posts were marked down together.) For each feed and key:
 
 ```
 lift = Σ residual over the feed's posts carrying the key / (10 + Σ exposure of those posts)
 ```
 
-This is the key's rate above or below the feed's, shrunk towards the feed's own rate by a prior of 10 pseudo-exposures (`withinFeedKeyPriorStrength`). A key carried by every labelled post of its feed has a lift of exactly 0.
+This is the key's rate above or below the feed's, shrunk towards the feed's own rate by a prior of 10 pseudo-exposures (`withinFeedKeyPriorStrength`). A key carried by every labelled post of its feed has a lift of exactly 0. Unlike a feed's affinity prior this one is not scaled to how often the key turns up: it is what keeps a key seen on one or two posts of a busy feed from reaching the cap on a single read. The cost is that a key on about seven posts a month (a link blog's own articles) rests near ×1.25 rather than at ×1.4.
 
 A feed's keys are trusted by `E / (E + 12)`, where `E` is the feed's decayed exposure (`withinFeedFeedPriorPosts`): half strength at a dozen recent labelled posts, three quarters at three dozen.
 
@@ -369,16 +381,28 @@ slope   = max(0, Σ z × residual / Σ exposure)
 text lift = slope × mean of its z under the two directions
 ```
 
-The text lift is trusted by `n / (n + 200)`, where `n` is the decayed exposure of all labelled posts with a vector (`withinFeedTextPriorPosts`): half strength at about a week of editions. It does not wait for the candidate's own feed to have a record.
+The text lift is trusted by how much evidence there is and by how well the two halves agree:
+
+```
+trust = n / (n + 50) × agreement(first half) × agreement(second half)
+agreement = t² / (t² + 2²), or 0 when the half predicts the opposite
+t = Σ z × residual / √Σ (z × residual)²        over the half's posts, z from the other half's direction
+```
+
+`n` is the decayed exposure of all labelled posts with a vector (`withinFeedTextPriorPosts`, half strength at 50, two or three editions' worth of printed stories). `t` is the statistic of "no taste" for that half: a half whose direction predicts the other half two standard errors from nothing is believed a half, five 0.86, ten 0.96 (`withinFeedTextConfidenceT`). A handful of labels, a reader who opens at random and halves that disagree all stay near 0; hundreds of consistent labels near 1. Nothing switches at a threshold. The text lift does not wait for the candidate's own feed to have a record.
 
 ### Combining
 
-Each signal of a candidate has an effect `gain × trust × lift`, with `gain` = 1.0 (`withinFeedGain`).
+Each signal of a candidate has an effect, with `gain` = 1.0 (`withinFeedGain`):
 
 ```
-ln W = (largest positive effect, or 0) + (most negative effect, or 0)
-W    = clamp(exp(ln W), 0.7, 1.4)
+key effect  = clamp(gain × trust × lift, ln 0.7, ln 1.4)
+text effect = trust × ln 2 × tanh(gain × text lift / ln 2)
+ln W        = (largest positive effect, or 0) + (most negative effect, or 0)
+W           = clamp(exp(ln W), 0.5, 2.0)
 ```
+
+A key alone stays within 0.7..1.4 (`withinFeedKeyMinWeight`, `withinFeedKeyMaxWeight`). The text taste is close to `trust × gain × lift` for a small lift and never goes past `trust × ln 2` (`withinFeedTextMaxEffect`): with little data it is nearly neutral, and a text taste whose halves fully agree can double or halve a post's score, enough to beat a day of freshness in a daily feed (`0.5 ^ (24 / 36) ≈ 0.63`).
 
 Only the strongest signal on each side counts. A podcast episode is often marked three ways (a category, an audio attachment, a title prefix); adding the three would count one fact three times. A candidate with no evidence either way gets exactly 1.
 
@@ -393,8 +417,8 @@ Only the strongest signal on each side counts. A podcast episode is often marked
 | Category | "You usually read Planet's posts about space" |
 | Length | "You usually read long posts from Planet" |
 | Attachment | "You usually open audio posts from Planet" |
-| Link post | "You usually read link posts from Planet" |
-| Code | "You usually read posts with code from Planet" |
+| Link post | "You usually read link posts from Planet"; "You usually read Planet's own pieces rather than its links" |
+| Code | "You usually read posts with code from Planet"; "You usually read Planet's posts without code" |
 | Title prefix | "You usually read "links" posts from Planet" |
 | Text | "Similar to posts you have Liked", or "Similar to posts you have read" when no Liked post shaped the taste |
 
@@ -426,14 +450,15 @@ Nothing is read when there is no evidence (a first edition). Candidates' vectors
 4. **Deduplicate** stories syndicated across feeds. See [Cross-feed deduplication](#cross-feed-deduplication).
 5. **Apply carry-over and the freshness floor.** See [Carry-over and From the archive](#carry-over-and-from-the-archive) and [Scoring](#scoring).
 6. **Front page.** The best 5 stories, at most one per feed. The highest score leads, with or without an image.
-7. **Top stories.** The next best stories regardless of tag, on up to two pages. Each slot goes to the best remaining story after its score is multiplied by 0.7 for every story from the same feed already on that page, so one busy feed cannot fill a page while others have something to offer.
+7. **Top stories.** The next best stories regardless of tag, on up to two pages. Each slot goes to the best remaining story after its score is multiplied by 0.7 for every story from the same feed already on that page (`sameFeedPagePenalty`), so one busy feed cannot fill a page while others have something to offer. With a single feed the page still fills. The penalty only orders the stories: the stored score and every threshold use the story's own score.
 8. **Section pages.** One page per tag, then General. The rules:
    - A story from a feed with several tags goes to the tag with the highest tag affinity. If that section is full it spills to the feed's next tag when there is room there. If all its sections are full it is not placed in General; it falls to In brief or the index.
    - A tag with fewer than 2 stories that day gets no page. Its stories move to their other tag, or to General when they have none left.
    - Sections are ordered by tag affinity, highest first. General is always last.
    - General holds stories from untagged feeds and from tags that got no page. With fewer than 2 stories it gets no page either.
+   - Stories are placed one at a time with the same-feed penalty of step 7, counted within the section the story would go to. A Favourite firehose filed under a tag shares that tag's page with the tag's other feeds instead of filling it, and with nothing else under its tag it still fills it. The penalty never sends a story to a section its feed is not in: the rules above decide where a story may go, the penalty only who gets the place.
    - A story appears at most once in an edition.
-9. **In brief.** Remaining Firehose and Daily posts scoring at least 0.1, best first, as headline-only lines.
+9. **In brief.** Remaining Firehose and Daily posts scoring at least 0.1, as headline-only lines, chosen with the same-feed penalty of step 7, so a busy feed shares In brief with the other fast feeds. A feed's own lines run best first. The 0.1 is held against the story's own score.
 10. **From the archive.** One story; see below.
 11. **While you were away.** If the reader missed editions, a pull-out page goes in as page 2. See [While you were away](#while-you-were-away).
 12. **Index.** Everything else goes in "Also in your feeds" on the back page, grouped by source in alphabetical order.
@@ -807,7 +832,7 @@ Both are in `todo.md`.
 
 ## What is stored
 
-A single Room 3 database (`data/db/`, schema version 3, exported to `app/schemas/`) on the platform's own SQLite.
+A single Room 3 database (`data/db/`, schema version 4, exported to `app/schemas/`) on the platform's own SQLite.
 
 | Table | Holds | Key columns |
 | --- | --- | --- |
@@ -817,7 +842,8 @@ A single Room 3 database (`data/db/`, schema version 3, exported to `app/schemas
 | `article` | One post | `feedId`, `guid` (unique together), `url`, `title`, `summary`, `imageUrl`, `author`, `publishedAt`, `firstSeenAt`, `wordCount`, `feedWordCount`, `contentHash` |
 | `article_content` | A post's body as block-model JSON, uncompressed | `articleId`, `blocksJson`, `source` (`FEED` or `FETCHED`), `storedAt` |
 | `engagement` | What the reader did with a post; a row exists only once something happened | `articleId`, `openedAt`, `readFraction`, `readAt`, `savedAt`, `likedAt`, `editionsRunUnopened`, `leadCount` |
-| `edition` | One edition | `date` and `kind` (unique together), `cutoffAt`, `releaseAt`, `builtAt`, `length`, `number`, `openedAt`, `finishedAt` |
+| `edition` | One edition | `date` and `kind` (unique together), `cutoffAt`, `releaseAt`, `builtAt`, `length`, `number`, `openedAt`, `finishedAt`, `pageViewsTracked` |
+| `edition_page_view` | How long one page of an edition has been on screen, in all | `editionId`, `page` (the two are the primary key), `msVisible`, `firstSeenAt` |
 | `edition_item` | A story's place in an edition | `editionId`, `articleId`, `page`, `section`, `slot`, `kind`, `score`, `reason` |
 | `feed_health` | Fetch record and health flag per feed | `feedId`, `lastPostAt`, `errorStreak`, `errorSince`, `lastHttpStatus`, `lastFlag`, `flagDismissedUntil`, `lastRepairAt` |
 | `article_fts` | Full-text index (FTS4) | `title`, `summary`, `author`, `body` |
@@ -844,6 +870,7 @@ Every change to the schema raises the database version and ships a migration (`d
 | 2 | Adds `stored_image` | Nothing to fill it from: version 1 kept no images, only what Coil's cache happened to hold. It starts empty. Back issues' pictures are shown from the network as before, and an article's pictures are stored when it is next opened. |
 | 2 | Adds `article.feedWordCount` | By the migration: a post whose stored body is the feed's own, or that has none, takes its `wordCount`. A post whose body was fetched from its page takes the word count of its summary, which is the feed's text cut to 400 characters; a longer feed text is undercounted. |
 | 3 | Adds `feed.status` and `feed.discoveredAt`, and the tables `discovery_verdict` and `discovery_candidate` | By the migration: every existing feed becomes a subscription, since `status` defaults to `SUBSCRIBED`. The two tables start empty: no decision has been made yet, and the crawler that would fill the candidates is not built. Subscribed feeds need no verdict row, because discovery excludes them by their address. |
+| 4 | Adds `edition.pageViewsTracked` and the table `edition_page_view` | Nothing to fill the table from: version 3 recorded nothing about pages, so it starts empty. Instead every existing edition gets `pageViewsTracked` = 0, the cut-over: its stories count as seen, as they always did, so nothing learned before the upgrade changes (see [Affinity learning](#signals)). Every edition built afterwards, a reprinted Extra included, gets 1. |
 
 Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, whether pictures are shown in greyscale, the storage budget (default 500 MB), and whether onboarding is done. The same store holds two things that are not settings: when the offer of an Extra edition was last turned down, `nothingNewFor`, the last four release times for which a run found nothing new to print (see [When an edition failed to build](#when-an-edition-failed-to-build)), and `resetChange` and `eveningChange`, how the last change of each release time takes effect (see [Changing a release time](#changing-a-release-time)). The reader's text size is in its own preferences file.
 
@@ -930,7 +957,7 @@ Import merges:
 - A post is matched by feed and post ID. One already held is skipped, except that a body it has lost to trimming is put back (and fetched full text replaces a feed excerpt).
 - Categories are added to a post that has none, and an attachment kind to a post that has none recorded. Traits and embeddings of imported posts are rebuilt by the next signals upkeep.
 - Engagement never overwrites anything set locally: a local time stands, counters only go up, and the archive fills in what is missing. A Like or save removed after the export therefore comes back.
-- An edition is matched by date and kind; one already held is skipped. Imported editions keep their number.
+- An edition is matched by date and kind; one already held is skipped. Imported editions keep their number. Page views are not in the file, so an imported edition is untracked (`pageViewsTracked` = 0): its stories count as seen, as before page views were recorded.
 - Unknown fields, unreadable lines and unknown enum names are skipped. A file whose format version is higher than this app's is refused.
 
 The file does not carry images, stored or not: they would multiply its size and can be fetched again.
@@ -972,6 +999,7 @@ Newsstand ─┬─ Paper ── Reader
 - **In brief**: headlines with source names, divided by hairlines.
 - **Back page**: "That's today's edition", the time of the next edition, buttons to back issues and search, then "Also in your feeds". Tapping a source name there opens its source page. In one edition a month it also carries the Subscriptions desk notice (see [Feed health](#feed-health)).
 - Read stories are greyed and get a tick. Reaching the back page marks the edition as read.
+- **Page views** (`ui/paper/PageViews.kt`). While the paper is on screen and the app is in the foreground, the time the settled page has been showing is measured on the monotonic clock and added to `edition_page_view` when the reader turns away, leaves or the app goes to the background. A page half-turned and let go is not counted until it settles. Learning only counts a story that ran unopened when its page was seen (see [Affinity learning](#signals)). Nothing else uses the times; they are not shown anywhere.
 
 ### Reader (`ui/reader/`)
 
@@ -1131,7 +1159,7 @@ You need JDK 21 and the Android SDK (platform 37).
 
 Unit tests are in `app/src/test`: the engine (scoring, cadence, affinity, within-feed ranking, edition building, sections, carry-over, the clock), the publisher and early build against an in-memory database and `work-testing`, the sync layer against saved feed fixtures and a mock web server, the embedder against the real asset and reference vectors from the original model, the migrations against the exported schemas, the image store against a local web server and Robolectric's native graphics (real decoding and WebP encoding, on the desktop), the greyscale option through a real Coil loader, and the pure parts of the UI. The debug sample data has traits and embeddings (the upkeep runs after it is loaded) but no categories.
 
-**Ranking simulation.** `RankingSimulationTest` (`app/src/test/.../simulation/`) has simulated readers use the app for 180 days: 14 real feeds saved on 2026-11-11 (`app/src/test/resources/simulation/`, with a README) replayed by a seeded generator at their own cadences, synced by the production syncer through an OkHttp interceptor in place of the network, embedded with the real potion-base-8M asset, built by the production early build at 05:00 and released at 06:30, and read through the article and edition repositories, with missed days, a week's holiday, front-page-only visits, Likes, saves and a change of taste on day 120. Five personas (a Scotland reader, a hobbyist, a tech reader, a drifter and a lapsed reader) and a reader who opens stories at random are checked with thresholds and orderings measured after a 30-day warm-up; the run is deterministic. It takes 1.5 to 2 minutes, four personas at a time. `-PsimulationReport` writes a report per persona to `app/build/reports/simulation/`, showing how affinity, W and the front page moved. Three checks that describe what the engine should do but does not yet are kept as ignored tests, with their measurements: a week away lowers a loved feed's affinity by about a third, the affinity prior outweighs a slow feed's whole record, and W is too weak to put a link blog's own articles above its link posts.
+**Ranking simulation.** `RankingSimulationTest` (`app/src/test/.../simulation/`) has simulated readers use the app for 180 days: 14 real feeds saved on 2026-11-11 (`app/src/test/resources/simulation/`, with a README) replayed by a seeded generator at their own cadences, synced by the production syncer through an OkHttp interceptor in place of the network, embedded with the real potion-base-8M asset, built by the production early build at 05:00 and released at 06:30, and read through the article and edition repositories, with missed days, a week's holiday, front-page-only visits, Likes, saves and a change of taste on day 120. Five personas (a Scotland reader, a hobbyist, a tech reader, a drifter and a lapsed reader) and a reader who opens stories at random are checked with thresholds and orderings measured after a 30-day warm-up; the run is deterministic. It takes 1.5 to 2 minutes, four personas at a time. `-PsimulationReport` writes a report per persona to `app/build/reports/simulation/`, showing how affinity, W and the front page moved. Simulated readers record page views like the paper: on a full visit every page is on screen for a couple of seconds plus a few per story, with one page in ten after the front flicked past; a front-page-only visit views the front page alone; a missed day views nothing. Three checks the simulation first found failing are now kept as tests, each with the measurements before and after its fix: a week away no longer lowers a loved feed's affinity (it lowered it by about a third while every unseen page counted as ignored), a slow feed read every time becomes loved (the prior outweighed its whole record), and a link blog's own articles come first on most days that also have link posts.
 
 **Continuous integration.** Every push and pull request runs `.github/workflows/tests.yml`: the unit tests, the ranking simulation among them, with the simulation's reports kept as a workflow artifact.
 

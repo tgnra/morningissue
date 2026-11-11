@@ -30,6 +30,21 @@ Merged. Checked on a phone emulator with real feeds; see Known rough edges for w
 - [x] **Section and From the archive pages**: visual polish now that the builder produces them.
 - [x] **"No new edition today" notice** on the newsstand when the latest edition is not today's because there were no new posts.
 
+## Done: fixes from the ranking simulation
+
+The 180-day ranking simulation found four weaknesses; each check is now a passing test with its before and after numbers (see "Ranking simulation" in `docs/how-it-works.md`).
+
+- [x] **An unseen page is not an ignore.** The paper records how long each page is on screen (`edition_page_view`, database version 4). A story counts as passed over only when its page was on screen for 5 seconds in all; engagement always counts. Applied to affinity, the within-feed labels, `editionsRunUnopened` and the Ignored and Loved flags. Editions from before the upgrade (`edition.pageViewsTracked` = 0) are judged by the old rule. A week away no longer lowers a loved feed's affinity by a third.
+- [x] **The affinity prior follows the cadence.** A feed's n₀ is a quarter of the decayed exposure its cadence can reach, between 1 and 10, so a slow feed's own record can outweigh its tags; and scarcity is only paid in full to a feed at neutral affinity or above. A monthly blog read every time becomes loved; a weekly podcast never opened falls off the front page.
+- [x] **The text taste scales to its data.** Its trust is `n / (n + 50)` times how well each half predicts the other, and its effect may reach ×2 or ×½ (keys alone stay within 0.7..1.4). Binary traits have a key either way ("not a link post", "no code"), so a link blog's own pieces are told apart.
+- [x] **The same-feed penalty applies to sections and In brief**, not only to Top stories, so a busy feed shares its tag's page and In brief with the other feeds.
+
+Left open by these:
+
+- [ ] **Per-page, not per-story, views.** A long page counts as seen once 5 seconds have passed, whether or not the reader scrolled to its last story. Tracking which cards were scrolled into view would be more exact.
+- [ ] **A rare feed's affinity is noisy.** With a prior scaled to cadence, a monthly feed is judged on its two or three posts in the window; for a reader with no taste its affinity can sit anywhere from about 0.1 to 0.9. That is the price of letting a rare feed read every time become loved.
+- [ ] **Keys on rare traits stay short of the cap.** The key prior (10 pseudo-exposures) is not scaled to how often a key turns up, so a link blog's own articles (about seven a month) rest near ×1.25 rather than ×1.4, and come first on about 70% of the days that also have link posts, against about 88% at the cap.
+
 ## Milestone 3: polish
 
 In progress. The edition engine's part is built; how it works is in `docs/how-it-works.md`.
@@ -199,7 +214,7 @@ Built and wired into every edition build; how it works is under "Ranking posts w
 - [x] **Feed categories** parsed from RSS, Atom and JSON Feed and stored per post (`article_category`).
 - [x] **Structural traits** per post (`article_traits`): link and image counts, code, attachment kind, link post, title prefix; computed at sync and by `TraitsBackfill`.
 - [x] **Text embeddings** per post (`article_embedding`) from a bundled static model (`potion-base-8M`, 7.9 MB asset, no ML library), computed by `EmbeddingBackfill`. This replaced the EmbeddingGemma idea: no download, and fast enough to embed a whole library in the background.
-- [x] **The W factor**: per-feed lifts for category, length, attachment, link post, code and title prefix, plus a text taste learned across feeds and checked out of sample; capped to 0.7 to 1.4 and shrunk to 1 until there is evidence; named in "Why is this here?" when it is the strongest pull.
+- [x] **The W factor**: per-feed lifts for category, length, attachment, link post, code and title prefix, plus a text taste learned across feeds and checked out of sample; keys capped to 0.7 to 1.4 and W as a whole to 0.5 to 2.0, shrunk to 1 until there is evidence; named in "Why is this here?" when it is the strongest pull.
 - [x] **Database version 2** with a migration, and background upkeep that fills the new tables for an upgraded library (after each sync and once after app start).
 - [x] **Posts in non-Latin scripts** get no vector, because the English model would encode their script; they are ranked on categories and traits.
 - [x] **The length key reads the feed's own word count** (`article.feedWordCount`), which full-text fetching never changes. Before, an excerpt-only feed's opened posts counted as long and its new posts as brief, and the new posts were marked down together. For a library upgraded from version 1 the count is estimated from the summary where a fetched page had already replaced the feed's text.
@@ -211,7 +226,7 @@ Open:
 - [ ] **Run it on a device.** Nothing here has: the migration of a real version 1 library, the upkeep's first pass over tens of thousands of posts (embedding ran at about 20,000 posts a second on a desktop JVM; the database writes are the cost, in transactions of 500), memory-mapping the asset out of the APK, and the build cost below.
 - [ ] **Build cost on a phone.** On a desktop JVM, loading signals and learning added a median of 37 ms (30 ms to learn from 3,000 labelled posts, 7 ms to read 1,000 candidates) to a 171 ms on-open build; the vectors themselves made no measurable difference. It grows with the number of stories printed in the last 180 days. The macrobenchmark seeds no reading history, so it does not measure this: give the seeder past editions with engagement and run it. If it is too slow, the options are a shorter window for W than for affinity, or learning the model at sync and storing it.
 - [ ] **Traits are not recomputed when full text is fetched later**, and a post is embedded once, from the text stored at the time. Code, links and images in the fetched page are missed until the trait rules' version is raised.
-- [ ] **Weekly and rare feeds gain little from keys.** Their decayed exposure levels off near 7 posts, so their keys never get past about a third of full strength. Only the text taste, which is pooled across feeds, can order their posts.
+- [ ] **Weekly and rare feeds gain little from keys.** Their decayed exposure levels off near 7 posts, so their keys never get past about a third of full strength. Only the text taste, which is pooled across feeds, can order their posts. (The affinity prior is now scaled to cadence; the keys' trust `E / (E + 12)` and key prior are not, because a key's few posts would then decide it on a single read.)
 - [ ] **The embedding model is English-only.** Other Latin-script languages are embedded but their vectors are mostly noise; non-Latin scripts are not embedded at all. A text that mixes scripts is judged by letter count, and one ideograph counts as one letter, so a Japanese post with many English names can pass.
 - [ ] **`media:content` audio and video are not treated as attachments.** Only `<enclosure>`, Atom enclosure links and JSON Feed attachments are, so some video and podcast feeds have no attachment key.
 - [ ] **Category names in reason lines are the lowercased keys** ("posts about space"), not the feed's spelling. The label is stored; the engine is only given the key.

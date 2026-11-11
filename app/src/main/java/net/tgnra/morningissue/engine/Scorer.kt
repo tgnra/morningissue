@@ -5,7 +5,6 @@ import java.time.Instant
 import kotlin.math.ln
 import kotlin.math.min
 import kotlin.math.pow
-import net.tgnra.morningissue.model.CadenceTier
 import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.model.SliderStep
 
@@ -59,7 +58,12 @@ data class Score(
  *
  * W is 1 unless a [withinFeedSource] is given, so a scorer built without one scores exactly
  * as before within-feed ranking. It applies whatever the slider says: it orders a feed's own
- * posts, and at most ×1.4 on a turned-down feed's small A does not bring that feed back.
+ * posts, and at most ×2 (×1.4 from a key alone) on a turned-down feed's small A does not
+ * bring that feed back.
+ *
+ * S is earned ([scarcity] with an affinity): the full bonus of a feed's cadence from neutral
+ * affinity up, shrinking below it and a drag below half of neutral, so that a slow feed the
+ * reader keeps leaving does not hold the front page on its rarity.
  */
 class Scorer(
     private val config: RankingConfig = RankingConfig.Default,
@@ -79,7 +83,7 @@ class Scorer(
             affinity = affinity,
             a = affinityWeight(affinity),
             f = freshness(ageHours, interval),
-            s = scarcity(interval),
+            s = scarcity(interval, affinity),
             p = seenPenalty(candidate.editionsRunUnopened, candidate.isRead),
             ageHours = ageHours,
             halfLifeHours = halfLifeHours(interval),
@@ -113,13 +117,7 @@ class Scorer(
     fun effectiveAffinity(learned: Double, slider: SliderStep): Double = affinityRules.effective(learned, slider)
 
     /** The feed's median interval, or its tier's typical one while cadence is unknown. */
-    fun intervalHours(feed: FeedProfile): Double =
-        feed.medianIntervalHours?.takeIf { it >= 0.0 && it.isFinite() } ?: when (feed.tier) {
-            CadenceTier.FIREHOSE -> config.firehoseTypicalIntervalHours
-            CadenceTier.DAILY -> config.dailyTypicalIntervalHours
-            CadenceTier.WEEKLY -> config.weeklyTypicalIntervalHours
-            CadenceTier.RARE -> config.rareTypicalIntervalHours
-        }
+    fun intervalHours(feed: FeedProfile): Double = Cadence.intervalHours(feed.medianIntervalHours, feed.tier, config)
 
     /** A = floor + range × affinity. */
     fun affinityWeight(affinity: Double): Double = config.affinityFloor + config.affinityRange * affinity
@@ -132,9 +130,31 @@ class Scorer(
     fun freshness(ageHours: Double, medianIntervalHours: Double): Double =
         0.5.pow(ageHours.coerceAtLeast(0.0) / halfLifeHours(medianIntervalHours))
 
-    /** S = min(cap, 1 + coefficient × log2(1 + medianInterval / 24 h)). */
+    /** S = min(cap, 1 + coefficient × log2(1 + medianInterval / 24 h)), for a feed at neutral affinity or above. */
     fun scarcity(medianIntervalHours: Double): Double =
         min(config.scarcityCap, 1.0 + config.scarcityCoefficient * log2(1.0 + medianIntervalHours / 24.0))
+
+    /**
+     * S as applied, earned by the reader's record:
+     *
+     * ```
+     * S = 1 + (S₀ − 1) × (2 × min(1, affinity / neutralAffinity) − 1)
+     * ```
+     *
+     * with `S₀` the scarcity of the feed's cadence above. Scarcity is a bet that a post the
+     * reader rarely gets is worth more to them. From neutral up the bet stands and the whole
+     * bonus is paid: a feed nobody knows anything about yet, and every feed the reader likes.
+     * Below neutral the record is against it and the bonus shrinks in proportion, to nothing
+     * at half of neutral, and below that turns into a drag of the same size, down to `2 − S₀`
+     * at affinity 0 (0.55 for a weekly feed). A slow feed whose posts the reader keeps
+     * leaving is then ranked below a fast one they leave as often, instead of above it, which
+     * is what its rarity and its long freshness had done. A firehose (`S₀` = 1) is unaffected.
+     */
+    fun scarcity(medianIntervalHours: Double, affinity: Double): Double {
+        val bonus = scarcity(medianIntervalHours) - 1.0
+        val earned = if (config.neutralAffinity > 0.0) (affinity / config.neutralAffinity).coerceIn(0.0, 1.0) else 1.0
+        return 1.0 + bonus * (2.0 * earned - 1.0)
+    }
 
     /** P = base ^ editions run unopened; 0 once the post has been read. */
     fun seenPenalty(editionsRunUnopened: Int, isRead: Boolean): Double =
@@ -171,7 +191,8 @@ class Scorer(
         val affinityPull = ((score.affinity - config.neutralAffinity) / (1.0 - config.neutralAffinity)).coerceIn(0.0, 1.0)
         val scarcityPull = ((score.s - 1.0) / (config.scarcityCap - 1.0)).coerceIn(0.0, 1.0)
         val lovedPull = (config.lovedAffinity - config.neutralAffinity) / (1.0 - config.neutralAffinity)
-        val withinPull = ((score.w - 1.0) / (config.withinFeedMaxWeight - 1.0)).coerceIn(0.0, 1.0)
+        // A key's cap is full pull; only a text taste trusted well can go past it.
+        val withinPull = ((score.w - 1.0) / (config.withinFeedKeyMaxWeight - 1.0)).coerceIn(0.0, 1.0)
         if (score.w >= config.withinFeedReasonMinWeight && withinPull > affinityPull && withinPull > scarcityPull) {
             withinFeedReason(feed, score.within.signal)?.let { return it }
         }
@@ -209,8 +230,10 @@ class Scorer(
                 "video" -> "You usually open video posts from ${feed.title}"
                 else -> "You usually open posts with attachments from ${feed.title}"
             }
-            WithinFeedSignalKind.LINK_POST -> "You usually read link posts from ${feed.title}"
-            WithinFeedSignalKind.CODE -> "You usually read posts with code from ${feed.title}"
+            WithinFeedSignalKind.LINK_POST ->
+                if (signal.label == WithinFeed.NOT) "You usually read ${feed.title}'s own pieces rather than its links" else "You usually read link posts from ${feed.title}"
+            WithinFeedSignalKind.CODE ->
+                if (signal.label == WithinFeed.NOT) "You usually read ${feed.title}'s posts without code" else "You usually read posts with code from ${feed.title}"
             WithinFeedSignalKind.TITLE_PREFIX -> "You usually read \"${signal.label}\" posts from ${feed.title}"
             WithinFeedSignalKind.TEXT -> null
         }

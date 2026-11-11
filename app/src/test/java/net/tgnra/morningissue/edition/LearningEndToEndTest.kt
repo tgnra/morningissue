@@ -128,8 +128,10 @@ class LearningEndToEndTest {
             repeat(10) { addPost(wire, seenAt, publishedAt = seenAt.minus(Duration.ofMinutes(3L * it))) }
 
             editions += publisher.ensureCurrentEdition()!!
+            // The reader turns through the whole paper ...
+            db.viewPages(editions.last(), clock.now)
 
-            // The reader opens, finishes and Likes the one feed's story and nothing else.
+            // ... and opens, finishes and Likes the one feed's story and nothing else.
             clock.now = clock.now.plus(Duration.ofHours(1))
             articles.markOpened(readPosts.last())
             articles.setReadFraction(readPosts.last(), 0.9f)
@@ -215,7 +217,8 @@ class LearningEndToEndTest {
             val seenAt = morningOf(day)
             if (day == 0) essay = addPost(essays, seenAt)
             dailies.forEach { addPost(it, seenAt) }
-            return publisher.ensureCurrentEdition()!!.also { editions += it }
+            // The reader turns through every page and opens nothing.
+            return publisher.ensureCurrentEdition()!!.also { editions += it; db.viewPages(it, seenAt) }
         }
 
         // New and loved: it leads. Unread the next day, it is held over and leads once more.
@@ -265,7 +268,7 @@ class LearningEndToEndTest {
         var seenAt = morningOf(0)
         val liked = mutableListOf(addPost(blog, seenAt), addPost(blog, seenAt))
         addPost(daily, seenAt)
-        publisher.ensureCurrentEdition()!!
+        db.viewPages(publisher.ensureCurrentEdition()!!, seenAt)
         liked.forEach { like(it) }
 
         seenAt = morningOf(1)
@@ -274,6 +277,7 @@ class LearningEndToEndTest {
         val unreadFromMeh = addPost(meh, seenAt)
         addPost(daily, seenAt)
         val second = publisher.ensureCurrentEdition()!!
+        db.viewPages(second, seenAt)
         like(liked.last())
         assertTrue(kindOf(second, unreadFromBlog) != ItemKind.INDEX)
         assertTrue(kindOf(second, unreadFromMeh) != ItemKind.INDEX)

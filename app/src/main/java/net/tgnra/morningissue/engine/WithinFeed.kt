@@ -2,7 +2,9 @@ package net.tgnra.morningissue.engine
 
 import java.time.Instant
 import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.math.sqrt
+import kotlin.math.tanh
 import net.tgnra.morningissue.model.EnclosureKind
 
 /**
@@ -33,6 +35,12 @@ class PostTraits(
     val linkCount: Int = 0,
     /** A recurring-series marker from the title, such as "links" or "podcast"; null for none. */
     val titlePrefix: String? = null,
+    /**
+     * [isLinkPost] and [hasCode] were computed under the current trait rules, so false means
+     * "is not" rather than "not known". Only then does the post carry the keys "not a link
+     * post" and "no code".
+     */
+    val traitsKnown: Boolean = false,
     /**
      * The text embedding, or null when it has not been computed yet. Any length; vectors whose
      * length differs from the first one seen in a learning pass are treated as missing. It need
@@ -109,8 +117,10 @@ fun interface WithinFeedSource {
  * **Unproven.** There is no engagement history to validate any of this against. Every rule
  * below was chosen to be simple, explainable in one reason line and hard to overfit, and every
  * constant is a guess to be tuned once labels can be exported and tested offline (`todo.md`).
- * W is capped to `withinFeedMinWeight..withinFeedMaxWeight` (0.7 to 1.4) so that a wrong guess
- * reorders a feed's posts without sinking or crowning them.
+ * A key is capped to `withinFeedKeyMinWeight..withinFeedKeyMaxWeight` (0.7 to 1.4) and W as a
+ * whole to `withinFeedMinWeight..withinFeedMaxWeight` (0.5 to 2.0) so that a wrong guess
+ * reorders a feed's posts without sinking or crowning them; only a text taste whose two halves
+ * agree on plenty of labels can go past a key's bounds (see Combining).
  *
  * **The label.** A post's evidence is turned into the same decayed [Tally] as for feed
  * affinity ([Affinity.tally]: `positive` in "posts read", `exposure` in "posts run", events
@@ -127,9 +137,9 @@ fun interface WithinFeedSource {
  *
  * **Keys.** Each post carries keys of six kinds: one per category, its length bucket (brief,
  * short, medium, long; `lengthBriefMaxWords` and the two after it), its enclosure when it has
- * one, "link post" and "has code" when true, and its title prefix when it has one. A missing
- * trait is no key, rather than a key of its own: a reason line can say "posts with code", not
- * "posts without". For each (feed, key):
+ * one, "link post" and "has code" either way once the post's traits are known (see Binary
+ * traits), and its title prefix when it has one. Any other missing trait is no key. For each
+ * (feed, key):
  *
  * ```
  * key rate = (n₀·r + Σ positive) / (n₀ + Σ exposure)     over the feed's posts carrying it
@@ -184,20 +194,47 @@ fun interface WithinFeedSource {
  *
  * **Shrinkage.** A feed's keys are trusted by `E / (E + withinFeedFeedPriorPosts)` with `E`
  * the feed's decayed exposure (half at a dozen posts, three quarters at three dozen), on top
- * of each key's own prior. The text lift is trusted by `n / (n + withinFeedTextPriorPosts)`
- * with `n` the decayed exposure of all posts with a vector (half at 200, about a week of
- * editions). The text lift does not wait for the candidate's own feed to have a record:
- * pooling is its point, and a feed with no labelled posts is still ordered by it. Both trusts
- * use decayed counts, so an old record fades instead of ruling for ever; the cost is that a
- * weekly feed, whose decayed exposure levels off near 7, never gets past about a third of
- * full strength from its keys.
+ * of each key's own prior. Both use decayed counts, so an old record fades instead of ruling
+ * for ever; the cost is that a weekly feed, whose decayed exposure levels off near 7, never
+ * gets past about a third of full strength from its keys.
  *
- * **Combining.** Each signal of a candidate has an effect `withinFeedGain × trust × lift`.
+ * The text lift is trusted by how much evidence there is and by how well the halves agree,
+ * smoothly, with no threshold anywhere:
  *
  * ```
+ * trust     = n / (n + withinFeedTextPriorPosts) × agreement(half 0) × agreement(half 1)
+ * agreement = t² / (t² + withinFeedTextConfidenceT²), or 0 when t ≤ 0
+ * t         = Σ z × residual / √Σ (z × residual)²      over the half's own posts
+ * ```
+ *
+ * with `n` the decayed exposure of all posts with a vector. `t` is the statistic of "this
+ * half's posts are not predicted by the other half's direction". A handful of labels, however
+ * unanimous, stay nearly neutral through the first factor (a perfect split of a dozen labels
+ * happens by chance); a random reader and halves that disagree stay near 0 through the
+ * second; hundreds of labels that agree reach most of full strength. The text lift does not
+ * wait for the candidate's own feed to have a record: pooling is its point, and a feed with
+ * no labelled posts is still ordered by it.
+ *
+ * **Binary traits.** Link post and code each give a key either way once the post's traits
+ * are known ([PostTraits.traitsKnown]): a link blog's own pieces carry "not a link post"
+ * ([NOT]). Without it the rare pieces were told apart only by a small lift down on the many
+ * link posts (a key on nine posts in ten sits close to the feed's own rate), and W hardly
+ * moved them.
+ *
+ * **Combining.** Each signal of a candidate has an effect:
+ *
+ * ```
+ * key  effect = clamp(withinFeedGain × trust × lift, ln withinFeedKeyMinWeight, ln withinFeedKeyMaxWeight)
+ * text effect = trust × L × tanh(withinFeedGain × text lift / L),   L = withinFeedTextMaxEffect
  * ln W = (largest positive effect, or 0) + (most negative effect, or 0)
  * W    = clamp(exp(ln W), withinFeedMinWeight, withinFeedMaxWeight)
  * ```
+ *
+ * A key alone stays within 0.7..1.4, as W always did. The text taste's reach grows with its
+ * trust: close to `trust × gain × lift` for a small lift, never past `trust × L` (`L = ln 2`),
+ * so a text taste with little data is nearly neutral and one whose halves fully agree can
+ * double or halve a post's score, enough to beat a day of freshness in a daily feed. W as a
+ * whole stays within 0.5..2.0.
  *
  * Only the strongest signal on each side counts. A post's keys are often the same fact told
  * twice (a "podcast" title prefix, an audio enclosure, a "podcast" category; a post about
@@ -349,19 +386,29 @@ class WithinFeed(private val config: RankingConfig = RankingConfig.Default) {
             deviation[k] = sqrt((second[k] / weight[k] - mean[k] * mean[k]).coerceAtLeast(0.0))
             if (!(deviation[k] > MIN_DEVIATION)) return null
         }
-        var covariance = 0.0
+        // Per half (the posts of that half against the other half's direction): Σ z × residual,
+        // and its spread under "no taste", Σ (z × residual)².
+        val covariance = DoubleArray(2)
+        val spread = DoubleArray(2)
         for (i in posts.indices) {
             if (norm[i] == 0.0) continue
-            val other = 1 - half[i]
-            covariance += (cosine[i] - mean[other]) / deviation[other] * residual[i]
+            val own = half[i].toInt()
+            val other = 1 - own
+            val term = (cosine[i] - mean[other]) / deviation[other] * residual[i]
+            covariance[own] += term
+            spread[own] += term * term
         }
+        // Believed as far as there are labels to believe (a t statistic on a handful of posts
+        // is itself noise) and as far as each half predicts the other.
+        var confidence = labelled / (labelled + config.withinFeedTextPriorPosts)
+        for (k in 0..1) confidence *= agreement(covariance[k], spread[k], config.withinFeedTextConfidenceT)
         return TextTaste(
             directions = directions,
             mean = mean,
             deviation = deviation,
-            slope = (covariance / labelled).coerceAtLeast(0.0),
+            slope = ((covariance[0] + covariance[1]) / labelled).coerceAtLeast(0.0),
             labelled = labelled,
-            trust = labelled / (labelled + config.withinFeedTextPriorPosts),
+            trust = confidence,
             fromLikes = fromLikes,
         )
     }
@@ -378,6 +425,17 @@ class WithinFeed(private val config: RankingConfig = RankingConfig.Default) {
         /** Below this a spread or a length is rounding error, not a measurement. */
         const val MIN_DEVIATION = 1e-9
 
+        /**
+         * How far one half's direction predicts the other half: `t² / (t² + t₀²)` for
+         * `t = Σ z·residual / √Σ (z·residual)²`, the statistic of "no taste" for that half,
+         * and 0 when it predicts the opposite. Half at `t = t₀`, near 1 well past it.
+         */
+        fun agreement(covariance: Double, spread: Double, t0: Double): Double {
+            if (!(covariance > 0.0) || !(spread > 0.0)) return 0.0
+            val t2 = covariance * covariance / spread
+            return if (t0 > 0.0) t2 / (t2 + t0 * t0) else 1.0
+        }
+
         /** Which half of the text model a post belongs to: one well-mixed bit of its ID. */
         fun halfOf(articleId: Long): Int = ((articleId * -0x61c8864680b583ebL) ushr 63).toInt()
 
@@ -386,6 +444,9 @@ class WithinFeed(private val config: RankingConfig = RankingConfig.Default) {
             for (j in a.indices) sum += a[j] * b[j].toDouble()
             return sum
         }
+
+        /** The value of the key for a binary trait the post does not have: "not a link post", "no code". */
+        const val NOT = "not"
 
         fun lengthBucket(config: RankingConfig, wordCount: Int): String? = when {
             wordCount < 0 -> null
@@ -402,8 +463,16 @@ class WithinFeed(private val config: RankingConfig = RankingConfig.Default) {
             if (traits.enclosure != EnclosureKind.NONE) {
                 block(TraitKey(WithinFeedSignalKind.ENCLOSURE, traits.enclosure.name.lowercase()))
             }
-            if (traits.isLinkPost) block(TraitKey(WithinFeedSignalKind.LINK_POST))
-            if (traits.hasCode) block(TraitKey(WithinFeedSignalKind.CODE))
+            if (traits.isLinkPost) {
+                block(TraitKey(WithinFeedSignalKind.LINK_POST))
+            } else if (traits.traitsKnown) {
+                block(TraitKey(WithinFeedSignalKind.LINK_POST, NOT))
+            }
+            if (traits.hasCode) {
+                block(TraitKey(WithinFeedSignalKind.CODE))
+            } else if (traits.traitsKnown) {
+                block(TraitKey(WithinFeedSignalKind.CODE, NOT))
+            }
             traits.titlePrefix?.let { block(TraitKey(WithinFeedSignalKind.TITLE_PREFIX, it)) }
         }
     }
@@ -432,7 +501,11 @@ class TextTaste internal constructor(
     val slope: Double,
     /** Decayed exposure of the posts with a vector. */
     val labelled: Double,
-    /** How far the slope is believed, 0..1. */
+    /**
+     * How far the slope is believed, 0..1: `n / (n + withinFeedTextPriorPosts)` times the two
+     * halves' agreement (see [WithinFeed]). It also scales the most the text taste may move a
+     * post.
+     */
     val trust: Double,
     /** A Liked post is among those that pulled the direction towards themselves. */
     val fromLikes: Boolean,
@@ -478,9 +551,11 @@ class WithinFeedModel internal constructor(
 
         val feed = feeds[traits.feedId]
         if (feed != null && feed.trust > 0.0) {
+            val keyUp = ln(config.withinFeedKeyMaxWeight)
+            val keyDown = ln(config.withinFeedKeyMinWeight)
             WithinFeed.forEachKey(config, traits) { key ->
                 val lift = feed.lifts[key] ?: return@forEachKey
-                val effect = config.withinFeedGain * feed.trust * lift
+                val effect = (config.withinFeedGain * feed.trust * lift).coerceIn(keyDown, keyUp)
                 // Ties keep the first key, in the fixed order of forEachKey.
                 if (effect > up) {
                     up = effect
@@ -491,10 +566,10 @@ class WithinFeedModel internal constructor(
                 }
             }
         }
-        if (text != null && text.slope > 0.0) {
+        if (text != null && text.slope > 0.0 && text.trust > 0.0) {
             val closeness = text.closeness(traits.embedding)
             if (closeness != null) {
-                val effect = config.withinFeedGain * text.trust * text.slope * closeness
+                val effect = textEffect(text.slope * closeness, text.trust)
                 if (effect > up) {
                     up = effect
                     upSignal = WithinFeedSignal(WithinFeedSignalKind.TEXT, "", effect, fromLikes = text.fromLikes)
@@ -511,6 +586,18 @@ class WithinFeedModel internal constructor(
             multiplier = exp(log).coerceIn(config.withinFeedMinWeight, config.withinFeedMaxWeight),
             signal = if (log > 0.0) upSignal else downSignal,
         )
+    }
+
+    /**
+     * The text taste's contribution to `ln W` for a text lift of [lift] believed [trust]:
+     * `trust × L × tanh(gain × lift / L)`, `L = withinFeedTextMaxEffect`. Close to
+     * `trust × gain × lift` for a small lift, and never past `trust × L` either way: the most
+     * the text taste can move a post grows with how far its two halves agree.
+     */
+    private fun textEffect(lift: Double, trust: Double): Double {
+        val limit = config.withinFeedTextMaxEffect
+        if (!(limit > 0.0)) return 0.0
+        return trust * limit * tanh(config.withinFeedGain * lift / limit)
     }
 
     /**

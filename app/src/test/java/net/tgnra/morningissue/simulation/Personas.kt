@@ -1,6 +1,7 @@
 package net.tgnra.morningissue.simulation
 
 import java.util.Random
+import net.tgnra.morningissue.model.EditionPage
 import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.simulation.SimulatedFeeds.ATP
 import net.tgnra.morningissue.simulation.SimulatedFeeds.BBC_NEWS
@@ -31,6 +32,9 @@ enum class Visit {
  * How likely the reader is to act on a post they see on a page: open it, and once opened
  * read it through, Like it, save it.
  */
+/** How long a page was on screen, and whether the reader turned past it without reading it. */
+class Glance(val millis: Long, val turnedPast: Boolean)
+
 data class Interest(val open: Double, val read: Double = 0.8, val like: Double = 0.0, val save: Double = 0.0) {
     companion object {
         val NONE = Interest(0.0)
@@ -64,6 +68,30 @@ abstract class Persona(val name: String) {
         ItemKind.INDEX -> 0.2
         else -> 1.0
     }
+
+    /**
+     * How long [page] stays on screen while the reader looks at it, opened stories apart.
+     * Every persona scans headlines alike: two seconds to take the page in, then two to four
+     * seconds a story (one to two a line in In brief and the index), so even a page it opens
+     * nothing on is up for well over five seconds. One page in ten after the front page is
+     * turned past instead, in one to four seconds, and nothing on it is read. The same three
+     * draws are made for every page.
+     */
+    open fun pageMillis(page: EditionPage, random: Random): Glance {
+        val turnPast = random.nextDouble() < TURN_PAST_RATE
+        val quick = 1_000L + random.nextInt(3_000)
+        val perStory = if (page is EditionPage.InBrief || page is EditionPage.Back) 1_000 + random.nextInt(1_000) else 2_000 + random.nextInt(2_000)
+        if (turnPast && page.number > 1) return Glance(quick, turnedPast = true)
+        return Glance(2_000L + perStory.toLong() * page.stories.size, turnedPast = false)
+    }
+
+    companion object {
+        const val TURN_PAST_RATE = 0.1
+
+        /** The page-time rule, for every persona's report. */
+        const val PAGE_RULE = "Each page looked at is on screen for 2 s plus 2-4 s a story (1-2 s a line in In brief and the index); " +
+            "one page in ten after the front page is turned past in 1-4 s and not read, so its stories are not seen."
+    }
 }
 
 /**
@@ -87,7 +115,7 @@ class Habits(
     }
 
     fun describe() = "Misses about 7% of days and every day of a holiday on days ${holiday.first}-${holiday.last}; " +
-        "about 12% of visits look at the front page only."
+        "about 12% of visits look at the front page only. ${Persona.PAGE_RULE}"
 }
 
 private val SCOTLAND = Regex("(?i)\\b(scotland|scottish|glasgow|edinburgh|aberdeen|dundee|highlands?|holyrood|swinney|snp|inverness|fife|motherwell|dalkeith|prestwick|burns)\\b")
@@ -236,6 +264,7 @@ class LapsedReader : Persona("lapsed-reader") {
     override val rules = listOf(
         "Opens the app after gaps of 4 to 13 days (and not at all on days 100-125), front page only on half the visits.",
         "On a visit: opens 10% of what it sees from any feed, reads half of those.",
+        PAGE_RULE,
     )
 
     override fun visit(day: Int, random: Random): Visit {

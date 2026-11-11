@@ -158,7 +158,13 @@ fun PaperScreen(
                 // While the menu is up, the page under it is not there for screen readers.
                 Box(if (menu != null) Modifier.fillMaxSize().clearAndSetSemantics { } else Modifier.fillMaxSize()) {
                     CompositionLocalProvider(LocalStoryActions provides storyActions) {
-                        Paper(edition, links, onFinished = { container.appScope.launch { container.editions.markEditionFinished(editionId) } })
+                        Paper(
+                            edition,
+                            links,
+                            onFinished = { container.appScope.launch { container.editions.markEditionFinished(editionId) } },
+                            // On the app's scope: the last page's time is written as the paper closes.
+                            onPageViewed = { page, millis -> container.appScope.launch { container.editions.recordPageView(editionId, page, millis) } },
+                        )
                     }
                 }
                 if (menu != null) {
@@ -192,7 +198,7 @@ fun PaperScreen(
 private class MenuFeed(val feed: Feed?)
 
 @Composable
-private fun Paper(edition: Edition, links: BackPageLinks, onFinished: () -> Unit) {
+private fun Paper(edition: Edition, links: BackPageLinks, onFinished: () -> Unit, onPageViewed: (page: Int, millis: Long) -> Unit) {
     val colors = MorningIssueTheme.colors
     val spec = LocalPaperLayoutSpec.current
     val turnStyle = rememberPageTurnStyle()
@@ -208,6 +214,9 @@ private fun Paper(edition: Edition, links: BackPageLinks, onFinished: () -> Unit
     LaunchedEffect(pagerState.settledPage, pages.size) {
         if (pagerState.settledPage == pages.lastIndex) onFinished()
     }
+    // How long each page is on screen: a story on a page the reader never stopped at is not
+    // counted as passed over (see PageViews.kt).
+    TrackPageViews(pagerState) { index, millis -> pages.getOrNull(index)?.let { onPageViewed(it.number, millis) } }
 
     val turnTo: (Int) -> Unit = { page -> scope.launch { pagerState.turnToPage(page, animate, turnAnimation) } }
     // "Onward": the rest of this page first, then the next page.

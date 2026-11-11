@@ -66,7 +66,10 @@ private val traceCookies = AtomicInteger()
  *
  * **Superseding.** A Morning or Evening build supersedes every pending edition (the newest
  * scheduled one and the Extras since): their untouched printed stories each count one more
- * unopened run, and count against their feeds in learning.
+ * unopened run, and count against their feeds in learning, provided the reader saw them: a
+ * story counts only when its page was on screen for `pageSeenMinMillis` in all
+ * (`edition_page_view`, recorded by the paper screen). Every edition the publisher builds
+ * records page views (`edition.pageViewsTracked`).
  *
  * **Held-over posts.** Untouched posts of loved Weekly and Rare feeds (`Affinity.holdsPostsOver`,
  * judged on the affinity learned for this build) from before the previous cutoff join the pool,
@@ -260,12 +263,13 @@ class RoomEditionPublisher(
         if (draft.printed.none { it.articleId in newIds && (reprintOf == null || it.feedId in extraFeedIds) }) return@withWriteTransaction null
 
         if (supersedes) {
-            // Each untouched story of a superseded edition counts one more run.
-            pending.forEach { engagementDao.countUnopenedRun(it.id) }
+            // Each untouched story of a superseded edition that the reader saw counts one more run.
+            pending.forEach { engagementDao.countUnopenedRun(it.id, config.pageSeenMinMillis) }
             learner.store(learned)
         }
 
-        val edition = reprintOf?.copy(cutoffAt = now, releaseAt = releaseAt, builtAt = now, length = length, finishedAt = null)
+        // A reprint's pages are new, and its old page views go with the old row (see below).
+        val edition = reprintOf?.copy(cutoffAt = now, releaseAt = releaseAt, builtAt = now, length = length, finishedAt = null, pageViewsTracked = true)
             ?: EditionEntity(
                 date = date,
                 kind = kind,
@@ -274,6 +278,7 @@ class RoomEditionPublisher(
                 builtAt = now,
                 length = length,
                 number = editionDao.maxNumber() + 1,
+                pageViewsTracked = true,
             )
         // A reprint takes the first printing's place: the old row and its items go, and the
         // new one is stored under the same ID.
@@ -296,7 +301,7 @@ class RoomEditionPublisher(
      * and those among [alreadyRun] (printed since, in an Extra edition), which are no longer
      * new but stay eligible like any other untouched post of such a feed. Their stored
      * unopened count does not include the [pending] editions yet (it is only written once
-     * this build is known to succeed), so it is added here.
+     * this build is known to succeed), so it is added here, for the runs the reader saw.
      */
     private suspend fun heldOver(
         feeds: List<FeedProfile>,
@@ -307,7 +312,7 @@ class RoomEditionPublisher(
         newIds: Set<Long>,
     ): List<Candidate> {
         val pendingRuns = HashMap<Long, Int>()
-        if (pending.isNotEmpty()) editionDao.printedRuns(pending.map { it.id }).forEach { pendingRuns.merge(it, 1, Int::plus) }
+        if (pending.isNotEmpty()) editionDao.seenRuns(pending.map { it.id }, config.pageSeenMinMillis).forEach { pendingRuns.merge(it, 1, Int::plus) }
         val recent = editionDao.getRecent(config.archiveCooldownEditions).map { it.id }
         val ranRecently = if (recent.isEmpty()) emptySet() else editionDao.printedArticleIds(recent).toSet()
         val untouchedRuns = alreadyRun

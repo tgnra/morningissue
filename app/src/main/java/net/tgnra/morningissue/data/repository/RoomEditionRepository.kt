@@ -51,6 +51,9 @@ class RoomEditionRepository(
 
     override suspend fun markEditionFinished(editionId: Long) = editionDao.markFinished(editionId, clock.instant())
 
+    override suspend fun recordPageView(editionId: Long, page: Int, millis: Long) =
+        editionDao.recordPageView(editionId, page, millis, clock.instant())
+
     private fun released(covers: List<EditionCoverRow>): List<EditionSummary> {
         val now = clock.instant()
         return covers.filter { it.edition.releaseAt <= now }.map { it.toSummary() }

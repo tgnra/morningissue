@@ -79,9 +79,11 @@ class ScorerWithinFeedTest {
         val high = scorerWith(lifted(WithinFeedSignalKind.CATEGORY, "space", w = 3.0)).score(feed(), post(), release)
         val low = scorerWith(WithinFeedWeight(0.1)).score(feed(), post(), release)
 
-        assertEquals(1.4, high.w, 0.0)
+        // withinFeedMinWeight and withinFeedMaxWeight: the bounds of W as a whole, keys and
+        // text taste together.
+        assertEquals(2.0, high.w, 0.0)
         assertEquals("space", high.within.signal!!.label)
-        assertEquals(0.7, low.w, 0.0)
+        assertEquals(0.5, low.w, 0.0)
     }
 
     @Test
@@ -104,6 +106,8 @@ class ScorerWithinFeedTest {
         assertEquals("You usually open video posts from Ars Technica", reason(lifted(WithinFeedSignalKind.ENCLOSURE, "video")))
         assertEquals("You usually open posts with attachments from Ars Technica", reason(lifted(WithinFeedSignalKind.ENCLOSURE, "other")))
         assertEquals("You usually read link posts from Ars Technica", reason(lifted(WithinFeedSignalKind.LINK_POST)))
+        assertEquals("You usually read Ars Technica's own pieces rather than its links", reason(lifted(WithinFeedSignalKind.LINK_POST, WithinFeed.NOT)))
+        assertEquals("You usually read Ars Technica's posts without code", reason(lifted(WithinFeedSignalKind.CODE, WithinFeed.NOT)))
         assertEquals("You usually read posts with code from Ars Technica", reason(lifted(WithinFeedSignalKind.CODE)))
         assertEquals("You usually read \"links\" posts from Ars Technica", reason(lifted(WithinFeedSignalKind.TITLE_PREFIX, "links")))
         assertEquals("Similar to posts you have Liked", reason(lifted(WithinFeedSignalKind.TEXT, rate = null, fromLikes = true)))

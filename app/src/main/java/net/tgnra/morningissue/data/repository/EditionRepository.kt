@@ -51,4 +51,11 @@ interface EditionRepository {
 
     /** Records that the reader reached the back page; the cover then shows as read. */
     suspend fun markEditionFinished(editionId: Long)
+
+    /**
+     * Adds [millis] to the time page [page] (1-based) of the edition has been on screen. A
+     * printed story only counts as passed over once its page has been on screen for
+     * `RankingConfig.pageSeenMinMillis` in all; see `EditionDao.SEEN`.
+     */
+    suspend fun recordPageView(editionId: Long, page: Int, millis: Long) {}
 }

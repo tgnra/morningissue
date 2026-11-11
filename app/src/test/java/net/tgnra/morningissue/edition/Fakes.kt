@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
+import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.repository.EditionRepository
 import net.tgnra.morningissue.data.settings.SettingsRepository
 import net.tgnra.morningissue.model.AppSettings
@@ -25,11 +26,22 @@ import net.tgnra.morningissue.model.IndexGroup
 import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.model.ReleaseChange
 import net.tgnra.morningissue.model.ThemeMode
+import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.sync.FeedSyncer
 import net.tgnra.morningissue.sync.FullTextFetcher
 import net.tgnra.morningissue.sync.FullTextResult
 import net.tgnra.morningissue.sync.SyncReport
 import net.tgnra.morningissue.sync.SyncStatus
+
+/**
+ * The reader turns through [editionId], leaving each page on screen long enough to count as
+ * seen (`pageSeenMinMillis`), except the pages in [skipping]. Learning only counts a story
+ * that ran unopened when its page was seen.
+ */
+internal suspend fun MorningIssueDatabase.viewPages(editionId: Long, at: Instant, skipping: Set<Int> = emptySet()) {
+    editionDao().getItems(editionId).map { it.item.page }.distinct().filter { it !in skipping }
+        .forEach { editionDao().recordPageView(editionId, it, RankingConfig.Default.pageSeenMinMillis, at) }
+}
 
 internal class MutableClock(var now: Instant, private val zone: ZoneId = ZoneOffset.UTC) : Clock() {
     override fun instant(): Instant = now

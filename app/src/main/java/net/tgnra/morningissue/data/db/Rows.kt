@@ -69,6 +69,11 @@ data class EditionRunRow(
     val readAt: Instant?,
     val savedAt: Instant?,
     val likedAt: Instant?,
+    /**
+     * The run counts as exposure: the story's page was on screen for at least
+     * `pageSeenMinMillis` in all, or the edition predates page views (`pageViewsTracked`).
+     */
+    val seen: Boolean = true,
 )
 
 /** An article the reader engaged with, whether or not it was printed; input to affinity. */

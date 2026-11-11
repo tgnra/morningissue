@@ -10,6 +10,8 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
+import java.time.Instant
+import java.time.LocalDate
 import kotlinx.coroutines.runBlocking
 import net.tgnra.morningissue.data.signals.EmbeddingBackfill
 import net.tgnra.morningissue.data.signals.SignalsUpkeep
@@ -21,7 +23,10 @@ import net.tgnra.morningissue.model.ArticleTraits
 import net.tgnra.morningissue.model.ContentBlock
 import net.tgnra.morningissue.model.ContentBlocks
 import net.tgnra.morningissue.model.ContentSource
+import net.tgnra.morningissue.model.EditionKind
+import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.EnclosureKind
+import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.model.InlineSpan
 import net.tgnra.morningissue.model.InlineStyle
 import net.tgnra.morningissue.model.RichText
@@ -292,12 +297,92 @@ class MigrationTest {
         }
     }
 
+    /** What version 4 must hold after an upgrade: every edition from before it untracked, the page-view table empty and usable. */
+    private fun assertVersion4(db: SQLiteConnection) {
+        assertVersion3(db)
+        assertEquals(1L, db.long("SELECT COUNT(*) FROM edition WHERE pageViewsTracked = 0"))
+        assertEquals(0L, db.long("SELECT COUNT(*) FROM edition_page_view"))
+        // An edition stored after the upgrade without the flag is untracked, as the column's default says.
+        db.execSQL("INSERT INTO edition (id, date, kind, cutoffAt, releaseAt, builtAt, length, number) VALUES (2, 20768, 'MORNING', 2000, 2000, 1990, 'STANDARD', 2)")
+        assertEquals(0L, db.long("SELECT pageViewsTracked FROM edition WHERE id = 2"))
+        db.execSQL("INSERT INTO edition_page_view (editionId, page, msVisible, firstSeenAt) VALUES (1, 1, 6000, 2100)")
+        assertEquals(6000L, db.long("SELECT msVisible FROM edition_page_view WHERE editionId = 1 AND page = 1"))
+        // Page views go with their edition.
+        db.execSQL("PRAGMA foreign_keys = ON")
+        db.execSQL("DELETE FROM edition WHERE id = 1")
+        assertEquals(0L, db.long("SELECT COUNT(*) FROM edition_page_view"))
+    }
+
+    @Test
+    fun version3To4AddsPageViewsAndLeavesEveryOldEditionUntracked() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(3, listOf(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3)).close()
+        // Validated against 4.json.
+        helper.runMigrationsAndValidate(4, listOf(Migrations.MIGRATION_3_4)).use(::assertVersion4)
+    }
+
+    @Test
+    fun version1To4RunsEveryStep() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(4, listOf(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3, Migrations.MIGRATION_3_4)).use { db ->
+            assertVersion4(db)
+            assertEquals(0L, db.long("SELECT COUNT(*) FROM feed WHERE etag IS NOT NULL"))
+        }
+    }
+
+    @Test
+    fun runsFromBeforeTheUpgradeStillCountAsSeenAndNewOnesNeedTheirPageOnScreen() = runBlocking<Unit> {
+        helper.createDatabase(1).use { v1 ->
+            seedVersion1(v1)
+            // An untouched story on the old edition's second page, which the reader may never have turned to.
+            v1.execSQL("INSERT INTO edition_item (editionId, articleId, page, slot, kind, score, reason) VALUES (1, 2, 2, 0, 'TOP', 1.0, NULL)")
+        }
+        helper.runMigrationsAndValidate(3, listOf(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3)).close()
+        val db = Room.databaseBuilder<MorningIssueDatabase>(context, file.absolutePath)
+            .setDriver(AndroidSQLiteDriver())
+            .addMigrations(*Migrations.ALL)
+            .build()
+        helper.closeWhenFinished(db)
+        val editions = db.editionDao()
+
+        // Before the upgrade nothing recorded pages: every run counts, as it always did.
+        val before = editions.getRunsSince(Instant.EPOCH)
+        assertEquals(2, before.size)
+        assertTrue(before.all { it.seen })
+
+        // An edition built after it: the front page was up for six seconds in all, page 2 for two.
+        val at = Instant.ofEpochMilli(5_000)
+        val id = editions.insertEditionWithItems(
+            EditionEntity(
+                date = LocalDate.ofEpochDay(20768), kind = EditionKind.MORNING, cutoffAt = at, releaseAt = at, builtAt = at,
+                length = EditionLength.STANDARD, number = 2, pageViewsTracked = true,
+            ),
+            listOf(
+                EditionItemEntity(0, 3, page = 1, slot = 0, kind = ItemKind.LEAD, score = 1.0),
+                EditionItemEntity(0, 2, page = 2, slot = 0, kind = ItemKind.TOP, score = 1.0),
+            ),
+        )
+        editions.recordPageView(id, 1, 4_000, at)
+        editions.recordPageView(id, 1, 2_000, at.plusSeconds(60))
+        editions.recordPageView(id, 2, 2_000, at)
+        assertEquals(listOf(6_000L, 2_000L), editions.getPageViews(id).map { it.msVisible })
+        assertEquals(at, editions.getPageViews(id).first().firstSeenAt)
+        val runs = editions.getRunsSince(Instant.EPOCH).filter { it.editionId == id }.associate { it.articleId to it.seen }
+        assertEquals(mapOf(3L to true, 2L to false), runs)
+        assertEquals(listOf(3L), editions.seenRuns(listOf(id), 5_000))
+
+        // Only the story the reader saw is passed over.
+        db.engagementDao().countUnopenedRun(id)
+        assertEquals(1, db.engagementDao().get(3)!!.editionsRunUnopened)
+        assertEquals(0, db.engagementDao().get(2)!!.editionsRunUnopened)
+    }
+
     @Test
     fun aFreshInstallIsCreatedAtTheCurrentVersion() = runBlocking<Unit> {
-        // Version 3 built directly must be what the migrations arrive at; validation compares both with 3.json.
-        helper.createDatabase(3).use { db ->
-            assertEquals(0L, db.long("SELECT COUNT(*) FROM discovery_verdict"))
+        // Version 4 built directly must be what the migrations arrive at; validation compares both with 4.json.
+        helper.createDatabase(4).use { db ->
+            assertEquals(0L, db.long("SELECT COUNT(*) FROM edition_page_view"))
         }
-        helper.runMigrationsAndValidate(3, emptyList()).close()
+        helper.runMigrationsAndValidate(4, emptyList()).close()
     }
 }

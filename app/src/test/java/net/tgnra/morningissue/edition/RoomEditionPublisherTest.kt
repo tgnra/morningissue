@@ -498,6 +498,10 @@ class RoomEditionPublisherTest {
         // Nothing is counted while the edition is still the current one.
         assertEquals(0, db.engagementDao().get(lead.articleId)?.editionsRunUnopened)
         db.engagementDao().markOpened(opened.articleId, morning.plus(Duration.ofHours(1)))
+        // The reader turns through every page but the last, which they never reach.
+        val unseenPage = printed.maxOf { it.page }
+        assertTrue(unseenPage > lead.page)
+        db.viewPages(first, morning.plus(Duration.ofHours(1)), skipping = setOf(unseenPage))
 
         clock.now = Instant.parse("2026-11-11T07:00:00Z")
         addSlowPosts(3, seenAt = minutesBefore(clock.now, 30), prefix = "Next")
@@ -507,7 +511,9 @@ class RoomEditionPublisherTest {
         assertEquals(0, db.engagementDao().get(opened.articleId)?.editionsRunUnopened)
         assertNull(db.engagementDao().get(indexed.articleId))
         printed.filter { it.articleId != opened.articleId }.forEach {
-            assertEquals(1, db.engagementDao().get(it.articleId)?.editionsRunUnopened)
+            // A story on the page the reader never saw has not been passed over.
+            val expected = if (it.page == unseenPage) 0 else 1
+            assertEquals(expected, db.engagementDao().get(it.articleId)?.editionsRunUnopened ?: 0)
         }
         // The new edition's own stories have not run unopened yet.
         val secondLead = db.editionDao().getItems(second).single { it.item.kind == ItemKind.LEAD }

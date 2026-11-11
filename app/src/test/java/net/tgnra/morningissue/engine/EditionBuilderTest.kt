@@ -5,6 +5,7 @@ import java.time.Instant
 import net.tgnra.morningissue.model.CadenceTier
 import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.ItemKind
+import net.tgnra.morningissue.model.SliderStep
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -148,7 +149,11 @@ class EditionBuilderTest {
         assertEquals(1, briefs.map { it.page }.distinct().size)
         assertEquals(5, briefs.first().page)
         assertEquals((0 until 15).toList(), briefs.map { it.slot })
-        assertEquals(briefs.map { it.score }.sortedDescending(), briefs.map { it.score })
+        // Each feed's briefs run best first; between feeds the same-feed penalty decides.
+        for (feed in listOf(wire, newsletter)) {
+            val own = briefs.filter { it.feedId == feed.id }.map { it.score }
+            assertEquals(own.sortedDescending(), own)
+        }
         // The slow feeds' leftovers are listed, not briefed, even though they score higher.
         val slowLeftovers = draft.index.filter { it.feedId < 100 }
         assertEquals(50 - 21 - 6, slowLeftovers.size)
@@ -328,6 +333,42 @@ class EditionBuilderTest {
         assertTrue(page2.count { it.feedId == wire.id } < 8)
         assertTrue(page2.any { it.feedId != wire.id })
         assertEquals(wire.id, page2.first().feedId)
+    }
+
+    @Test
+    fun aBusyFeedSharesInBriefWithTheOtherFeeds() {
+        // A Favourite wire: forty posts, each of them scoring above every other feed's post.
+        // Enough slow posts fill the mixed pages and General, leaving In brief to the fast feeds.
+        val (slow, slowPosts) = slowFeeds(count = 27, postsEach = 1)
+        val wire = firehose(100).copy(sliderStep = SliderStep.FAVOURITE)
+        val dailies = (101..105L).map { daily(it) }
+        val wirePosts = (0 until 40).map { post(wire, ageHours = 20.0 + it * 0.05) }
+        val dailyPosts = dailies.flatMap { feed -> (0 until 2).map { post(feed, ageHours = 62.0 + (feed.id - 101) + it * 0.5) } }
+
+        val draft = build(slowPosts + wirePosts + dailyPosts, slow + wire + dailies)
+        val briefs = draft.items.filter { it.kind == ItemKind.BRIEF }.sortedBy { it.slot }
+        val wireIds = wirePosts.map { it.articleId }.toSet()
+
+        assertEquals(15, briefs.size)
+        assertTrue(dailyPosts.all { post -> draft.items.single { it.articleId == post.articleId }.score < wirePosts.minOf { p -> draft.items.single { it.articleId == p.articleId }.score } })
+        // The wire opens In brief and keeps a share of it; every daily feed gets a line too.
+        assertEquals(wire.id, briefs.first().feedId)
+        assertTrue(briefs.count { it.articleId in wireIds } < 10)
+        assertTrue(dailies.all { feed -> briefs.any { it.feedId == feed.id } })
+        // Without the penalty the wire would have every line.
+        val unpenalised = EditionBuilder(RankingConfig(sameFeedPagePenalty = 1.0)).build(slowPosts + wirePosts + dailyPosts, slow + wire + dailies, EditionLength.STANDARD, release)
+        assertTrue(unpenalised.items.filter { it.kind == ItemKind.BRIEF }.all { it.articleId in wireIds })
+    }
+
+    @Test
+    fun aSingleFeedStillFillsInBrief() {
+        val wire = firehose(1)
+        val posts = (0 until 60).map { post(wire, ageHours = it * 0.1) }
+
+        val briefs = build(posts, listOf(wire)).items.filter { it.kind == ItemKind.BRIEF }.sortedBy { it.slot }
+
+        assertEquals(15, briefs.size)
+        assertEquals(briefs.map { it.score }.sortedDescending(), briefs.map { it.score })
     }
 
     @Test

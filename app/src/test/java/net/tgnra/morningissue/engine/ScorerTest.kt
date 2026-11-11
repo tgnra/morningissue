@@ -48,7 +48,9 @@ class ScorerTest {
         )
         val table = listOf(
             Row("Favourite weekly blog", 0.9, 7 * 24.0, 7 * 24.0, 0.93, 0.62, 1.45, 0.83),
-            Row("Daily newsletter, so-so", 0.3, 6.0, 24.0, 0.51, 0.89, 1.15, 0.52),
+            // v1 gave every daily feed S = 1.15; scarcity now only lifts a feed the reader has
+            // not turned away from, and affinity 0.3 keeps a fifth of the bonus.
+            Row("Daily newsletter, so-so", 0.3, 6.0, 24.0, 0.51, 0.89, 1.03, 0.47),
             Row("News site (firehose), neutral, 3 h", 0.5, 3.0, 0.5, 0.65, 0.59, 1.00, 0.39),
             Row("Daily newsletter, neutral", 0.5, 3 * 24.0, 24.0, 0.65, 0.25, 1.15, 0.19),
             Row("News site (firehose), neutral, 12 h", 0.5, 12.0, 0.5, 0.65, 0.13, 1.00, 0.08),
@@ -78,6 +80,31 @@ class ScorerTest {
         assertPrinted(1.45, v2.scarcity(7 * 24.0))
         assertPrinted(1.74, v2.scarcity(30 * 24.0))
         assertEquals(1.8, v2.scarcity(10_000 * 24.0), 0.0)
+    }
+
+    @Test
+    fun scarcityOnlyLiftsAFeedTheReaderHasNotTurnedAwayFrom() {
+        val weekly = 7 * 24.0
+        // From neutral up the bonus is paid in full.
+        assertEquals(v2.scarcity(weekly), v2.scarcity(weekly, 0.5), 0.0)
+        assertEquals(v2.scarcity(weekly), v2.scarcity(weekly, 0.95), 0.0)
+        // Below it the bonus shrinks in proportion, is gone at half of neutral and turns into a
+        // drag of the same size towards 0.
+        val bonus = v2.scarcity(weekly) - 1.0
+        assertEquals(1.0 + bonus / 2.0, v2.scarcity(weekly, 0.375), 1e-12)
+        assertEquals(1.0, v2.scarcity(weekly, 0.25), 1e-12)
+        assertEquals(1.0 - bonus, v2.scarcity(weekly, 0.0), 1e-12)
+        assertPrinted(0.55, v2.scarcity(weekly, 0.0))
+        // A firehose has nothing to gain or lose.
+        assertEquals(1.0, v2.scarcity(0.5, 0.0), 0.01)
+
+        // The score uses the affinity after the slider: a weekly podcast the reader never opens
+        // scores below a daily feed they ignore as much; turned up to More it keeps its lift.
+        val podcast = feed(medianHours = weekly, tier = CadenceTier.WEEKLY, affinity = 0.05)
+        val fresh = post(ageHours = 1.0)
+        assertEquals(v2.scarcity(weekly, 0.05), v2.score(podcast, fresh, release).s, 1e-12)
+        assertTrue(v2.score(podcast, fresh, release).value < v2.score(feed(affinity = 0.05), fresh, release).value)
+        assertEquals(v2.scarcity(weekly), v2.score(podcast.copy(sliderStep = SliderStep.MORE), fresh, release).s, 1e-12)
     }
 
     @Test

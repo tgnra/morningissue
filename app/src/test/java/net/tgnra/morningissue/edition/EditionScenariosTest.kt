@@ -247,6 +247,8 @@ class EditionScenariosTest {
         assertEquals(morning, publisher.ensureCurrentEdition())
         assertEquals(1, db.editionDao().count())
 
+        // The reader turned through the morning paper.
+        db.viewPages(morning, at(10, "08:00"))
         clock.now = at(10, "18:30")
         val evening = publisher.ensureCurrentEdition()!!
         val eveningEdition = db.editionDao().getById(evening)!!
@@ -276,6 +278,7 @@ class EditionScenariosTest {
         // Later that night.
         val night = (0 until 3).map { addPost(wire, at(10, "22:00")) } + addPosts(1, at(10, "22:00"), "Night")
 
+        db.viewPages(evening, at(10, "19:00"))
         clock.now = at(11, "07:00")
         val next = publisher.ensureCurrentEdition()!!
         val nextEdition = db.editionDao().getById(next)!!
@@ -557,6 +560,9 @@ class EditionScenariosTest {
         assertEquals(extraPrinted, printedIn(extra))
 
         // Tomorrow morning: what the Extra printed is not new again; what it only listed is.
+        // The reader turned through both papers.
+        db.viewPages(morning, at(10, "10:30"))
+        db.viewPages(extra, at(10, "10:30"))
         clock.now = at(11, "07:00")
         val next = publisher.ensureCurrentEdition()!!
         assertEquals(EditionKind.MORNING, db.editionDao().getById(next)!!.kind)
@@ -653,6 +659,8 @@ class EditionScenariosTest {
         // Tomorrow morning supersedes it once: untouched stories of the reprint count one run,
         // and the story the reprint dropped counts none.
         addPost(added, at(11, "06:00"))
+        // The reader turned through the reprint (the first printing's views went with it).
+        db.viewPages(extra, at(10, "12:30"))
         clock.now = at(11, "07:00")
         val next = publisher.ensureCurrentEdition()!!
         assertEquals(3, db.editionDao().getById(next)!!.number)
@@ -686,6 +694,8 @@ class EditionScenariosTest {
         assertTrue(wirePosts.containsAll(dropped))
 
         addPost(wire, at(11, "06:00"))
+        // The reader turned through the reprint, so its stories count as seen.
+        db.viewPages(extra, at(10, "12:30"))
         clock.now = at(11, "07:00")
         publisher.ensureCurrentEdition()!!
         dropped.forEach { assertEquals(0, runs(it)) }

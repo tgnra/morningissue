@@ -25,8 +25,9 @@ import androidx.room3.ColumnTypeConverters
         StoredImageEntity::class,
         DiscoveryVerdictEntity::class,
         DiscoveryCandidateEntity::class,
+        EditionPageViewEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @ColumnTypeConverters(Converters::class)
