@@ -1,0 +1,11 @@
+# Morning Issue, for NickelMenu v0.6.0. Installed as /mnt/onboard/.adds/nm/morningissue.
+# Labels must not contain a colon (NickelMenu reads it as a field separator); build.sh checks.
+#
+# 1. Check this Kobo can run the reader (it leaves Nickel alone if not).
+# 2. Ask Nickel to bring Wi-Fi up, so the sync can reach the phone.
+# 3. Spawn the launcher: sync, stop Nickel, read, restart Nickel.
+menu_item:main:Morning Issue:cmd_output:5000:quiet:/mnt/onboard/.adds/morningissue/morningissue check
+  chain_success:nickel_wifi:autoconnect
+  chain_success:dbg_toast:Morning Issue - syncing with your phone
+  chain_success:cmd_spawn:quiet:exec /bin/sh /mnt/onboard/.adds/morningissue/launch.sh
+  chain_failure:dbg_toast:Morning Issue does not support this Kobo yet

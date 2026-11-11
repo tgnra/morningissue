@@ -1,0 +1,34 @@
+{
+ "v": 1,
+ "dbId": "3f0c9b1e-0d4c-4a8e-9a57-6b1d2c3e4f50",
+ "ackedSeq": 0,
+ "editions": [
+  {
+   "id": 120,
+   "date": "2026-11-11",
+   "kind": "MORNING",
+   "number": 120,
+   "releaseAt": "2026-11-11T06:30:00Z",
+   "version": "b3c1f0"
+  },
+  {
+   "id": 119,
+   "date": "2026-11-10",
+   "kind": "MORNING",
+   "number": 119,
+   "releaseAt": "2026-11-10T06:30:00Z",
+   "version": "a9d2e4"
+  },
+  {
+   "id": 118,
+   "date": "2026-11-09",
+   "kind": "EVENING",
+   "number": 118,
+   "releaseAt": "2026-11-09T18:00:00Z",
+   "version": "771c02"
+  }
+ ],
+ "unknown": {
+  "x": 1
+ }
+}

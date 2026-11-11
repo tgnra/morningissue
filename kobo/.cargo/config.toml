@@ -1,0 +1,5 @@
+# The Kobo build links with the lld that ships with Rust and musl's self-contained CRT and libc,
+# so no C cross-compiler is needed.
+[target.armv7-unknown-linux-musleabihf]
+linker = "rust-lld"
+rustflags = ["-C", "link-self-contained=yes", "-C", "target-feature=+crt-static"]

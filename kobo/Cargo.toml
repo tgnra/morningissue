@@ -1,0 +1,36 @@
+[package]
+name = "morningissue"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Morning Issue reader for Kobo e-readers"
+
+[[bin]]
+name = "morningissue"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+swash = "0.2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+sha2 = "0.10"
+libc = "0.2"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Font rasterising and image decoding are slow unoptimised; keep tests quick.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.test.package."*"]
+opt-level = 2
+
+# The reader's own drawing loops too, so the screenshot tests run in seconds.
+[profile.test]
+opt-level = 1
