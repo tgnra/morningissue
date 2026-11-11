@@ -453,6 +453,8 @@ Images are not in the database; they are in Coil's disk cache.
 
 The budget (`data/storage/StorageRepository.kt`) governs stored article text: the bodies in `article_content` plus their copy in the search index, measured in characters. Images are not counted; Coil's disk cache keeps to its own fixed cap. The budget is the answer to "how long are back issues kept?": there is no fixed period.
 
+The budget is stored in megabytes and runs from 50 MB to 16 GB (16,000 MB). It is turned into bytes as a 64-bit number in one place (`RoomStorageRepository`), because anything from 2,048 MB up does not fit a 32-bit one.
+
 After every full sync, if the text is over budget it is trimmed down to 90% of the budget:
 
 - The oldest editions' posts go first (by first-seen time, which is what assigns a post to an edition).
@@ -544,7 +546,7 @@ A month calendar of every released edition, read ones ticked, with the month's e
 
 Reset time, edition length (Short, Standard, Long), the Evening edition (Off or On, with its release time when on), theme (System, Light, Dark) and display mode (Auto, Standard, E-ink).
 
-- **Storage**: the budget for stored article text, moved one step at a time (50, 100, 250, 500 MB, 1, 2, 4 GB) with Less and More, a bar and "Using 132 MB of 500 MB" beneath. Over budget it says so and offers "Trim now".
+- **Storage**: the budget for stored article text, moved one step at a time (50, 100, 250, 500 MB, 1, 2, 4, 8, 16 GB) with Less and More, a bar and "Using 132 MB of 500 MB" beneath. Over budget it says so and offers "Trim now".
 - **Archive**: Export, Export and free up space, and Import, through the system file picker (no storage permission). The job runs in the app's scope, so it carries on if the screen is left; progress and the result ("Imported 1,240 posts, skipped 310.") show under the buttons.
 
 Debug builds add buttons that load or clear invented sample data.

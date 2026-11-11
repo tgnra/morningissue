@@ -24,6 +24,8 @@ data class AppSettings(
         val DEFAULT_EVENING_TIME: LocalTime = LocalTime.of(18, 0)
         const val DEFAULT_STORAGE_BUDGET_MB = 500
         const val MIN_STORAGE_BUDGET_MB = 50
-        const val MAX_STORAGE_BUDGET_MB = 4000
+
+        /** 16 GB. In bytes this is far past `Int.MAX_VALUE`: multiply as a `Long`. */
+        const val MAX_STORAGE_BUDGET_MB = 16000
     }
 }

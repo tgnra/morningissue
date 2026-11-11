@@ -93,6 +93,7 @@ class RoomStorageRepository(
     }
 
     private companion object {
+        /** A `Long` on purpose: budgets go up to 16,000 MB, and an `Int` product overflows from 2,048 MB. */
         const val BYTES_PER_MB = 1024L * 1024L
         const val BATCH = 200
     }

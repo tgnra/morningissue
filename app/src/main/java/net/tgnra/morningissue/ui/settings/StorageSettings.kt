@@ -51,8 +51,13 @@ import net.tgnra.morningissue.ui.theme.MorningIssueTheme
 
 /** The storage budget's steps and how sizes are written. */
 object StorageBudget {
-    /** The budgets on offer, in megabytes. Discrete, so the control is a stepper, not a drag. */
-    val STEPS = listOf(50, 100, 250, 500, 1000, 2000, 4000)
+    /**
+     * The budgets on offer, in megabytes. Discrete, so the control is a stepper, not a drag.
+     *
+     * The top steps are past what an `Int` holds in bytes (2,047 MB), so a budget is only ever
+     * turned into bytes as a `Long` (`StorageRepository`); nothing here multiplies megabytes.
+     */
+    val STEPS = listOf(50, 100, 250, 500, 1000, 2000, 4000, 8000, 16000)
 
     /** The step a stored budget sits on: the nearest one. */
     fun stepIndex(megabytes: Int): Int = STEPS.indices.minBy { kotlin.math.abs(STEPS[it] - megabytes) }

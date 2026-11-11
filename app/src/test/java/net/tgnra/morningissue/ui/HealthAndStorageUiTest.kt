@@ -131,7 +131,11 @@ class HealthAndStorageUiTest {
         assertEquals(250, StorageBudget.lower(500))
         assertEquals(1000, StorageBudget.higher(500))
         assertNull(StorageBudget.lower(50))
-        assertNull(StorageBudget.higher(4000))
+        assertEquals(8000, StorageBudget.higher(4000))
+        assertEquals(16000, StorageBudget.higher(8000))
+        assertEquals(8000, StorageBudget.lower(16000))
+        assertNull("16 GB is the top step", StorageBudget.higher(16000))
+        assertEquals(listOf(50, 100, 250, 500, 1000, 2000, 4000, 8000, 16000), StorageBudget.STEPS)
         // A stored value between steps (set some other way) sits on the nearest.
         assertEquals(500, StorageBudget.higher(300))
         assertEquals(100, StorageBudget.lower(300))
@@ -139,6 +143,9 @@ class HealthAndStorageUiTest {
         assertEquals("50 MB", StorageBudget.label(50))
         assertEquals("1 GB", StorageBudget.label(1000))
         assertEquals("4 GB", StorageBudget.label(4000))
+        assertEquals("8 GB", StorageBudget.label(8000))
+        assertEquals("16 GB", StorageBudget.label(16000))
+        assertEquals(StorageBudget.STEPS.size, StorageBudget.STEPS.map(StorageBudget::label).toSet().size)
     }
 
     @Test
@@ -147,6 +154,11 @@ class HealthAndStorageUiTest {
         assertEquals("under 1 MB", StorageBudget.size(300_000, "under 1 MB", Locale.UK))
         assertEquals("132 MB", StorageBudget.size(132 * mb, "under 1 MB", Locale.UK))
         assertEquals("1.4 GB", StorageBudget.size(1400 * mb, "under 1 MB", Locale.UK))
+        // Sizes past 2 GB, where a byte count no longer fits an Int.
+        assertEquals("12.3 GB", StorageBudget.size(12_300 * mb, "under 1 MB", Locale.UK))
+        assertEquals("16.0 GB", StorageBudget.size(16_000 * mb, "under 1 MB", Locale.UK))
+        assertEquals(0.5f, StorageBudget.fraction(StorageUsage(8_000 * mb, 16_000 * mb)))
+        assertFalse(StorageUsage(3_000 * mb, 16_000 * mb).overBudget)
         assertEquals(0.25f, StorageBudget.fraction(StorageUsage(125 * mb, 500 * mb)))
         assertEquals("over budget is a full bar", 1f, StorageBudget.fraction(StorageUsage(900 * mb, 500 * mb)))
         assertTrue(StorageUsage(900 * mb, 500 * mb).overBudget)

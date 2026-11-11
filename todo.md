@@ -70,7 +70,7 @@ Built; see "Feed health" in `docs/how-it-works.md` for the rules as implemented.
 
 Built; see "Storage budget" in `docs/how-it-works.md`. Not yet seen on a device.
 
-- [x] A storage budget control in Settings (discrete steps, 50 MB to 4 GB) showing current usage.
+- [x] A storage budget control in Settings (discrete steps, 50 MB to 16 GB) showing current usage.
 - [x] When the budget fills, the stored text of the oldest editions' articles is trimmed first, after a sync. Liked and saved posts are never trimmed; headlines, summaries and edition rows stay.
 - The budget counts stored text only. Cached images are in Coil's disk cache, which has its own fixed cap and is not managed by the budget.
 - Content stays uncompressed (see Out of scope).
