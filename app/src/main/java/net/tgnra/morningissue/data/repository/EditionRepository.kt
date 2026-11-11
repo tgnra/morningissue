@@ -28,9 +28,13 @@ interface EditionRepository {
 
     /**
      * Makes sure the edition for the most recent reset time exists, building it from stored
-     * posts if the early build did not run, and returns its ID. Never syncs. Returns null when
-     * there is nothing to show (for example no feeds yet). Call when the app comes to the
-     * foreground; cheap when the edition already exists.
+     * posts if it is missing, and returns the ID of the newest edition on the stand. Never
+     * syncs. Returns null when there is nothing to show (for example no feeds yet). Cheap when
+     * the edition already exists.
+     *
+     * The newsstand does not call this when it opens: an edition the background build missed
+     * is shown as unprinted and built by Print now (`edition.EditionPrinter`). Onboarding
+     * calls it once, after its first sync.
      */
     suspend fun ensureCurrentEdition(): Long?
 

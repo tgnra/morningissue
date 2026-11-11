@@ -23,17 +23,34 @@
     <string name="newsstand_latest">Latest edition</string>
     <string name="newsstand_recent">Recent editions</string>
     <string name="newsstand_older_issues">Older issues</string>
-    <string name="newsstand_refresh">Check for new posts</string>
+    <string name="newsstand_check">Check for new posts</string>
     <string name="newsstand_empty_title">No edition yet</string>
     <string name="newsstand_empty_no_sources">Add some sources and your first edition will be printed here.</string>
-    <string name="newsstand_empty_waiting">Your first edition will be printed once your sources have been fetched.</string>
+    <string name="newsstand_empty_waiting">Your sources have had nothing recent to print. Your first edition will be printed when they post.</string>
     <string name="newsstand_add_sources">Add sources</string>
     <string name="newsstand_no_edition_title">No new edition today</string>
     <string name="newsstand_no_edition_since_day">Your feeds had nothing new since %1$s’s paper.</string>
     <string name="newsstand_no_edition_since_date">Your feeds have had nothing new since the paper of %1$s.</string>
     <string name="newsstand_next_edition">Next edition at %1$s.</string>
-    <string name="refresh_no_new">No new posts since the last check</string>
-    <string name="refresh_no_sources">No sources were checked</string>
+    <string name="newsstand_unprinted_today">Today’s edition has not been printed.</string>
+    <string name="newsstand_unprinted_evening">This evening’s edition has not been printed.</string>
+    <string name="newsstand_unprinted_date">The edition of %1$s has not been printed.</string>
+    <string name="print_now">Print now</string>
+    <string name="print_try_again">Try again</string>
+    <string name="print_stage_syncing">Fetching your sources…</string>
+    <string name="print_stage_building">Setting the pages…</string>
+    <string name="print_stage_text">Fetching the stories…</string>
+    <plurals name="print_stage_images">
+        <item quantity="one">Fetching %d picture…</item>
+        <item quantity="other">Fetching %d pictures…</item>
+    </plurals>
+    <string name="print_stay">Printing carries on if you leave this screen.</string>
+    <string name="print_from_stored">Your sources could not be reached, so this edition was printed from the posts already stored.</string>
+    <string name="print_nothing_new">Your sources had nothing new to print.</string>
+    <string name="print_unreachable">Your sources could not be reached, and nothing new is stored to print. Try again when you are connected.</string>
+    <string name="print_failed">The edition could not be printed. Try again.</string>
+    <string name="cover_description_unprinted">Edition of %1$s, not printed</string>
+    <string name="cover_unprinted">Not printed</string>
     <string name="cover_description">Edition No. %1$d, %2$s</string>
     <string name="edition_number_extra">No. %1$d · Extra</string>
     <string name="edition_number_evening">No. %1$d · Evening</string>
@@ -52,14 +69,6 @@
     <string name="cover_lead">Lead story: %1$s</string>
     <string name="cover_open">Open edition</string>
     <string name="fetching_progress">%1$d of %2$d</string>
-    <plurals name="new_posts_saved">
-        <item quantity="one">%d new post saved for tomorrow</item>
-        <item quantity="other">%d new posts saved for tomorrow</item>
-    </plurals>
-    <plurals name="sources_unreachable">
-        <item quantity="one">%d source couldn’t be reached</item>
-        <item quantity="other">%d sources couldn’t be reached</item>
-    </plurals>
     <plurals name="fetching_feeds">
         <item quantity="one">Fetching %d feed…</item>
         <item quantity="other">Fetching %d feeds…</item>

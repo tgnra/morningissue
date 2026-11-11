@@ -19,8 +19,8 @@ sealed interface SyncStatus {
 
 /**
  * Fetches feeds and stores new posts. **Owned by the sync agent** (`sync/`); the stub wired in
- * milestone 0 is [NoOpFeedSyncer]. Called by onboarding and pull-to-refresh in the UI, by
- * `SyncWorker`, and by the early edition build.
+ * milestone 0 is [NoOpFeedSyncer]. Called by onboarding and Sources in the UI, by
+ * `SyncWorker`, and by the early edition build (which is also what Print now runs).
  *
  * Implementations write through the DAOs: new posts with `ArticleDao.insertNew` (first-seen
  * time = now), validators with `FeedDao.updateSyncState`, cadence with `FeedDao.updateCadence`,

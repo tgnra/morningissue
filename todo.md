@@ -8,7 +8,7 @@ What is built, what is being built and what is left. How the built parts work is
 - [x] **Sync.** RSS, Atom and JSON Feed parsing; conditional fetching; feed discovery from a site address; full-text extraction; periodic background sync; cadence and tiers.
 - [x] **OPML import and export** in Sources and onboarding; every ancestor folder becomes a tag.
 - [x] **Scoring**: A × F × S × P with all constants in `RankingConfig`.
-- [x] **Daily edition**: front page, Top stories, In brief, back-page index; early build with prefetch; on-open fallback; frozen once stored.
+- [x] **Daily edition**: front page, Top stories, In brief, back-page index; early build with prefetch; on-open fallback (since replaced by the unprinted placeholder and Print now, below); frozen once stored.
 - [x] **No empty or reprint-only editions**: with no new posts nothing is built and the previous edition stays current.
 - [x] **Newsstand** with drawn covers, rack and labelled button bar; **paper** pager with contents list; **reader** with Like, Save, text size and read tracking; **back issues** calendar; **source pages**; **Saved and Liked** lists; basic **search**; **Settings**; **onboarding** with first sync.
 - [x] **Tablet layouts** (Compact, Medium, Expanded) and **e-ink mode** (paged movement, no animation, greyscale images).
@@ -110,9 +110,24 @@ Built; see "Archive export and import" in `docs/how-it-works.md`. The file-picke
 - [ ] If sources are added after tomorrow's edition was pre-built but before it is released, the Extra and the pre-built edition can both carry the same stories. Untested.
 - [ ] Only one Extra edition per calendar date can be stored, because `edition` has a unique `(date, kind)` index. Lifting this needs a schema change.
 
+### Unprinted placeholder and Print now
+
+Built; see "When an edition failed to build" in `docs/how-it-works.md`. Not seen on a device or emulator at all: the logic is unit-tested, the screen is not.
+
+- [x] The newsstand's refresh button and pull-to-refresh gesture are removed.
+- [x] Opening the app no longer builds an edition. When the due edition failed to build (no edition, and no record that a run found nothing new) the stand shows an unprinted placeholder cover with Print now.
+- [x] Print now runs the early build's stages in the foreground from an app-scoped holder (`EditionPrinter`): sync, build, full text, pictures, with progress; it survives rotation and leaving the screen, cannot be started twice, prints from stored posts when offline and says so, and offers Try again on failure.
+- [x] `nothingNewFor` in the settings store records the releases a run found nothing new for, so "No new edition today" is not mistaken for a failure.
+- [ ] Look at the placeholder, the progress display and the result notices on a phone, a small tablet and a landscape tablet, in Light, Dark and E-ink.
+- [ ] Changing the reset time to one that has already passed today puts the placeholder up at once, because that reset is now due and unprinted. Decide whether that is wanted.
+- [ ] Onboarding's first edition is still built by onboarding itself, without the full-text and picture prefetch and without recording "nothing new". If its sync found nothing recent, the stand shows the placeholder rather than the "nothing recent" empty state until Print now has been pressed once.
+- [ ] A Print now result notice stays on the stand until the next release time or the end of the process; it cannot be dismissed.
+- [ ] Print now's result says only whether the sources could be reached at all, not how many failed.
+
 ### Benchmark
 
-- [x] A Macrobenchmark for the on-open fallback build (`:macrobenchmark`, `OnOpenEditionBuildBenchmark`): 1,000 unread posts from 40 feeds, cold start, measuring the trace section around the build. How to run it is in `docs/how-it-works.md`.
+- [x] A Macrobenchmark for the build from stored posts, formerly the on-open fallback build (`:macrobenchmark`, `OnOpenEditionBuildBenchmark`): 1,000 unread posts from 40 feeds, cold start, measuring the trace section around the build. Opening the app no longer builds, so the benchmark triggers the build with a broadcast to the seeding receiver. How to run it is in `docs/how-it-works.md`.
+- [ ] The broadcast trigger compiles but has not been run on a device or emulator.
 - [ ] Run it on a real low-end phone. The budget is under 300 ms there; an emulator's numbers are only indicative. On the software-rendered API 37 emulator, on a host short of memory, five cold starts gave 371 ms at best, 573 ms median and 1,061 ms at worst for the build, which is over budget there. If a real phone is over too, see "Scores kept current during sync" below.
 
 ## Smaller gaps against the original spec
@@ -226,7 +241,7 @@ Dropped when the design moved from a live ranked feed to a daily edition:
 ## Known rough edges and unverified areas
 
 - [ ] **The release workflow has never run.** GitHub has not registered `.github/workflows/release.yml` since the first push. The cause is unknown.
-- [ ] **The early build has only run under tests**, never overnight on a device. Whether WorkManager runs it in time under Doze is unknown.
+- [ ] **The early build has only run under tests**, never overnight on a device. Whether WorkManager runs it in time under Doze is unknown. This matters more now: when it does not run, the reader sees the unprinted placeholder and has to press Print now, where before the edition was built silently on open.
 - [ ] **Relearning affinity on every engagement change** (each open, read, Save or Like) is unmeasured for performance.
 - [ ] **OPML export on a device is untested.** The writer is unit-tested; the file-picker path is not.
 - [ ] **E-ink: a long page can end on a mostly blank screen**, because steps snap to anchors.

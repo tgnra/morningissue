@@ -71,6 +71,20 @@ class DataStoreSettingsRepository(
         dataStore.edit { it[EXTRA_OFFER_DISMISSED_AT] = at.toEpochMilli() }
     }
 
+    override suspend fun recordNothingNew(releaseAt: Instant) {
+        dataStore.edit { prefs ->
+            val kept = (listOf(releaseAt) + releaseTimes(prefs[NOTHING_NEW_FOR]))
+                .distinct()
+                .sortedDescending()
+                .take(AppSettings.NOTHING_NEW_KEPT)
+            prefs[NOTHING_NEW_FOR] = kept.joinToString(",") { it.toEpochMilli().toString() }
+        }
+    }
+
+    /** Epoch milliseconds separated by commas; anything unreadable is dropped. */
+    private fun releaseTimes(stored: String?): List<Instant> =
+        stored.orEmpty().split(',').mapNotNull { it.trim().toLongOrNull() }.map(Instant::ofEpochMilli)
+
     private fun toSettings(prefs: Preferences): AppSettings {
         val defaults = AppSettings()
         return AppSettings(
@@ -83,6 +97,7 @@ class DataStoreSettingsRepository(
             storageBudgetMb = prefs[STORAGE_BUDGET_MB] ?: defaults.storageBudgetMb,
             onboardingDone = prefs[ONBOARDING_DONE] ?: defaults.onboardingDone,
             extraOfferDismissedAt = prefs[EXTRA_OFFER_DISMISSED_AT]?.let(Instant::ofEpochMilli),
+            nothingNewFor = releaseTimes(prefs[NOTHING_NEW_FOR]),
         )
     }
 
@@ -102,5 +117,6 @@ class DataStoreSettingsRepository(
         val STORAGE_BUDGET_MB = intPreferencesKey("storage_budget_mb")
         val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
         val EXTRA_OFFER_DISMISSED_AT = longPreferencesKey("extra_offer_dismissed_at")
+        val NOTHING_NEW_FOR = stringPreferencesKey("nothing_new_for")
     }
 }

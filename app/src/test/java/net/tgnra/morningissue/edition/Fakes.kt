@@ -48,6 +48,10 @@ internal class FakeSettings(initial: AppSettings = AppSettings()) : SettingsRepo
     override suspend fun setEveningEditionTime(time: LocalTime) = state.update { it.copy(eveningEditionTime = time) }
     override suspend fun setStorageBudgetMb(megabytes: Int) = state.update { it.copy(storageBudgetMb = megabytes) }
     override suspend fun setOnboardingDone(done: Boolean) = state.update { it.copy(onboardingDone = done) }
+    override suspend fun recordNothingNew(releaseAt: Instant) =
+        state.update { it.copy(nothingNewFor = (listOf(releaseAt) + it.nothingNewFor).distinct().take(AppSettings.NOTHING_NEW_KEPT)) }
+
+    val current: AppSettings get() = state.value
 }
 
 /** Records the order of everything the early build does. */
@@ -98,8 +102,12 @@ internal class FakePublisher(
     override suspend fun nextReleaseAt(): Instant? = nextRelease
 }
 
-internal class FakeEditions(private val editions: Map<Long, Edition>) : EditionRepository {
-    override fun observeReleasedEditions(): Flow<List<EditionSummary>> = flowOf(emptyList())
+internal class FakeEditions(
+    private val editions: Map<Long, Edition>,
+    /** The stand: which editions count as released, as IDs into [editions]. */
+    var released: List<Long> = emptyList(),
+) : EditionRepository {
+    override fun observeReleasedEditions(): Flow<List<EditionSummary>> = flowOf(released.map { summary(editions.getValue(it)) })
     override fun observeEdition(editionId: Long): Flow<Edition?> = flowOf(editions[editionId])
     override suspend fun getEdition(editionId: Long): Edition? = editions[editionId]
     override suspend fun ensureCurrentEdition(): Long? = null
@@ -116,6 +124,21 @@ internal class FakeFullText(
         return result(articleId)
     }
 }
+
+internal fun summary(edition: Edition) = EditionSummary(
+    id = edition.id,
+    date = edition.date,
+    kind = edition.kind,
+    number = edition.number,
+    length = edition.length,
+    releaseAt = edition.releaseAt,
+    cutoffAt = edition.cutoffAt,
+    leadHeadline = null,
+    leadImageUrl = null,
+    leadSource = null,
+    storyCount = 5,
+    isRead = false,
+)
 
 internal fun story(articleId: Long, kind: ItemKind, imageUrl: String? = null, slot: Int = 0) = EditionStory(
     articleId = articleId,

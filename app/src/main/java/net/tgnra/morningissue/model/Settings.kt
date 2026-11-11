@@ -18,10 +18,24 @@ data class AppSettings(
     val onboardingDone: Boolean = false,
     /** When the reader last turned down the newsstand's offer of an Extra edition, if ever. */
     val extraOfferDismissedAt: Instant? = null,
+    /**
+     * Release times (morning resets and Evening edition times) for which a run reached the
+     * feeds and found nothing new to print, newest first; at most [NOTHING_NEW_KEPT]. Without
+     * this an edition that was not printed because there was nothing new could not be told
+     * from one that failed to build: see `edition.DueEditions`.
+     */
+    val nothingNewFor: List<Instant> = emptyList(),
 ) {
     companion object {
         val DEFAULT_RESET_TIME: LocalTime = LocalTime.of(6, 30)
         val DEFAULT_EVENING_TIME: LocalTime = LocalTime.of(18, 0)
+
+        /**
+         * How many [nothingNewFor] entries are kept. The early build records the coming
+         * release while the two current ones (morning and evening) are still being shown,
+         * so three can matter at once; four leaves a margin.
+         */
+        const val NOTHING_NEW_KEPT = 4
         const val DEFAULT_STORAGE_BUDGET_MB = 500
         const val MIN_STORAGE_BUDGET_MB = 50
 

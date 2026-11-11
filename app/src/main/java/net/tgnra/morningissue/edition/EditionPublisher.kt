@@ -17,9 +17,13 @@ interface EditionPublisher {
     /**
      * Returns the ID of the edition for the most recent reset time, building it first if it is
      * missing: from stored posts only, with `cutoffAt = now` and `releaseAt` = that reset time
-     * (the on-open fallback; target under 300 ms). Never touches the network. Returns null when
+     * (target under 300 ms). Never touches the network. Returns null when
      * no edition exists and none can be built (no feeds or no posts). Safe to call concurrently
      * and repeatedly; at most one edition is created per date and kind.
+     *
+     * This used to run every time the newsstand opened (the on-open fallback). It no longer
+     * does: it is the build stage of Print now and of a background run that started after its
+     * reset (both through `EarlyBuild`), and onboarding's first edition.
      */
     suspend fun ensureCurrentEdition(): Long?
 

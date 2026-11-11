@@ -19,21 +19,35 @@ import net.tgnra.morningissue.model.SliderStep
 /**
  * Only in the `benchmark` build type, for `:macrobenchmark`: replaces everything stored with
  * [EXTRA_FEEDS] feeds and [EXTRA_POSTS] unread posts first seen in the last day and **no
- * edition**, so the next time the app opens it has to run the on-open fallback build over that
- * many candidates. Onboarding is marked done so the newsstand (which asks for the build) shows.
+ * edition**, so the build from stored posts has that many candidates to work through.
+ * Onboarding is marked done so the newsstand shows.
  *
  * Sent from the shell: `am broadcast -n net.tgnra.morningissue/.benchmark.BenchmarkSeedReceiver
  * --ei posts 1000`. The result data says what was stored. Guarded by the DUMP permission, which
  * the shell holds and other apps do not.
+ *
+ * With `--ez print true` it stores nothing and instead **runs that build**:
+ * `EditionPublisher.ensureCurrentEdition()`, the build from stored posts that Print now and a
+ * late background run perform between their sync and their prefetch. Opening the app no
+ * longer builds an edition, and the seeded feeds do not exist on the network, so the
+ * benchmark asks for the build this way instead of pressing Print now. The result data is
+ * "printed edition 12", or "printed nothing".
  */
 class BenchmarkSeedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val posts = intent.getIntExtra(EXTRA_POSTS, 1000)
         val feeds = intent.getIntExtra(EXTRA_FEEDS, 40)
+        val print = intent.getBooleanExtra(EXTRA_PRINT, false)
         val pending = goAsync()
         val container = context.appContainer
         container.appScope.launch {
             try {
+                if (print) {
+                    val editionId = container.editionPublisher.ensureCurrentEdition()
+                    pending.resultCode = Activity.RESULT_OK
+                    pending.resultData = if (editionId != null) "printed edition $editionId" else "printed nothing"
+                    return@launch
+                }
                 seed(context, posts, feeds)
                 container.settings.setOnboardingDone(true)
                 pending.resultCode = Activity.RESULT_OK
@@ -120,6 +134,7 @@ class BenchmarkSeedReceiver : BroadcastReceiver() {
     private companion object {
         const val EXTRA_POSTS = "posts"
         const val EXTRA_FEEDS = "feeds"
+        const val EXTRA_PRINT = "print"
         const val SEED = 20261110
     }
 }

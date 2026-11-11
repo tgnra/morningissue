@@ -23,7 +23,9 @@ import net.tgnra.morningissue.data.settings.SettingsRepository
 import net.tgnra.morningissue.data.settings.settingsDataStore
 import net.tgnra.morningissue.data.storage.RoomStorageRepository
 import net.tgnra.morningissue.data.storage.StorageRepository
+import net.tgnra.morningissue.edition.EarlyBuild
 import net.tgnra.morningissue.edition.EditionModule
+import net.tgnra.morningissue.edition.EditionPrinter
 import net.tgnra.morningissue.edition.EditionPublisher
 import net.tgnra.morningissue.edition.EditionScheduler
 import net.tgnra.morningissue.sync.FeedDiscovery
@@ -62,6 +64,9 @@ interface AppContainer {
 
     val editionPublisher: EditionPublisher
     val editionScheduler: EditionScheduler
+
+    /** Print now: the foreground build of an edition that was not printed in the background. */
+    val editionPrinter: EditionPrinter
 
     val imageLoader: ImageLoader
     val clock: Clock
@@ -146,6 +151,9 @@ class DefaultAppContainer(context: Context) : AppContainer {
 
     override val editionPublisher: EditionPublisher get() = edition.publisher
     override val editionScheduler: EditionScheduler get() = edition.scheduler
+    override val editionPrinter: EditionPrinter by lazy {
+        EditionPrinter(appScope, earlyBuild = { EarlyBuild.from(appContext, this) }, clock = clock)
+    }
 
     override val editions: EditionRepository by lazy { RoomEditionRepository(database, editionPublisher, clock) }
 }

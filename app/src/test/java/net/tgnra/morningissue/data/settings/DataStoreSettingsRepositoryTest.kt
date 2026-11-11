@@ -2,6 +2,7 @@ package net.tgnra.morningissue.data.settings
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import java.io.File
+import java.time.Instant
 import java.time.LocalTime
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -74,5 +75,25 @@ class DataStoreSettingsRepositoryTest {
             ),
             repository.settings.first(),
         )
+    }
+
+    @Test
+    fun nothingNewReleasesAreKeptNewestFirstAndOnlyTheLastFew() = scope.runTest {
+        val repository = repository()
+        assertEquals(emptyList<Instant>(), repository.settings.first().nothingNewFor)
+        val day = Instant.parse("2026-11-11T06:30:00Z")
+        fun release(daysLater: Long) = day.plusSeconds(daysLater * 86_400)
+
+        repository.recordNothingNew(release(1))
+        repository.recordNothingNew(release(0))
+        repository.recordNothingNew(release(1))
+        assertEquals("newest first, each once", listOf(release(1), release(0)), repository.settings.first().nothingNewFor)
+
+        (2L..6L).forEach { repository.recordNothingNew(release(it)) }
+        assertEquals(
+            listOf(release(6), release(5), release(4), release(3)),
+            repository.settings.first().nothingNewFor,
+        )
+        assertEquals(AppSettings.NOTHING_NEW_KEPT, repository.settings.first().nothingNewFor.size)
     }
 }

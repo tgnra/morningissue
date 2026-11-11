@@ -39,4 +39,12 @@ interface SettingsRepository {
 
     /** Records that the offer of an Extra edition was turned down, so it is not made again for the same sources. */
     suspend fun setExtraOfferDismissedAt(at: Instant) = Unit
+
+    /**
+     * Records that a run reached the feeds and found nothing new to print for the scheduled
+     * release at [releaseAt] (`AppSettings.nothingNewFor`). Written by `EarlyBuild`, read by
+     * the newsstand so it does not report that edition as unprinted. Only the newest few are
+     * kept.
+     */
+    suspend fun recordNothingNew(releaseAt: Instant)
 }
