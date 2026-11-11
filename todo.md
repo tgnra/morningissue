@@ -173,7 +173,7 @@ Built; see "When an edition failed to build" in `docs/how-it-works.md`. Not seen
 
 ### Discovery (Find sources)
 
-Built on `discovery-app`; see "Discovery" in `docs/how-it-works.md`. Unit-tested on simulated readers and a hand-built catalogue; not run on a device, and not yet run with the real `assets/discovery/catalogue.db`, which comes from the pipeline in `tools/discovery/`.
+Built on `discovery-app`; see "Discovery" in `docs/how-it-works.md`. Unit-tested on simulated readers, a hand-built catalogue and the real bundled `assets/discovery/catalogue.db` (18,062 feeds in 56 clusters, built by `tools/discovery/`; `BundledCatalogueTest`). Not run on a device.
 
 - [x] Schema version 3: `feed.status` (`SUBSCRIBED` or `DISCOVERED`), `feed.discoveredAt`, `discovery_verdict` and `discovery_candidate`, with `MIGRATION_2_3` and tests from versions 1 and 2. Archive format version 2 carries feed status.
 - [x] Discovered feeds are left out of editions, sync, the health check, affinity learning, Sources, OPML and search filters; `SubscribedOnlyQueryTest` guards the DAO queries.
@@ -185,6 +185,11 @@ Built on `discovery-app`; see "Discovery" in `docs/how-it-works.md`. Unit-tested
 - [ ] **The blogroll and outbound-link crawler.** `discovery_candidate` and its DAO exist, but nothing fills them. A crawler would read the blogroll pages and outbound links of subscribed feeds' posts, count mentions per feed (`mentions`, `foundVia`), fetch each candidate's feed once to fill tier, full-text share and centroid, and offer the best as cards beside the catalogue's ("Linked from Lost Art Press"). Needs: a budget for fetches, robots.txt, and a rule for how candidates and catalogue feeds share a deck.
 - [ ] **Webcomics in discovery need UX thought.** They are filtered out for now. They are image-led, post on a different cadence, and it is unclear how they print in the paper (a strip in In brief? a page of their own?). Source for a catalogue of them: Kagi's `smallcomic.txt`.
 - [ ] Discovery's verdicts are not in the archive, so passes do not move to a new device.
+- [ ] **Read over the catalogue's cluster labels.** They come from feed categories, and the small web leans heavily on AI ("AI & Devops", "AI & Emacs"). Labels and clusters also shift between rebuilds, which moves picked topics.
+- [ ] **Near-duplicate feeds by content.** One blog can appear under two addresses (abdullah.gula.bi and gulabi.bearblog.dev); deduplication is by URL and host only.
+- [ ] **A few non-English feeds declared as English** get in (about 290 feeds sit in a mixed-language cluster).
+- [ ] **Catalogue rebuild workflow** (`.github/workflows/discovery-catalogue.yml`) has never run, and needs "Allow GitHub Actions to create and approve pull requests" in the repository settings.
+- [ ] Feeds with no `icon_url` (12,329 of them) could fall back to the site's favicon.
 - [ ] The design report's rule that a feed with a discovered row is shown as a card again only once something from it is saved was simplified: only a verdict (pass, subscribe, unsubscribe) or a subscription keeps a feed off the cards, so a feed whose post was opened but not saved can be suggested again. Decide whether that is wanted.
 
 ## Smaller gaps against the original spec

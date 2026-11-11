@@ -76,7 +76,7 @@ sealed interface CatalogueStatus {
  * ```
  * meta(key, value)        format_version '1', built_at (epoch ms), model_id, dims '256',
  *                         mean (256 little-endian float32)
- * cluster(id, label, centroid, scale)        centroid: 256 int8, value = int8 × scale
+ * cluster(id, label, centroid, scale)        centroid: 256 int8 in the centred space (unused: the app averages the members)
  * feed(id, url, url_key, site_url, host, title, description, icon_url, language, tier,
  *      median_interval_hours, posts_per_week, full_text_share, last_post_at, cluster_id,
  *      categories ('\n'-separated), source, quality, centroid, scale)
@@ -216,13 +216,29 @@ class Catalogue internal constructor(
     /** The mean of every feed centroid, subtracted before similarities are taken. */
     val mean: FloatArray,
 ) {
+    /**
+     * The clusters, each with the unit-length mean of its members' (uncentred) feed centroids.
+     * The pipeline stores `cluster.centroid` in the centred space, which the engine does not
+     * use; working the centre out from the members keeps it in the same space as every feed
+     * and profile vector. A cluster with no member feeds is left out.
+     */
     val clusters: List<CatalogueCluster> by lazy {
+        val sums = HashMap<Int, FloatArray>()
+        for (feed in feeds) {
+            val id = feed.clusterId ?: continue
+            val centroid = feed.centroid ?: continue
+            val sum = sums.getOrPut(id) { FloatArray(centroid.size) }
+            if (sum.size != centroid.size) continue
+            for (i in sum.indices) sum[i] += centroid[i]
+        }
         synchronized(db) {
-            db.rawQuery("SELECT id, label, centroid, scale FROM cluster ORDER BY id", null).use { c ->
+            db.rawQuery("SELECT id, label FROM cluster ORDER BY id", null).use { c ->
                 buildList {
                     while (c.moveToNext()) {
-                        val vector = vectorOf(c.getBlob(2), c.getDouble(3)) ?: continue
-                        add(CatalogueCluster(c.getInt(0), c.getString(1) ?: "", vector))
+                        val sum = sums[c.getInt(0)] ?: continue
+                        val norm = kotlin.math.sqrt(sum.sumOf { (it * it).toDouble() }).toFloat()
+                        if (norm <= 0f) continue
+                        add(CatalogueCluster(c.getInt(0), c.getString(1) ?: "", FloatArray(sum.size) { sum[it] / norm }))
                     }
                 }
             }
