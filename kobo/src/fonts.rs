@@ -72,6 +72,7 @@ impl Style {
             weight: self.weight.round() as u16,
             size: (self.size * 16.0).round() as u32,
             opsz: (self.opsz(dpi) * 4.0).round() as u16,
+            tracking: (self.tracking * 1000.0).round() as i16,
         }
     }
 }
@@ -83,6 +84,8 @@ struct StyleKey {
     weight: u16,
     size: u32,
     opsz: u16,
+    /// Thousandths of an em.
+    tracking: i16,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -192,10 +195,9 @@ impl Fonts {
             shaper.shape_with(|cluster| {
                 for g in cluster.glyphs {
                     glyphs.push(ShapedGlyph { id: g.id, x: pen + g.x, y: g.y });
-                    pen += g.advance;
-                }
-                if !cluster.glyphs.is_empty() {
-                    pen += track;
+                    // Swash may hand back a whole run as one cluster, so letter-spacing goes
+                    // after every glyph rather than every cluster.
+                    pen += g.advance + track;
                 }
             });
         }
@@ -212,7 +214,16 @@ impl Fonts {
     }
 
     pub fn width(&self, text: &str, s: &Style) -> f32 {
+        if text == " " {
+            return self.space(s);
+        }
         self.shape(text, s).width
+    }
+
+    /// The width of a word space. Measured between letters: a space shaped on its own comes
+    /// back as a narrower glyph than the one used inside running text.
+    pub fn space(&self, s: &Style) -> f32 {
+        (self.shape("x x", s).width - self.shape("xx", s).width).max(s.size * 0.2)
     }
 
     /// Whether every character of `text` has a glyph in the style's font.

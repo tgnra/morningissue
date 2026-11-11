@@ -30,3 +30,7 @@ opt-level = 2
 
 [profile.test.package."*"]
 opt-level = 2
+
+# The reader's own drawing loops too, so the screenshot tests run in seconds.
+[profile.test]
+opt-level = 1

@@ -1,0 +1,1397 @@
+{
+ "id": 120,
+ "date": "2026-11-11",
+ "kind": "MORNING",
+ "number": 120,
+ "length": "STANDARD",
+ "releaseAt": "2026-11-11T06:30:00Z",
+ "finishedAt": null,
+ "aFieldFromTheFuture": [
+  1,
+  2,
+  3
+ ],
+ "pages": [
+  {
+   "page": 1,
+   "items": [
+    {
+     "articleId": 9001,
+     "slot": 0,
+     "kind": "LEAD",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9002,
+     "slot": 1,
+     "kind": "FRONT",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9003,
+     "slot": 2,
+     "kind": "FRONT",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9004,
+     "slot": 3,
+     "kind": "FRONT",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9005,
+     "slot": 4,
+     "kind": "FRONT",
+     "section": null,
+     "reason": "Placed for the fixture"
+    }
+   ]
+  },
+  {
+   "page": 2,
+   "items": [
+    {
+     "articleId": 9006,
+     "slot": 0,
+     "kind": "TOP",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9007,
+     "slot": 1,
+     "kind": "TOP",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9008,
+     "slot": 2,
+     "kind": "TOP",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9009,
+     "slot": 3,
+     "kind": "TOP",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9010,
+     "slot": 4,
+     "kind": "TOP",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9011,
+     "slot": 5,
+     "kind": "TOP",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9012,
+     "slot": 6,
+     "kind": "TOP",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9013,
+     "slot": 7,
+     "kind": "TOP",
+     "section": null,
+     "reason": "Placed for the fixture"
+    }
+   ]
+  },
+  {
+   "page": 3,
+   "items": [
+    {
+     "articleId": 9014,
+     "slot": 0,
+     "kind": "SECTION",
+     "section": "Science",
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9015,
+     "slot": 1,
+     "kind": "SECTION",
+     "section": "Science",
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9016,
+     "slot": 2,
+     "kind": "SECTION",
+     "section": "Science",
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9017,
+     "slot": 3,
+     "kind": "SECTION",
+     "section": "Science",
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9018,
+     "slot": 4,
+     "kind": "SECTION",
+     "section": "Science",
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9019,
+     "slot": 5,
+     "kind": "SECTION",
+     "section": "Science",
+     "reason": "Placed for the fixture"
+    }
+   ]
+  },
+  {
+   "page": 4,
+   "items": [
+    {
+     "articleId": 9020,
+     "slot": 0,
+     "kind": "SECTION",
+     "section": "Design",
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9021,
+     "slot": 1,
+     "kind": "SECTION",
+     "section": "Design",
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9022,
+     "slot": 2,
+     "kind": "SECTION",
+     "section": "Design",
+     "reason": "Placed for the fixture"
+    }
+   ]
+  },
+  {
+   "page": 5,
+   "items": [
+    {
+     "articleId": 9023,
+     "slot": 0,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9024,
+     "slot": 1,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9025,
+     "slot": 2,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9026,
+     "slot": 3,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9027,
+     "slot": 4,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9028,
+     "slot": 5,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9029,
+     "slot": 6,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9030,
+     "slot": 7,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9031,
+     "slot": 8,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9032,
+     "slot": 9,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9033,
+     "slot": 10,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9034,
+     "slot": 11,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9035,
+     "slot": 12,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9036,
+     "slot": 13,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9037,
+     "slot": 14,
+     "kind": "BRIEF",
+     "section": null,
+     "reason": "Placed for the fixture"
+    }
+   ]
+  },
+  {
+   "page": 6,
+   "items": [
+    {
+     "articleId": 9038,
+     "slot": 0,
+     "kind": "ARCHIVE",
+     "section": null,
+     "reason": "Placed for the fixture"
+    }
+   ]
+  },
+  {
+   "page": 7,
+   "items": [
+    {
+     "articleId": 9039,
+     "slot": 0,
+     "kind": "INDEX",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9040,
+     "slot": 1,
+     "kind": "INDEX",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9041,
+     "slot": 2,
+     "kind": "INDEX",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9042,
+     "slot": 3,
+     "kind": "INDEX",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9043,
+     "slot": 4,
+     "kind": "INDEX",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9044,
+     "slot": 5,
+     "kind": "INDEX",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9045,
+     "slot": 6,
+     "kind": "INDEX",
+     "section": null,
+     "reason": "Placed for the fixture"
+    },
+    {
+     "articleId": 9046,
+     "slot": 7,
+     "kind": "INDEX",
+     "section": null,
+     "reason": "Placed for the fixture"
+    }
+   ]
+  }
+ ],
+ "articles": {
+  "9001": {
+   "feedTitle": "The Coastal Courier",
+   "title": "Town votes to bring the old tide mill back to life",
+   "author": "Hannah Ellery",
+   "url": "https://example.org/9001",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "The harbour authority voted on Tuesday night to rebuild the old tide mill as a working museum, ending a twelve-year argument about what to do with the most photographed ruin on the coast.",
+   "imageUrl": "https://example.org/img/lead.jpg",
+   "wordCount": 980,
+   "blocks": [
+    {
+     "t": "p",
+     "text": {
+      "text": "The harbour authority voted on Tuesday night to rebuild the old tide mill as a working museum, ending a twelve-year argument about what to do with the most photographed ruin on the coast.",
+      "spans": []
+     }
+    },
+    {
+     "t": "p",
+     "text": {
+      "text": "The vote was nine to four. Supporters packed the public gallery and applauded when the chair read the result; the four councillors who voted against said the town could not afford the running costs once the grant money is spent.",
+      "spans": []
+     }
+    },
+    {
+     "t": "p",
+     "text": {
+      "text": "Work will start in the spring. The plan restores the wheel, the sluice gates and the miller’s house, and adds a small café in the grain store. On the highest tides of the year the wheel will turn again, grinding flour that the café will bake into bread.",
+      "spans": [
+       {
+        "start": 150,
+        "end": 163,
+        "style": "i"
+       }
+      ]
+     }
+    },
+    {
+     "t": "h",
+     "level": 2,
+     "text": {
+      "text": "A building that refused to fall down",
+      "spans": []
+     }
+    },
+    {
+     "t": "p",
+     "text": {
+      "text": "The mill was built in 1793 and worked until 1938, when a storm broke the sea wall and flooded the wheel pit. It has stood roofless since the 1950s. Three earlier schemes, a hotel, flats and a sailing school, all stalled when their backers found out what it costs to work on a listed building that the sea visits twice a day.",
+      "spans": []
+     }
+    },
+    {
+     "t": "quote",
+     "paragraphs": [
+      {
+       "text": "People think a ruin is free. It is the most expensive thing a town can own, because every winter it asks you again what you are going to do about it.",
+       "spans": []
+      }
+     ],
+     "citation": {
+      "text": "Mairead Quinn, chair of the harbour authority",
+      "spans": []
+     }
+    },
+    {
+     "t": "p",
+     "text": {
+      "text": "Engineers surveyed the structure last year and found it in better shape than anyone expected. The walls are sound to the first floor; the timber is gone, but the oak beams that carried the floors left sockets that show exactly where each one went.",
+      "spans": []
+     }
+    },
+    {
+     "t": "img",
+     "url": "https://example.org/img/mill-plan.png",
+     "caption": {
+      "text": "The restored mill as the architects drew it, seen from the harbour wall.",
+      "spans": []
+     },
+     "width": 1200,
+     "height": 800
+    },
+    {
+     "t": "h",
+     "level": 3,
+     "text": {
+      "text": "What the money buys",
+      "spans": []
+     }
+    },
+    {
+     "t": "list",
+     "ordered": false,
+     "items": [
+      {
+       "text": "A new roof in Welsh slate, on oak trusses made to the old pattern",
+       "spans": []
+      },
+      {
+       "text": "The wheel rebuilt from the surviving iron hub, with new elm paddles",
+       "spans": []
+      },
+      {
+       "text": "Sluice gates that can be closed in a storm surge, protecting the quay as well as the mill",
+       "spans": []
+      },
+      {
+       "text": "A ground-floor gallery that stays open all year, free to enter",
+       "spans": []
+      }
+     ]
+    },
+    {
+     "t": "p",
+     "text": {
+      "text": "The grant from the national heritage fund covers £2.4 million of the £3.1 million cost. The rest is to come from a public appeal, which opened yesterday and had raised £41,000 by the evening.",
+      "spans": []
+     }
+    },
+    {
+     "t": "p",
+     "text": {
+      "text": "Opponents say the appeal is optimistic. “We have been here before,” said Councillor Peter Hale, who voted against. “Everyone loves the mill on a postcard. Fewer people love it on a spreadsheet.”",
+      "spans": []
+     }
+    },
+    {
+     "t": "pre",
+     "text": "Tide   Height  Wheel\n06:12  5.8 m   turns\n18:40  6.1 m   turns\n07:01  4.2 m   idle",
+     "language": null
+    },
+    {
+     "t": "p",
+     "text": {
+      "text": "The museum is due to open in the summer of 2028. Until then the harbour wall will stay open to walkers, and the authority promises a viewing platform so that people can watch the work.",
+      "spans": []
+     }
+    },
+    {
+     "t": "video",
+     "src": "unknown block type, skipped"
+    }
+   ],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9002": {
+   "feedTitle": "Field Notes",
+   "title": "Swifts return early as spring warms faster",
+   "author": null,
+   "url": "https://example.org/9002",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Ringers counted the first birds nine days ahead of the long-term average, the earliest arrival since records began on the estuary.",
+   "imageUrl": null,
+   "wordCount": 700,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9003": {
+   "feedTitle": "Signal & Noise",
+   "title": "Why your router slows down in the evening",
+   "author": null,
+   "url": "https://example.org/9003",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "It is not your imagination: the hours between eight and eleven are when the neighbours stream, and the radio spectrum is a shared road.",
+   "imageUrl": null,
+   "wordCount": 700,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9004": {
+   "feedTitle": "The Long Table",
+   "title": "A winter stew that asks for nothing but time",
+   "author": null,
+   "url": "https://example.org/9004",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Shin of beef, a bottle of stout and four hours in a low oven: the recipe that got a village through the snow of 1963.",
+   "imageUrl": null,
+   "wordCount": 700,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9005": {
+   "feedTitle": "Margins",
+   "title": "The quiet revival of the printed street map",
+   "author": null,
+   "url": "https://example.org/9005",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Folded paper maps are selling again, and not only to walkers. Publishers say buyers want to see a whole city at once.",
+   "imageUrl": null,
+   "wordCount": 700,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9006": {
+   "feedTitle": "Signal & Noise",
+   "title": "The satellite that lost its way and found it again",
+   "author": null,
+   "url": "https://example.org/9006",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Controllers spent a fortnight coaxing a weather satellite back into its orbit after a software update pointed it at the sun.",
+   "imageUrl": "https://example.org/img/satellite.webp",
+   "wordCount": 850,
+   "blocks": [],
+   "engagement": {
+    "openedAt": "2026-11-11T04:55:00Z",
+    "readFraction": 1.0,
+    "readAt": "2026-11-11T05:00:00Z",
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9007": {
+   "feedTitle": "Field Notes",
+   "title": "Otters are back on every river in the county",
+   "author": null,
+   "url": "https://example.org/9007",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "A survey found spraint on all forty sites for the first time since the 1950s, a sign that cleaner water has brought the fish back.",
+   "imageUrl": null,
+   "wordCount": 850,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9008": {
+   "feedTitle": "The Coastal Courier",
+   "title": "Ferry timetable to change from January",
+   "author": null,
+   "url": "https://example.org/9008",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Two crossings a day will move to fit the new tide tables, and the late Friday sailing returns after a three-year gap.",
+   "imageUrl": null,
+   "wordCount": 850,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9009": {
+   "feedTitle": "Margins",
+   "title": "An interview with the last letterpress printer in town",
+   "author": null,
+   "url": "https://example.org/9009",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Ruth Calder has set type by hand for fifty-one years. She is not retiring, she says, because nobody has asked her to.",
+   "imageUrl": null,
+   "wordCount": 850,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9010": {
+   "feedTitle": "The Long Table",
+   "title": "In praise of the humble parsnip",
+   "author": null,
+   "url": "https://example.org/9010",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Sweet after the first frost, roasted until its edges catch: a case for the vegetable that every allotment grows too many of.",
+   "imageUrl": null,
+   "wordCount": 850,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9011": {
+   "feedTitle": "Signal & Noise",
+   "title": "How a library got its catalogue back after the outage",
+   "author": null,
+   "url": "https://example.org/9011",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "When the server died, librarians rebuilt three years of loans from printed date slips and the memories of regular borrowers.",
+   "imageUrl": null,
+   "wordCount": 850,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9012": {
+   "feedTitle": "Field Notes",
+   "title": "The hedgerow that is older than the parish church",
+   "author": null,
+   "url": "https://example.org/9012",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Counting woody species along a lane suggests it was planted before the Norman conquest, older than any building in the village.",
+   "imageUrl": null,
+   "wordCount": 850,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9013": {
+   "feedTitle": "Weekend Review",
+   "title": "A novel set entirely on a night bus",
+   "author": null,
+   "url": "https://example.org/9013",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Eleven passengers, one route and seven hours between closing time and dawn: the debut that critics cannot stop recommending.",
+   "imageUrl": null,
+   "wordCount": 850,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9014": {
+   "feedTitle": "Field Notes",
+   "title": "Glow-worms counted by torchlight in the old quarry",
+   "author": null,
+   "url": "https://example.org/9014",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Volunteers found more than three hundred females glowing on the quarry floor, double last year’s count after a wet spring.",
+   "imageUrl": null,
+   "wordCount": 640,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9015": {
+   "feedTitle": "Orbit Weekly",
+   "title": "A comet will be visible to the naked eye next week",
+   "author": null,
+   "url": "https://example.org/9015",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Look low in the west an hour after sunset; binoculars will show the tail, which is already longer than the full moon is wide.",
+   "imageUrl": "https://example.org/img/comet.png",
+   "wordCount": 640,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9016": {
+   "feedTitle": "Field Notes",
+   "title": "Seaweed farms could shelter young fish",
+   "author": null,
+   "url": "https://example.org/9016",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Divers found juvenile cod and pollack among the ropes of a kelp farm, a nursery nobody planned.",
+   "imageUrl": null,
+   "wordCount": 640,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9017": {
+   "feedTitle": "Orbit Weekly",
+   "title": "What the new telescope saw first",
+   "author": null,
+   "url": "https://example.org/9017",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "The first image is a nearby galaxy, but astronomers are more excited by a faint smudge in the corner of the frame.",
+   "imageUrl": null,
+   "wordCount": 640,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9018": {
+   "feedTitle": "Lab Bench",
+   "title": "The ice core that remembers a volcanic winter",
+   "author": null,
+   "url": "https://example.org/9018",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Ash in a Greenlandic core dates an eruption that cooled the northern summer and ruined harvests across Europe.",
+   "imageUrl": null,
+   "wordCount": 640,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9019": {
+   "feedTitle": "Lab Bench",
+   "title": "Why bread goes stale, and how to stop it",
+   "author": null,
+   "url": "https://example.org/9019",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Staling is starch recrystallising, not drying out, which is why the fridge makes it worse and the toaster makes it better.",
+   "imageUrl": null,
+   "wordCount": 640,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9020": {
+   "feedTitle": "Margins",
+   "title": "The typeface that was drawn for railway signs",
+   "author": null,
+   "url": "https://example.org/9020",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Designed to be read at speed from a moving train, it is now on every platform in the country and half its shop fronts.",
+   "imageUrl": null,
+   "wordCount": 520,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9021": {
+   "feedTitle": "Margins",
+   "title": "A chair you can mend with a pocket knife",
+   "author": null,
+   "url": "https://example.org/9021",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "A furniture maker’s answer to flat-pack: joints that come apart, and a promise that every part can be whittled anew.",
+   "imageUrl": null,
+   "wordCount": 520,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9022": {
+   "feedTitle": "Weekend Review",
+   "title": "Inside the restored seaside lido",
+   "author": null,
+   "url": "https://example.org/9022",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": "Art deco curves, a new heat pump and water warm enough for January swims: the pool reopens after six years.",
+   "imageUrl": null,
+   "wordCount": 520,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9023": {
+   "feedTitle": "Wire Desk",
+   "title": "Rail strike called off after late-night talks",
+   "author": null,
+   "url": "https://example.org/9023",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9024": {
+   "feedTitle": "Wire Desk",
+   "title": "Bank holds interest rates for a third month",
+   "author": null,
+   "url": "https://example.org/9024",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": "2026-11-11T06:00:00Z",
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9025": {
+   "feedTitle": "Coast Weather",
+   "title": "Gales expected along the west coast from Thursday",
+   "author": null,
+   "url": "https://example.org/9025",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9026": {
+   "feedTitle": "Wire Desk",
+   "title": "City council approves new cycle lanes on the ring road",
+   "author": null,
+   "url": "https://example.org/9026",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9027": {
+   "feedTitle": "The Coastal Courier",
+   "title": "Lifeboat crew rescue two walkers cut off by the tide",
+   "author": null,
+   "url": "https://example.org/9027",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9028": {
+   "feedTitle": "Wire Desk",
+   "title": "Petrol prices fall for the fifth week running",
+   "author": null,
+   "url": "https://example.org/9028",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9029": {
+   "feedTitle": "Coast Weather",
+   "title": "Frost likely inland overnight, clearing by mid-morning",
+   "author": null,
+   "url": "https://example.org/9029",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9030": {
+   "feedTitle": "Wire Desk",
+   "title": "Museum extends free entry for under-25s",
+   "author": null,
+   "url": "https://example.org/9030",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9031": {
+   "feedTitle": "Sports Desk",
+   "title": "County side reach the cup semi-final on penalties",
+   "author": null,
+   "url": "https://example.org/9031",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9032": {
+   "feedTitle": "Wire Desk",
+   "title": "Post office to keep rural branches open until 2030",
+   "author": null,
+   "url": "https://example.org/9032",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9033": {
+   "feedTitle": "Sports Desk",
+   "title": "Marathon route changes to avoid the harbour works",
+   "author": null,
+   "url": "https://example.org/9033",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9034": {
+   "feedTitle": "Wire Desk",
+   "title": "School term dates agreed for next year",
+   "author": null,
+   "url": "https://example.org/9034",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9035": {
+   "feedTitle": "Coast Weather",
+   "title": "Highest tide of the year due on Saturday morning",
+   "author": null,
+   "url": "https://example.org/9035",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9036": {
+   "feedTitle": "Wire Desk",
+   "title": "New bridge opens two months ahead of schedule",
+   "author": null,
+   "url": "https://example.org/9036",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9037": {
+   "feedTitle": "Sports Desk",
+   "title": "Swimmer breaks a forty-year-old club record",
+   "author": null,
+   "url": "https://example.org/9037",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 120,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9038": {
+   "feedTitle": "The Long Table",
+   "title": "The baker who still uses a wood-fired oven",
+   "author": null,
+   "url": "https://example.org/9038",
+   "publishedAt": "2026-10-28T08:00:00Z",
+   "summary": "Every morning at four she lights the oven her grandfather built. A held-over story from a source you love.",
+   "imageUrl": null,
+   "wordCount": 1400,
+   "blocks": [
+    {
+     "t": "p",
+     "text": {
+      "text": "Every morning at four, before the street lights go off, Agnes Byrne lights the oven her grandfather built in 1931.",
+      "spans": []
+     }
+    },
+    {
+     "t": "p",
+     "text": {
+      "text": "It takes two hours to come up to heat. She knows it is ready by the colour of the bricks, which go from black to a pale, chalky grey.",
+      "spans": []
+     }
+    }
+   ],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9039": {
+   "feedTitle": "Wire Desk",
+   "title": "Council publishes its budget for consultation",
+   "author": null,
+   "url": "https://example.org/9039",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 300,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9040": {
+   "feedTitle": "Wire Desk",
+   "title": "Airport adds a winter route to Lisbon",
+   "author": null,
+   "url": "https://example.org/9040",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 300,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9041": {
+   "feedTitle": "Lab Bench",
+   "title": "A beginner’s guide to sourdough starters",
+   "author": null,
+   "url": "https://example.org/9041",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 300,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9042": {
+   "feedTitle": "Lab Bench",
+   "title": "Measuring rainfall with a jam jar",
+   "author": null,
+   "url": "https://example.org/9042",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 300,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9043": {
+   "feedTitle": "Orbit Weekly",
+   "title": "This month’s night sky",
+   "author": null,
+   "url": "https://example.org/9043",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 300,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9044": {
+   "feedTitle": "Field Notes",
+   "title": "Where to see waxwings this winter",
+   "author": null,
+   "url": "https://example.org/9044",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 300,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9045": {
+   "feedTitle": "Field Notes",
+   "title": "The moth trap diaries, week 40",
+   "author": null,
+   "url": "https://example.org/9045",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 300,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  },
+  "9046": {
+   "feedTitle": "Weekend Review",
+   "title": "Five podcasts for a long drive",
+   "author": null,
+   "url": "https://example.org/9046",
+   "publishedAt": "2026-11-10T21:15:00Z",
+   "summary": null,
+   "imageUrl": null,
+   "wordCount": 300,
+   "blocks": [],
+   "engagement": {
+    "openedAt": null,
+    "readFraction": 0.0,
+    "readAt": null,
+    "savedAt": null,
+    "likedAt": null
+   },
+   "futureField": "ignored"
+  }
+ }
+}

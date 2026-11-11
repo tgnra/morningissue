@@ -145,6 +145,10 @@ pub struct Piece {
     pub gap: f32,
     /// Keep on the same screen as the next piece (a heading, a paragraph's first line).
     pub keep: bool,
+    /// Drawn only when the piece is not the first on its screen (a rule between rows).
+    pub divider: Vec<El>,
+    /// May move below the text that follows it, to the top of the next screen.
+    pub float: bool,
 }
 
 impl Piece {
@@ -168,12 +172,30 @@ pub struct Screen {
 }
 
 /// Stacks pieces into screens of height `area.h` starting at `area.y`. A run of kept pieces
-/// moves to the next screen whole when it fits on an empty one.
+/// moves to the next screen whole when it fits on an empty one. A floating piece (a picture)
+/// that does not fit waits for the top of the next screen while the text after it fills
+/// this one.
 pub fn paginate(pieces: &[Piece], area: Rect) -> Vec<Screen> {
+    fn put(s: &mut Screen, p: &Piece, top: f32, first: bool) {
+        if !first {
+            s.els.extend(p.divider.iter().map(|e| e.shifted(top)));
+        }
+        s.els.extend(p.els.iter().map(|e| e.shifted(top)));
+        s.hits.extend(p.hits.iter().map(|(r, a)| (Rect::new(r.x, r.y + top.round() as i32, r.w, r.h), a.clone())));
+    }
     let mut screens = vec![Screen::default()];
     let mut y = 0.0f32;
     let avail = area.h as f32;
+    let mut waiting: Option<usize> = None;
     let mut i = 0;
+    let new_screen = |screens: &mut Vec<Screen>, y: &mut f32, waiting: &mut Option<usize>| {
+        screens.push(Screen::default());
+        *y = 0.0;
+        if let Some(f) = waiting.take() {
+            put(screens.last_mut().unwrap(), &pieces[f], area.y as f32, true);
+            *y = pieces[f].h;
+        }
+    };
     while i < pieces.len() {
         // The chain of pieces that must stay together, starting here.
         let mut j = i;
@@ -187,25 +209,29 @@ pub fn paginate(pieces: &[Piece], area: Rect) -> Vec<Screen> {
         }
         let gap = if y > 0.0 { pieces[i].gap } else { 0.0 };
         let fits_here = y + gap + chain_h <= avail + 0.5;
+        if !fits_here && y > 0.0 && pieces[i].float && waiting.is_none() && chain_h <= avail {
+            waiting = Some(i);
+            i += 1;
+            continue;
+        }
         if !fits_here && y > 0.0 && chain_h <= avail {
-            screens.push(Screen::default());
-            y = 0.0;
+            new_screen(&mut screens, &mut y, &mut waiting);
             continue;
         }
         // Place piece i (if the chain is taller than a screen, it breaks inside).
         let p = &pieces[i];
         let gap = if y > 0.0 { p.gap } else { 0.0 };
         if y > 0.0 && y + gap + p.h > avail + 0.5 {
-            screens.push(Screen::default());
-            y = 0.0;
+            new_screen(&mut screens, &mut y, &mut waiting);
             continue;
         }
         let top = area.y as f32 + y + gap;
-        let s = screens.last_mut().unwrap();
-        s.els.extend(p.els.iter().map(|e| e.shifted(top)));
-        s.hits.extend(p.hits.iter().map(|(r, a)| (Rect::new(r.x, r.y + top.round() as i32, r.w, r.h), a.clone())));
+        put(screens.last_mut().unwrap(), p, top, y <= 0.0);
         y += gap + p.h;
         i += 1;
+    }
+    if waiting.is_some() {
+        new_screen(&mut screens, &mut y, &mut waiting);
     }
     if screens.len() > 1 && screens.last().is_some_and(|s| s.els.is_empty()) {
         screens.pop();

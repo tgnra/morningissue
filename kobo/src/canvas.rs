@@ -177,9 +177,10 @@ impl Canvas {
     /// A chevron pointing left (`dir` < 0) or right, centred at (cx, cy).
     pub fn chevron(&mut self, cx: f32, cy: f32, size: f32, dir: f32, v: u8) {
         let t = (size / 5.0).max(1.5);
+        // The tip is on the side `dir` points to.
         let w = size * 0.3 * dir.signum();
-        self.stroke(cx + w, cy - size * 0.5, cx - w, cy, t, v);
-        self.stroke(cx - w, cy, cx + w, cy + size * 0.5, t, v);
+        self.stroke(cx - w, cy - size * 0.5, cx + w, cy, t, v);
+        self.stroke(cx + w, cy, cx - w, cy + size * 0.5, t, v);
     }
 
     /// Copies `src` with its top-left at (x, y).

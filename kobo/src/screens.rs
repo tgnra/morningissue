@@ -93,22 +93,14 @@ enum Role {
     Cell,
 }
 
-/// A story as a column of text (and maybe a picture) `w` wide, positioned at (x, 0).
-fn story(ctx: &Ctx, id: i64, a: &Article, x: f32, w: f32, role: Role, with_image: bool) -> Piece {
+/// The text of a story (headline, standfirst, byline) `w` wide at (x, y); returns its height.
+fn story_text(ctx: &Ctx, a: &Article, x: f32, y0: f32, w: f32, role: Role, with_image: bool, els: &mut Vec<El>) -> f32 {
     let ty = &ctx.ty;
     let read = is_read(a);
     let ink = if read { READ_GREY } else { BLACK };
-    let mut els = Vec::new();
-    let mut y = 0.0f32;
-    let image = if with_image { ctx.has_image(a.image_url.as_deref()) } else { None };
-    if let (Some((iw, ih)), Some(url)) = (image, a.image_url.as_ref()) {
-        let max_h = ctx.m.content().h as f32 * if role == Role::Lead { 0.36 } else { 0.28 };
-        let h = (w * ih as f32 / iw as f32).clamp(w * 0.42, w * 0.75).min(max_h).round();
-        els.push(El::Image { url: url.clone(), r: Rect::new(x as i32, 0, w as i32, h as i32), fit: Fit::Cover });
-        y += h + ctx.m.pt(6.0);
-    }
+    let mut y = y0;
     let (head_style, standfirst_lines) = match role {
-        Role::Lead if image.is_some() => (ty.lead, 3),
+        Role::Lead if with_image => (ty.lead, 2),
         Role::Lead => (ty.lead.size(ty.lead.size * 1.18), 5),
         Role::Feature => (ty.headline, 4),
         Role::Cell => (ty.headline_small, 3),
@@ -133,9 +125,52 @@ fn story(ctx: &Ctx, id: i64, a: &Article, x: f32, w: f32, role: Role, with_image
     let by = ctx.line(&byline(a), by_style, w - (bx - x), Align::Left);
     els.push(El::Text { para: by.clone(), x: bx, y });
     y += by.height();
-    let mut p = Piece::new(y.ceil());
+    y - y0
+}
+
+/// A story `w` wide at (x, 0). With a `budget` (the height it may take) it shows its picture
+/// if one is stored and there is room for it: above the text, or beside it on a wide page.
+fn story(ctx: &Ctx, id: i64, a: &Article, x: f32, w: f32, role: Role, budget: Option<f32>) -> Piece {
+    let mut els = Vec::new();
+    let image = budget.and_then(|b| Some((b, ctx.has_image(a.image_url.as_deref())?, a.image_url.clone()?)));
+    let mut h = 0.0;
+    let mut placed = false;
+    if let Some((budget, (iw, ih), url)) = image {
+        let gap = ctx.m.pt(if role == Role::Lead { 10.0 } else { 8.0 });
+        let aspect = ih as f32 / iw as f32;
+        let min_h = ctx.m.inch(0.8).max(w * 0.22);
+        if w > ctx.m.inch(4.4) {
+            // Side by side: the picture takes 58% of the width.
+            let pw = (w * 0.58).round();
+            let tw = w - pw - gap;
+            let mut text_els = Vec::new();
+            let th = story_text(ctx, a, x + pw + gap, 0.0, tw, role, true, &mut text_els);
+            let ph = (pw * aspect).clamp(pw * 0.5, pw * 0.8).min(budget).max(th.min(budget));
+            if ph >= min_h {
+                els.push(El::Image { url, r: Rect::new(x as i32, 0, pw as i32, ph as i32), fit: Fit::Cover });
+                els.extend(text_els);
+                h = ph.max(th);
+                placed = true;
+            }
+        } else {
+            let mut text_els = Vec::new();
+            let th = story_text(ctx, a, x, 0.0, w, role, true, &mut text_els);
+            let share = if role == Role::Lead { 0.42 } else { 0.32 };
+            let ph = (w * aspect).clamp(w * 0.42, w * 0.7).min(ctx.m.content().h as f32 * share).min(budget - th - gap).floor();
+            if ph >= min_h {
+                els.push(El::Image { url, r: Rect::new(x as i32, 0, w as i32, ph as i32), fit: Fit::Cover });
+                els.extend(text_els.iter().map(|e| e.shifted(ph + gap)));
+                h = ph + gap + th;
+                placed = true;
+            }
+        }
+    }
+    if !placed {
+        h = story_text(ctx, a, x, 0.0, w, role, false, &mut els);
+    }
+    let mut p = Piece::new(h.ceil());
     p.els = els;
-    p.hits.push((Rect::new(x as i32, 0, w as i32, y.ceil() as i32), Action::OpenArticle(id)));
+    p.hits.push((Rect::new(x as i32, 0, w as i32, h.ceil() as i32), Action::OpenArticle(id)));
     p
 }
 
@@ -153,12 +188,12 @@ fn grid(ctx: &Ctx, bundle: &Bundle, ids: &[i64], cols: usize) -> Vec<Piece> {
             let Some(a) = bundle.article(*id) else { continue };
             let x = c.x as f32 + i as f32 * (cw + gutter);
             let role = if n == 1 { Role::Feature } else { Role::Cell };
-            cells.push(story(ctx, *id, a, x, cw, role, false));
+            cells.push(story(ctx, *id, a, x, cw, role, None));
         }
         let h = cells.iter().map(|p| p.h).fold(0.0, f32::max);
         let pad = ctx.m.pt(9.0);
         let mut piece = Piece::new(h + 2.0 * pad);
-        piece.els.push(El::Fill { r: Rect::new(c.x, 0, c.w, ctx.hair()), v: RULE_GREY });
+        piece.divider.push(El::Fill { r: Rect::new(c.x, 0, c.w, ctx.hair()), v: RULE_GREY });
         for (i, cell) in cells.into_iter().enumerate() {
             if i > 0 {
                 let x = c.x as f32 + i as f32 * (cw + gutter) - gutter / 2.0;
@@ -298,7 +333,7 @@ fn back_page(ctx: &Ctx, b: &Bundle, page: &EditionPage, latest: bool) -> Vec<Pie
     let w = c.w as f32;
     let mut out = Vec::new();
     let mut els = Vec::new();
-    let mut y = ctx.m.pt(18.0);
+    let mut y = ctx.m.pt(12.0);
     els.push(El::Fill { r: Rect::new(c.x + c.w / 3, 0, c.w / 3, ctx.heavy()), v: BLACK });
     let thats = if latest {
         "That\u{2019}s today\u{2019}s edition.".to_string()
@@ -341,7 +376,7 @@ fn back_page(ctx: &Ctx, b: &Bundle, page: &EditionPage, latest: bool) -> Vec<Pie
         }
         for (feed, ids) in groups {
             let l = ctx.line(&feed.to_uppercase(), ty.section, w, Align::Left);
-            let mut gp = Piece::new(l.height() + ctx.m.pt(2.0)).gap(ctx.m.pt(10.0)).keep();
+            let mut gp = Piece::new(l.height() + ctx.m.pt(2.0)).gap(ctx.m.pt(8.0)).keep();
             gp.els.push(El::Text { para: l, x: c.x as f32, y: 0.0 });
             out.push(gp);
             for id in ids {
@@ -399,16 +434,31 @@ pub fn edition_screens(ctx: &Ctx, b: &Bundle, pages: &[EditionPage], latest: boo
         let c = ctx.m.content();
         match &page.kind {
             PageKind::Front => {
-                pieces.push(masthead(ctx, b));
+                let mast = masthead(ctx, b);
+                let left = c.h as f32 - mast.h - gap;
+                pieces.push(mast);
                 let mut rest = page.stories.clone();
                 if let Some(lead) = page.lead {
                     rest.retain(|&x| x != lead);
-                    if let Some(a) = b.article(lead) {
-                        // On a wide screen the lead takes two columns and its picture the rest.
-                        pieces.push(story(ctx, lead, a, c.x as f32, c.w as f32, Role::Lead, true).gap(gap));
-                    }
                 }
-                let mut g = grid(ctx, b, &rest, cols.max(2).min(rest.len().max(1)).min(if cols == 1 { 1 } else { cols }));
+                let mut g = grid(ctx, b, &rest, cols);
+                if let Some(a) = page.lead.and_then(|l| b.article(l)) {
+                    // The lead and the first row of secondaries share the first screen when
+                    // there is room for a picture of some size; otherwise the lead has it alone.
+                    let row = g.first().map(|r| r.h + gap).unwrap_or(0.0);
+                    let budget = if left - row > c.h as f32 * 0.42 { left - row } else { left };
+                    let id = page.lead.unwrap();
+                    let mut lead = story(ctx, id, a, c.x as f32, c.w as f32, Role::Lead, Some(budget));
+                    let has_pic = |p: &Piece| p.els.iter().any(|e| matches!(e, El::Image { .. }));
+                    if budget < left && !has_pic(&lead) && ctx.has_image(a.image_url.as_deref()).is_some() {
+                        // The picture matters more than sharing the screen with the row.
+                        let alone = story(ctx, id, a, c.x as f32, c.w as f32, Role::Lead, Some(left));
+                        if has_pic(&alone) {
+                            lead = alone;
+                        }
+                    }
+                    pieces.push(lead.gap(gap));
+                }
                 if let Some(first) = g.first_mut() {
                     first.gap = gap;
                 }
@@ -430,11 +480,13 @@ pub fn edition_screens(ctx: &Ctx, b: &Bundle, pages: &[EditionPage], latest: boo
                     PageKind::ReadingList => Some("Saved from a source you don\u{2019}t subscribe to."),
                     _ => None,
                 };
-                pieces.push(heading(ctx, page, intro));
+                let head = heading(ctx, page, intro);
+                let left = c.h as f32 - head.h - gap;
+                pieces.push(head);
                 let mut ids = page.stories.iter().copied().filter(|id| b.article(*id).is_some());
                 if let Some(first) = ids.next() {
                     let a = b.article(first).unwrap();
-                    pieces.push(story(ctx, first, a, c.x as f32, c.w as f32, Role::Feature, true).gap(gap));
+                    pieces.push(story(ctx, first, a, c.x as f32, c.w as f32, Role::Feature, Some(left * 0.62)).gap(gap));
                 }
                 let rest: Vec<i64> = ids.collect();
                 let mut g = grid(ctx, b, &rest, cols);
@@ -533,7 +585,9 @@ pub fn article_screens(ctx: &Ctx, a: &Article) -> ArticleLayout {
     // The lead picture, unless the body starts with it anyway.
     let body_images: Vec<&str> = a.blocks.iter().filter_map(|b| if let Block::Image { url, .. } = b { Some(url.as_str()) } else { None }).collect();
     if let Some(url) = a.image_url.as_deref().filter(|u| !body_images.contains(u)) {
-        if let Some(p) = image_piece(ctx, url, None, x, w, gap) {
+        if let Some(mut p) = image_piece(ctx, url, None, x, w, gap) {
+            // The lead stays under the headline.
+            p.float = false;
             pieces.push(p);
         }
     }
@@ -551,7 +605,7 @@ pub fn article_screens(ctx: &Ctx, a: &Article) -> ArticleLayout {
                 if t.text.trim().is_empty() {
                     continue;
                 }
-                let p = ctx.para(&rich_or_plain(t, body), w, Align::Justify, body_lh, None);
+                let p = ctx.para(&rich_or_plain(t, body), w, Align::Left, body_lh, None);
                 pieces.extend(para_pieces(ctx, &p, x, first_gap));
             }
             Block::Heading { level, text: t } => {
@@ -582,8 +636,13 @@ pub fn article_screens(ctx: &Ctx, a: &Article) -> ArticleLayout {
                 }
                 // The rule down the left of each line.
                 let rule = ctx.m.pt(2.0).round().max(2.0) as i32;
-                for p in &mut qp {
-                    p.els.push(El::Fill { r: Rect::new(x as i32 + (indent * 0.25) as i32, 0, rule, p.h.ceil() as i32), v: MUTED });
+                let rx = x as i32 + (indent * 0.25) as i32;
+                for (i, p) in qp.iter_mut().enumerate() {
+                    p.els.push(El::Fill { r: Rect::new(rx, 0, rule, p.h.ceil() as i32), v: MUTED });
+                    if i > 0 && p.gap > 0.0 {
+                        // Bridges the space above, unless the piece starts a screen.
+                        p.divider.push(El::Fill { r: Rect::new(rx, -p.gap.ceil() as i32, rule, p.gap.ceil() as i32), v: MUTED });
+                    }
                 }
                 pieces.extend(qp);
             }
@@ -617,17 +676,34 @@ pub fn article_screens(ctx: &Ctx, a: &Article) -> ArticleLayout {
         p.els.push(El::Text { para: note, x, y: 0.0 });
         pieces.push(p);
     }
-    // An end mark.
-    let mut end = Piece::new(ctx.m.pt(8.0)).gap(gap);
+    // An end mark, after the last word when it fits there, so it never sits alone.
     let s = ctx.m.pt(5.0).round() as i32;
-    end.els.push(El::Fill { r: Rect::new((x + w) as i32 - s, 0, s, s), v: BLACK });
-    pieces.push(end);
+    let after_last = pieces.last_mut().and_then(|p| {
+        let (para, px, py) = p.els.iter().find_map(|e| match e {
+            El::Text { para, x, y } if para.lines.len() == 1 => Some((para.clone(), *x, *y)),
+            _ => None,
+        })?;
+        let lw = para.lines[0].width;
+        let mx = px + lw + ctx.m.pt(6.0);
+        (mx + s as f32 <= x + w).then(|| {
+            let top = py + para.baseline - s as f32;
+            p.els.push(El::Fill { r: Rect::new(mx.round() as i32, top.round() as i32, s, s), v: BLACK });
+        })
+    });
+    if after_last.is_none() {
+        let mut end = Piece::new(ctx.m.pt(8.0)).gap(gap);
+        end.els.push(El::Fill { r: Rect::new((x + w) as i32 - s, 0, s, s), v: BLACK });
+        if let Some(last) = pieces.last_mut() {
+            last.keep = true;
+        }
+        pieces.push(end);
+    }
     ArticleLayout { screens: paginate(&pieces, c) }
 }
 
 fn image_piece(ctx: &Ctx, url: &str, caption: Option<&RichText>, x: f32, w: f32, gap: f32) -> Option<Piece> {
     let (iw, ih) = ctx.images.dims(url)?;
-    let max_h = ctx.m.content().h as f32 * 0.62;
+    let max_h = ctx.m.content().h as f32 * 0.42;
     let mut dw = w.min(iw as f32 * ctx.m.dpi / 150.0).max(w * 0.4).min(w);
     let mut dh = dw * ih as f32 / iw as f32;
     if dh > max_h {
@@ -636,6 +712,7 @@ fn image_piece(ctx: &Ctx, url: &str, caption: Option<&RichText>, x: f32, w: f32,
     }
     let ix = x + (w - dw) / 2.0;
     let mut p = Piece::new(dh.round()).gap(gap);
+    p.float = true;
     p.els.push(El::Image { url: url.into(), r: Rect::new(ix as i32, 0, dw as i32, dh as i32), fit: Fit::Contain });
     if let Some(c) = caption {
         let cp = ctx.para(&rich_or_plain(c, ctx.ty.caption.color(MUTED)), w, Align::Left, 1.4, Some(6));
@@ -711,9 +788,9 @@ pub fn draw_chrome(ctx: &Ctx, canvas: &mut Canvas, ch: &Chrome) -> Vec<(Rect, Ac
     let back = ctx.line(ch.back_label, ui, m.w as f32 / 2.0, Align::Left);
     let chev = ui.size * 0.62;
     canvas.chevron(margin as f32 + chev * 0.3, mid, chev, -1.0, BLACK);
-    let bx = margin as f32 + chev * 0.9;
+    let bx = margin as f32 + chev * 1.25;
     back.draw(ctx.fonts, canvas, bx, mid - back.height() / 2.0);
-    let back_w = back.lines.first().map(|l| l.width).unwrap_or(0.0) + chev * 1.2;
+    let back_w = back.lines.first().map(|l| l.width).unwrap_or(0.0) + chev * 1.25;
     hits.push((Rect::new(0, 0, margin + back_w as i32 + margin, bar), Action::Back));
     let pos = ctx.line(&ch.position, ty.byline.color(MUTED), m.w as f32 / 2.0, Align::Right);
     let pos_w = pos.lines.first().map(|l| l.width).unwrap_or(0.0);
@@ -758,9 +835,9 @@ pub fn draw_chrome(ctx: &Ctx, canvas: &mut Canvas, ch: &Chrome) -> Vec<(Rect, Ac
         }
         None => {
             let pl = ctx.line("Previous", ui, m.w as f32 / 3.0, Align::Left);
-            pl.draw(ctx.fonts, canvas, margin as f32 + chev * 1.2, cy - pl.height() / 2.0);
+            pl.draw(ctx.fonts, canvas, margin as f32 + chev * 1.5, cy - pl.height() / 2.0);
             let nl = ctx.line("Next", ui, m.w as f32 / 3.0, Align::Right);
-            nl.draw(ctx.fonts, canvas, (m.w - margin) as f32 - chev * 1.2 - m.w as f32 / 3.0, cy - nl.height() / 2.0);
+            nl.draw(ctx.fonts, canvas, (m.w - margin) as f32 - chev * 1.5 - m.w as f32 / 3.0, cy - nl.height() / 2.0);
             let pw = pl.lines.first().map(|l| l.width).unwrap_or(0.0) as i32;
             hits.insert(0, (Rect::new(0, top, margin + pw + zone, bar), Action::Prev));
             hits.insert(0, (Rect::new(m.w - margin - pw - zone, top, margin + pw + zone, bar), Action::Next));
@@ -814,34 +891,45 @@ fn cover(ctx: &Ctx, canvas: &mut Canvas, b: &Bundle, r: Rect, big: bool) {
     let pages = b.edition_pages();
     let lead = pages.first().and_then(|p| p.lead.or_else(|| p.stories.first().copied())).and_then(|id| b.article(id));
     let bottom = (r.bottom() as f32 - pad * 0.8).floor();
+    // The column the headline and stand-in text use; narrower when the picture sits beside it.
+    let (tx, mut tw) = (ix, iw);
     if let Some(a) = lead {
         if let (Some((w0, h0)), Some(url)) = (ctx.has_image(a.image_url.as_deref()), a.image_url.as_ref()) {
-            let h = (iw * h0 as f32 / w0 as f32).clamp(iw * 0.4, iw * 0.62).min((bottom - y) * 0.48);
-            if h > m.pt(30.0) {
-                layout::draw(&[El::Image { url: url.clone(), r: Rect::new(ix as i32, y as i32, iw as i32, h as i32), fit: Fit::Cover }], ctx.fonts, ctx.images, canvas);
-                y += h + m.pt(5.0);
+            let avail = bottom - y;
+            if iw > avail * 1.5 && avail > m.pt(40.0) {
+                // A wide, short cover: the picture on the right, full height.
+                let gut = m.pt(8.0);
+                let pw = (iw * 0.45).round();
+                layout::draw(&[El::Image { url: url.clone(), r: Rect::new((ix + iw - pw) as i32, y as i32, pw as i32, avail as i32), fit: Fit::Cover }], ctx.fonts, ctx.images, canvas);
+                tw = iw - pw - gut;
+            } else {
+                let h = (iw * h0 as f32 / w0 as f32).clamp(iw * 0.4, iw * 0.62).min(avail * 0.48);
+                if h > m.pt(30.0) {
+                    layout::draw(&[El::Image { url: url.clone(), r: Rect::new(ix as i32, y as i32, iw as i32, h as i32), fit: Fit::Cover }], ctx.fonts, ctx.images, canvas);
+                    y += h + m.pt(5.0);
+                }
             }
         }
-        let hs = ty.lead.size(ty.lead.size * scale * if big { 0.95 } else { 0.85 });
-        let head = ctx.para(&text::plain(a.title.trim(), hs), iw, Align::Left, 1.1, Some(if big { 4 } else { 5 }));
+        let hs = ty.lead.size(ty.lead.size * scale * if big { 0.95 } else { 0.85 } * if tw < iw { 0.8 } else { 1.0 });
+        let head = ctx.para(&text::plain(a.title.trim(), hs), tw, Align::Left, 1.1, Some(if big { 4 } else { 5 }));
         if y + head.line_height <= bottom {
             let lines = ((bottom - y) / head.line_height).floor() as usize;
-            let head = if lines < head.lines.len() { ctx.para(&text::plain(a.title.trim(), hs), iw, Align::Left, 1.1, Some(lines.max(1))) } else { head };
-            head.draw(ctx.fonts, canvas, ix, y);
+            let head = if lines < head.lines.len() { ctx.para(&text::plain(a.title.trim(), hs), tw, Align::Left, 1.1, Some(lines.max(1))) } else { head };
+            head.draw(ctx.fonts, canvas, tx, y);
             y += head.height() + m.pt(4.0);
         }
     }
     // Stand-in text: grey lines in columns, the way a folded paper reads from across a room.
-    let cols = if big { 3 } else { 2 };
+    let cols = if big && tw == iw { 3 } else { 2 };
     let gut = m.pt(6.0);
-    let cw = (iw - gut * (cols as f32 - 1.0)) / cols as f32;
+    let cw = (tw - gut * (cols as f32 - 1.0)) / cols as f32;
     let lh = m.pt(5.5).max(4.0);
     let th = (lh * 0.42).max(2.0);
     let mut k = 0usize;
     let mut ly = y;
     while ly + lh <= bottom {
         for c in 0..cols {
-            let x = ix + c as f32 * (cw + gut);
+            let x = tx + c as f32 * (cw + gut);
             let frac = [1.0, 0.93, 0.97, 0.88, 1.0, 0.6, 0.95, 0.9][(k + c * 3) % 8];
             canvas.fill(Rect::new(x as i32, ly as i32, (cw * frac) as i32, th as i32), 200);
         }
