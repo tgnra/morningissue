@@ -229,7 +229,7 @@ class Simulation(
                         )
                     }
                 }
-                val affinity = db.feedDao().getAll().associate { keyOf.getValue(it.id) to it.affinity }
+                val affinity = db.feedDao().getSubscribed().associate { keyOf.getValue(it.id) to it.affinity }
                 phases[1] += System.nanoTime() - mark
                 mark = System.nanoTime()
 
