@@ -47,6 +47,12 @@ enum class ContentSource {
     FETCHED,
 }
 
+/**
+ * What a post carries besides its text: a podcast episode, a video file or some other download.
+ * Image attachments are not counted; they are the post's lead image.
+ */
+enum class EnclosureKind { NONE, AUDIO, VIDEO, OTHER }
+
 /** User's colour theme choice. E-ink display mode overrides both light and dark. */
 enum class ThemeMode { System, Light, Dark }
 

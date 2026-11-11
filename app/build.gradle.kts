@@ -69,6 +69,12 @@ android {
         getByName("benchmark") {
             kotlin.directories.add("src/release/java")
         }
+        // MigrationTestHelper reads the exported schemas as assets. Unit tests (Robolectric) are
+        // given the debug build's assets and have none of their own, so the schemas go into the
+        // debug build; release builds do not carry them.
+        getByName("debug") {
+            assets.directories.add("schemas")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

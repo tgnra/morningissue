@@ -8,10 +8,12 @@ import androidx.room3.Index
 import androidx.room3.PrimaryKey
 import java.time.Instant
 import java.time.LocalDate
+import net.tgnra.morningissue.model.ArticleTraits
 import net.tgnra.morningissue.model.CadenceTier
 import net.tgnra.morningissue.model.ContentSource
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
+import net.tgnra.morningissue.model.EnclosureKind
 import net.tgnra.morningissue.model.HealthFlag
 import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.model.SliderStep
@@ -216,4 +218,67 @@ data class ArticleFtsEntity(
     val summary: String,
     val author: String,
     val body: String,
+)
+
+/**
+ * A category the feed files a post under. Categories come only from the feed document, so
+ * they cannot be recomputed from what is stored; the archive carries them.
+ */
+@Entity(
+    tableName = "article_category",
+    primaryKeys = ["articleId", "key"],
+    foreignKeys = [
+        ForeignKey(entity = ArticleEntity::class, parentColumns = ["id"], childColumns = ["articleId"], onDelete = ForeignKey.CASCADE),
+    ],
+    // "Every post in this category", for learning an affinity per feed and category.
+    indices = [Index("key")],
+)
+data class ArticleCategoryEntity(
+    val articleId: Long,
+    /** The category squashed to single spaces and lowercased (`ArticleCategories.key`). */
+    val key: String,
+    /** The feed's own spelling. */
+    val label: String,
+)
+
+/**
+ * Structural features of a post (`ArticleTraits`), computed by `ArticleTraitRules` at sync and,
+ * for posts stored before the table existed or under older rules, by `TraitsBackfill`.
+ */
+@Entity(
+    tableName = "article_traits",
+    foreignKeys = [
+        ForeignKey(entity = ArticleEntity::class, parentColumns = ["id"], childColumns = ["articleId"], onDelete = ForeignKey.CASCADE),
+    ],
+)
+data class ArticleTraitsEntity(
+    @PrimaryKey val articleId: Long,
+    /** `ArticleTraitRules.VERSION` when the row was computed; a row that is behind is recomputed. */
+    val traitsVersion: Int,
+    val linkCount: Int,
+    val imageCount: Int,
+    val hasCode: Boolean,
+    /** Known only from the feed document; recomputing a row keeps it. */
+    val enclosure: EnclosureKind,
+    val isLinkPost: Boolean,
+    val titlePrefix: String?,
+) {
+    fun toTraits() = ArticleTraits(linkCount, imageCount, hasCode, enclosure, isLinkPost, titlePrefix)
+}
+
+/**
+ * A post's text embedding. One row per post: [model] says which embedder (and version of it)
+ * wrote [vector], so a post embedded by an older model counts as not embedded and is replaced.
+ * The layout of [vector] is the embedder's own.
+ */
+@Entity(
+    tableName = "article_embedding",
+    foreignKeys = [
+        ForeignKey(entity = ArticleEntity::class, parentColumns = ["id"], childColumns = ["articleId"], onDelete = ForeignKey.CASCADE),
+    ],
+)
+class ArticleEmbeddingEntity(
+    @PrimaryKey val articleId: Long,
+    val model: Int,
+    val vector: ByteArray,
 )

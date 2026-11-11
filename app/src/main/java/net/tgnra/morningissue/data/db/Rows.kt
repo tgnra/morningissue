@@ -4,6 +4,8 @@ import androidx.room3.Embedded
 import androidx.room3.Junction
 import androidx.room3.Relation
 import java.time.Instant
+import net.tgnra.morningissue.model.ArticleCategory
+import net.tgnra.morningissue.model.EnclosureKind
 
 /** A feed with its tags and health row. */
 data class FeedWithDetails(
@@ -102,4 +104,64 @@ data class FeedPostStatsRow(
 data class ContentSizeRow(
     val articleId: Long,
     val size: Long,
+)
+
+/**
+ * What sync needs to know about a post it already holds; see `ArticleSignalDao.storedPosts`.
+ * [traitsVersion] and [enclosure] are null when the post has no `article_traits` row.
+ */
+data class StoredPostRow(
+    val articleId: Long,
+    val guid: String,
+    val hasCategories: Boolean,
+    val traitsVersion: Int?,
+    val enclosure: EnclosureKind?,
+)
+
+/**
+ * A post whose traits are missing or behind, with what they are computed from; see
+ * `ArticleSignalDao.articlesNeedingTraits`. [blocksJson] is null when the post has no stored
+ * body; [enclosure] is the outdated row's, when there is one.
+ */
+data class TraitsInputRow(
+    val articleId: Long,
+    val title: String,
+    val url: String?,
+    val siteUrl: String?,
+    val blocksJson: String?,
+    val enclosure: EnclosureKind?,
+)
+
+/** A post to embed; see `ArticleSignalDao.articlesWithoutEmbedding`. [body] is the opening of its plain text. */
+data class EmbeddingInputRow(
+    val articleId: Long,
+    val title: String,
+    val summary: String?,
+    val body: String?,
+)
+
+/** One row of `ArticleSignalDao`'s ranking reads, before its categories are attached. */
+data class ArticleSignalRow(
+    val articleId: Long,
+    val feedId: Long,
+    val wordCount: Int,
+    @Embedded(prefix = "t_") val traits: ArticleTraitsEntity?,
+    val vector: ByteArray?,
+)
+
+/**
+ * Everything stored about a post that the within-feed ranking reads, without its text.
+ *
+ * @property traits null when not computed yet; check `traitsVersion` against
+ *   `ArticleTraitRules.VERSION` before trusting more than the enclosure.
+ * @property embedding the vector written by the model asked for; null when the post has not
+ *   been embedded by it.
+ */
+class ArticleSignals(
+    val articleId: Long,
+    val feedId: Long,
+    val wordCount: Int,
+    val categories: List<ArticleCategory>,
+    val traits: ArticleTraitsEntity?,
+    val embedding: ByteArray?,
 )

@@ -11,20 +11,28 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.runBlocking
+import net.tgnra.morningissue.data.db.ArticleEmbeddingEntity
+import net.tgnra.morningissue.data.db.ArticleSignalDao
 import net.tgnra.morningissue.data.db.EditionEntity
 import net.tgnra.morningissue.data.db.EditionItemEntity
 import net.tgnra.morningissue.data.db.FeedEntity
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.db.T0
 import net.tgnra.morningissue.data.db.article
+import net.tgnra.morningissue.data.signals.TraitsBackfill
 import net.tgnra.morningissue.data.storage.RoomStorageRepository
 import net.tgnra.morningissue.edition.FakeSettings
 import net.tgnra.morningissue.edition.MutableClock
+import net.tgnra.morningissue.model.ArticleCategories
+import net.tgnra.morningissue.model.ArticleCategory
+import net.tgnra.morningissue.model.ArticleTraitRules
+import net.tgnra.morningissue.model.ArticleTraits
 import net.tgnra.morningissue.model.ContentBlock
 import net.tgnra.morningissue.model.ContentBlocks
 import net.tgnra.morningissue.model.ContentSource
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
+import net.tgnra.morningissue.model.EnclosureKind
 import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.model.RichText
 import net.tgnra.morningissue.model.SliderStep
@@ -377,5 +385,140 @@ class ArchiveTransferTest {
         val edition = target.editionDao().getByDate(LocalDate.of(2026, 1, 2), EditionKind.MORNING)!!
         assertEquals(listOf(ItemKind.LEAD), target.editionDao().getItems(edition.id).map { it.item.kind })
         assertTrue(target.articleDao().getContent(target.editionDao().getItems(edition.id).single().item.articleId) == null)
+    }
+
+    // --- Categories and enclosures ---------------------------------------------------------------
+
+    private fun category(name: String) = ArticleCategories.of(name)!!
+
+    private suspend fun categoriesOf(db: MorningIssueDatabase, articleId: Long): List<ArticleCategory> =
+        db.articleSignalDao().categoriesOf(listOf(articleId)).map { ArticleCategory(it.key, it.label) }
+
+    private suspend fun idOf(db: MorningIssueDatabase, feedUrl: String, guid: String): Long =
+        db.articleDao().getByGuid(db.feedDao().getByUrl(feedUrl)!!.id, guid)!!.id
+
+    @Test
+    fun categoriesAndEnclosureKindsRoundTripAndTheRestIsRebuilt() = runBlocking<Unit> {
+        val library = seed(source)
+        val signals = source.articleSignalDao()
+        val blog1 = library.posts.getValue("blog-1")
+        val blog2 = library.posts.getValue("blog-2")
+        signals.addCategories(blog1, listOf(category("Tech"), category("Long Reads")))
+        signals.addCategories(library.posts.getValue("news-1"), listOf(category("World")))
+        signals.upsertTraits(ArticleSignalDao.traitsRow(blog1, ArticleTraits(4, 2, true, EnclosureKind.AUDIO, false, "podcast")))
+        signals.upsertTraits(ArticleSignalDao.traitsRow(blog2, ArticleTraits(1, 0, false, EnclosureKind.NONE, true, null)))
+        signals.upsertEmbeddings(listOf(ArticleEmbeddingEntity(blog1, 1, byteArrayOf(1, 2, 3))))
+
+        val (file, _) = export(source)
+        import(target, file)
+        assertEquals(snapshot(source), snapshot(target))
+
+        val imported = target.articleSignalDao()
+        val blogUrl = "https://blog.example/feed.xml"
+        val newBlog1 = idOf(target, blogUrl, "blog-1")
+        assertEquals(listOf(ArticleCategory("long reads", "Long Reads"), ArticleCategory("tech", "Tech")), categoriesOf(target, newBlog1))
+        assertEquals(listOf(ArticleCategory("world", "World")), categoriesOf(target, idOf(target, "http://www.news.example/rss", "news-1")))
+        assertEquals(3, imported.categoryCount())
+
+        // Traits and embeddings are not in the file. Only the enclosure, which nothing stored
+        // could give back, comes across, in a row that still awaits its traits.
+        assertEquals(0, imported.embeddingCount())
+        assertEquals(1, imported.traitsCount())
+        val pending = imported.getTraits(newBlog1)!!
+        assertEquals(ArticleTraitRules.VERSION_PENDING, pending.traitsVersion)
+        assertEquals(EnclosureKind.AUDIO, pending.enclosure)
+
+        assertEquals(12, TraitsBackfill(target).run())
+        val rebuilt = imported.getTraits(newBlog1)!!
+        assertEquals(ArticleTraitRules.VERSION, rebuilt.traitsVersion)
+        assertEquals(EnclosureKind.AUDIO, rebuilt.enclosure)
+        assertEquals(12, imported.traitsCount())
+
+        // A second import adds nothing and disturbs nothing.
+        import(target, file)
+        assertEquals(3, imported.categoryCount())
+        assertEquals(rebuilt, imported.getTraits(newBlog1))
+    }
+
+    @Test
+    fun importedCategoriesAndEnclosuresFillInWhatAHeldPostLacksAndReplaceNothing() = runBlocking<Unit> {
+        val library = seed(source)
+        val signals = source.articleSignalDao()
+        for (n in 1..3) {
+            val id = library.posts.getValue("blog-$n")
+            signals.addCategories(id, listOf(category("Archived")))
+            signals.upsertTraits(ArticleSignalDao.traitsRow(id, ArticleTraits(0, 0, false, EnclosureKind.AUDIO, false, null)))
+        }
+        val (file, _) = export(source)
+
+        // The target holds the same three posts: one filed and with a video, one computed without an enclosure, one bare.
+        val blog = target.feedDao().insert(FeedEntity(url = "https://blog.example/feed.xml", title = "A Blog", addedAt = day(0)))
+        val held = (1..3).map { n -> target.articleDao().insertNew(article(blog, "blog-$n", firstSeenAt = day(n.toLong())))!! }
+        val local = target.articleSignalDao()
+        local.addCategories(held[0], listOf(category("Local")))
+        local.upsertTraits(ArticleSignalDao.traitsRow(held[0], ArticleTraits(7, 0, false, EnclosureKind.VIDEO, false, null)))
+        local.upsertTraits(ArticleSignalDao.traitsRow(held[1], ArticleTraits(7, 0, false, EnclosureKind.NONE, false, null)))
+
+        import(target, file)
+
+        assertEquals(listOf(ArticleCategory("local", "Local")), categoriesOf(target, held[0]))
+        assertEquals(EnclosureKind.VIDEO, local.getTraits(held[0])!!.enclosure)
+        assertEquals(listOf(ArticleCategory("archived", "Archived")), categoriesOf(target, held[1]))
+        // The computed row keeps its numbers and learns the enclosure.
+        assertEquals(ArticleSignalDao.traitsRow(held[1], ArticleTraits(7, 0, false, EnclosureKind.AUDIO, false, null)), local.getTraits(held[1]))
+        assertEquals(listOf(ArticleCategory("archived", "Archived")), categoriesOf(target, held[2]))
+        assertEquals(ArticleTraitRules.VERSION_PENDING, local.getTraits(held[2])!!.traitsVersion)
+        assertEquals(EnclosureKind.AUDIO, local.getTraits(held[2])!!.enclosure)
+    }
+
+    @Test
+    fun anArchiveWrittenBeforeCategoriesImportsAndForeignCategoriesAreNormalised() = runBlocking<Unit> {
+        val file = ByteArrayOutputStream().also { out ->
+            ZipOutputStream(out).use { zip ->
+                fun entry(name: String, text: String) {
+                    zip.putNextEntry(ZipEntry(name))
+                    zip.write(text.toByteArray())
+                    zip.closeEntry()
+                }
+                entry("manifest.json", """{"format":"morning-issue-archive","version":1,"exportedAt":0,"posts":3}""")
+                entry("feeds.jsonl", """{"n":1,"url":"https://a.example/feed","title":"A","addedAt":0}""")
+                entry(
+                    "posts.jsonl",
+                    // As version 1 of the app wrote a post: no categories, no enclosure.
+                    """{"n":1,"feed":1,"guid":"old","title":"Old","publishedAt":0,"firstSeenAt":0,"wordCount":3}""" + "\n" +
+                        // As another program might: untidy keys, a blank one, repeats, an unknown enclosure kind.
+                        """{"n":2,"feed":1,"guid":"untidy","title":"Untidy","publishedAt":0,"firstSeenAt":0,"categories":[""" +
+                        """{"key":"  Long   READS ","label":"Long Reads"},{"key":"","label":"Blank"},{"key":"long reads","label":"Again"}],"enclosure":"HOLOGRAM"}""" + "\n" +
+                        """{"n":3,"feed":1,"guid":"episode","title":"Episode","publishedAt":0,"firstSeenAt":0,"categories":[],"enclosure":"NONE"}""" + "\n",
+                )
+                entry("editions.jsonl", "")
+            }
+        }.toByteArray()
+
+        assertEquals(ImportReport(postsImported = 3, feedsAdded = 1), import(target, file))
+        val url = "https://a.example/feed"
+        assertTrue(categoriesOf(target, idOf(target, url, "old")).isEmpty())
+        assertEquals(listOf(ArticleCategory("long reads", "Long Reads")), categoriesOf(target, idOf(target, url, "untidy")))
+        assertEquals(0, target.articleSignalDao().traitsCount())
+        assertEquals(3, TraitsBackfill(target).run())
+    }
+
+    @Test
+    fun aPostsLineCarriesItsCategoriesAndEnclosure() = runBlocking<Unit> {
+        val library = seed(source)
+        val id = library.posts.getValue("blog-1")
+        source.articleSignalDao().addCategories(id, listOf(category("Tech")))
+        source.articleSignalDao().upsertTraits(ArticleSignalDao.traitsRow(id, ArticleTraits(0, 0, false, EnclosureKind.VIDEO, false, null)))
+        val (file, _) = export(source)
+        val posts = ZipInputStream(ByteArrayInputStream(file)).use { zip ->
+            generateSequence { zip.nextEntry }.first { it.name == "posts.jsonl" }
+            zip.readBytes().decodeToString().trim().lines().map { ArchiveFormat.json.decodeFromString<ArchivePost>(it) }
+        }
+        val blog = posts.single { it.guid == "blog-1" }
+        assertEquals(listOf(ArchiveCategory("tech", "Tech")), blog.categories)
+        assertEquals("VIDEO", blog.enclosure)
+        val news = posts.single { it.guid == "news-1" }
+        assertTrue(news.categories.isEmpty())
+        assertNull(news.enclosure)
     }
 }

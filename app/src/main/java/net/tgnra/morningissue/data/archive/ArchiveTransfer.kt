@@ -29,10 +29,12 @@ import net.tgnra.morningissue.data.db.FeedEntity
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.repository.AffinityLearner
 import net.tgnra.morningissue.engine.RankingConfig
+import net.tgnra.morningissue.model.ArticleCategories
 import net.tgnra.morningissue.model.ContentBlocks
 import net.tgnra.morningissue.model.ContentSource
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
+import net.tgnra.morningissue.model.EnclosureKind
 import net.tgnra.morningissue.model.FeedUrls
 import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.model.SliderStep
@@ -62,8 +64,9 @@ class ArchiveFormatException(val reason: Reason) : IOException(reason.name) {
 }
 
 /**
- * Writes the whole library (feeds with their tags, every stored post with its text and the
- * reader's engagement, and every released edition) to one file, and merges such a file back.
+ * Writes the whole library (feeds with their tags, every stored post with its text, its feed
+ * categories and the reader's engagement, and every released edition) to one file, and merges
+ * such a file back.
  * Implemented by [RoomArchiveTransfer]. The file format is [ArchiveFormat].
  */
 interface ArchiveTransfer {
@@ -79,6 +82,8 @@ interface ArchiveTransfer {
      * - A post is matched by feed and post ID. One already held is left alone, except that
      *   text it has lost to trimming is put back.
      * - Engagement is merged without overwriting anything set locally.
+     * - A post's categories are added when it has none. Traits and embeddings are not in the
+     *   file; `TraitsBackfill` and the embedder rebuild them for imported posts.
      * - An edition is matched by date and kind; one already held is skipped.
      *
      * @throws ArchiveFormatException when the file is not an archive, or is from a newer version.
@@ -99,6 +104,7 @@ class RoomArchiveTransfer(
     private val engagementDao = database.engagementDao()
     private val editionDao = database.editionDao()
     private val archiveDao = database.archiveDao()
+    private val signalDao = database.articleSignalDao()
 
     // --- Export ----------------------------------------------------------------------------
 
@@ -154,9 +160,12 @@ class RoomArchiveTransfer(
                 val ids = page.map { it.id }
                 val contents = archiveDao.contents(ids).associateBy { it.articleId }
                 val engagements = archiveDao.engagements(ids).associateBy { it.articleId }
+                val categories = signalDao.categoriesOf(ids).groupBy({ it.articleId }) { ArchiveCategory(it.key, it.label) }
+                val enclosures = signalDao.traitsOf(ids).filter { it.enclosure != EnclosureKind.NONE }.associate { it.articleId to it.enclosure.name }
                 for (article in page) {
                     val content = contents[article.id]?.let { ArchiveContent(it.blocksJson, it.source.name, it.storedAt.toEpochMilli()) }
-                    line(json.encodeToString(article.toArchive(content, engagements[article.id]?.toArchive())))
+                    val post = article.toArchive(content, engagements[article.id]?.toArchive())
+                    line(json.encodeToString(post.copy(categories = categories[article.id].orEmpty(), enclosure = enclosures[article.id])))
                 }
                 posts += page.size
                 onProgress(ArchiveProgress(posts, postsTotal))
@@ -306,12 +315,30 @@ class RoomArchiveTransfer(
             }
         }
         postIds[post.n] = articleId
+        importSignals(post, articleId, isNew = existing == null)
         post.engagement?.let { archived ->
             val local = engagementDao.get(articleId)
             val merged = mergeEngagement(articleId, local, archived)
             if (merged != local) archiveDao.upsertEngagement(merged)
         }
         return result
+    }
+
+    /**
+     * Categories and the enclosure kind fill in what the post lacks and never replace what it
+     * has, like engagement. Keys are normalised again, since the file may not be this app's own.
+     */
+    private suspend fun importSignals(post: ArchivePost, articleId: Long, isNew: Boolean) {
+        val categories = post.categories.mapNotNull { ArticleCategories.of(it.key, it.label) }
+        if (categories.isNotEmpty() && (isNew || signalDao.categoriesOf(listOf(articleId)).isEmpty())) {
+            signalDao.addCategories(articleId, categories)
+        }
+        val enclosure = post.enclosure?.let { enumOrNull<EnclosureKind>(it) }?.takeIf { it != EnclosureKind.NONE } ?: return
+        val held = if (isNew) null else signalDao.getTraits(articleId)
+        when {
+            held == null -> signalDao.insertPendingEnclosure(articleId, enclosure)
+            held.enclosure == EnclosureKind.NONE -> signalDao.updateEnclosure(articleId, enclosure)
+        }
     }
 
     private suspend fun storeContent(articleId: Long, wordCount: Int, content: Triple<ArchiveContent, String, ContentSource>) {

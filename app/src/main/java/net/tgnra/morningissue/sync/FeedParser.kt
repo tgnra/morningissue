@@ -1,6 +1,8 @@
 package net.tgnra.morningissue.sync
 
 import java.time.Instant
+import net.tgnra.morningissue.model.ArticleCategories
+import net.tgnra.morningissue.model.ArticleCategory
 
 /** A post as read from the document, before identity, dates and links are settled. */
 internal class RawItem {
@@ -20,6 +22,20 @@ internal class RawItem {
 
     /** Overrides the feed's base for this post's relative links (Atom `xml:base`). */
     var base: String? = null
+
+    /** The feed's categories for the post, in document order, uncleaned. */
+    val categories = ArrayList<ArticleCategory>()
+
+    /** Every attachment, images included, as written. */
+    val enclosures = ArrayList<ItemEnclosure>()
+
+    fun addCategory(name: String?, label: String? = null) {
+        name?.let { ArticleCategories.of(it, label) }?.let { categories += it }
+    }
+
+    fun addEnclosure(url: String?, mediaType: String?) {
+        if (!url.isNullOrBlank()) enclosures += ItemEnclosure(url, mediaType?.trim()?.takeIf { it.isNotEmpty() })
+    }
 }
 
 internal class RawFeed(val format: FeedFormat) {
@@ -119,6 +135,9 @@ object FeedParser {
             bodyHtml = bodyHtml,
             // Relative links inside the body are relative to the post's page when it has one.
             baseUrl = url ?: siteUrl ?: base,
+            siteUrl = siteUrl,
+            categories = ArticleCategories.clean(item.categories),
+            enclosures = item.enclosures.mapNotNull { enclosure -> Texts.resolve(base, enclosure.url)?.let { enclosure.copy(url = it) } },
         )
     }
 

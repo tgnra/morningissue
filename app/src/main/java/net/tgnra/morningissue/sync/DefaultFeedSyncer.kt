@@ -23,17 +23,22 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import net.tgnra.morningissue.data.db.ArticleEntity
+import net.tgnra.morningissue.data.db.ArticleSignalDao
 import net.tgnra.morningissue.data.db.FeedEntity
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
+import net.tgnra.morningissue.data.db.StoredPostRow
 import net.tgnra.morningissue.engine.Cadence
 import net.tgnra.morningissue.engine.RankingConfig
+import net.tgnra.morningissue.model.ArticleTraitRules
 import net.tgnra.morningissue.model.ContentBlocks
+import net.tgnra.morningissue.model.EnclosureKind
 import net.tgnra.morningissue.model.FeedUrls
 import net.tgnra.morningissue.model.HealthFlag
 
 /**
  * The real [FeedSyncer]. Fetches feeds a few at a time, stores posts it has not seen with
- * first-seen = now, and keeps each feed's validators, health row and cadence up to date.
+ * first-seen = now (and their categories and traits), and keeps each feed's validators, health
+ * row and cadence up to date.
  */
 class DefaultFeedSyncer(
     private val database: MorningIssueDatabase,
@@ -50,6 +55,7 @@ class DefaultFeedSyncer(
     private val feedDao = database.feedDao()
     private val articleDao = database.articleDao()
     private val healthDao = database.feedHealthDao()
+    private val signalDao = database.articleSignalDao()
 
     private val _status = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
     override val status: StateFlow<SyncStatus> = _status.asStateFlow()
@@ -162,10 +168,21 @@ class DefaultFeedSyncer(
         }
     }
 
-    /** Stores the posts the feed has not had before and returns how many there were. */
+    /**
+     * Stores the posts the feed has not had before, with their categories and traits, and
+     * returns how many there were.
+     *
+     * Posts already held are completed where something is missing: categories and traits did
+     * not exist before database version 2, and a category or an enclosure can only be learned
+     * from the feed. Once a post has them it is passed over, so an ordinary sync costs one
+     * read per feed here ([ArticleSignalDao.storedPosts]) and converts no HTML.
+     */
     private suspend fun store(feed: FeedEntity, parsed: ParsedFeed, now: Instant): Int {
-        val fresh = parsed.items.filter { articleDao.getByGuid(feed.id, it.guid) == null }
-        if (fresh.isEmpty()) return 0
+        val stored = parsed.items.map { it.guid }.chunked(ArticleSignalDao.MAX_IDS)
+            .flatMap { signalDao.storedPosts(feed.id, it) }.associateBy { it.guid }
+        val fresh = parsed.items.filter { it.guid !in stored }
+        val incomplete = parsed.items.mapNotNull { item -> stored[item.guid]?.let { completion(item, it) } }
+        if (fresh.isEmpty() && incomplete.isEmpty()) return 0
         // HTML conversion is the slow part; do it outside the transaction.
         val rows = withContext(parseDispatcher) {
             fresh.map { item ->
@@ -185,14 +202,47 @@ class DefaultFeedSyncer(
                     wordCount = content.wordCount,
                     contentHash = content.contentHash,
                 )
-                Triple(article, content.blocks.takeIf { it.isNotEmpty() }?.let(ContentBlocks::encode), content.plainText)
+                NewPost(item, article, content.blocks.takeIf { it.isNotEmpty() }?.let(ContentBlocks::encode))
             }
+        }
+        val traits = withContext(parseDispatcher) {
+            incomplete.filter { it.traits }.associate { it.articleId to it.item.content.traits }
         }
         return database.withWriteTransaction {
-            rows.count { (article, blocksJson, plainText) ->
-                articleDao.insertNew(article, blocksJson, plainText.takeIf { blocksJson != null }) != null
+            for (post in incomplete) {
+                if (post.categories) signalDao.addCategories(post.articleId, post.item.categories)
+                traits[post.articleId]?.let { signalDao.upsertTraits(ArticleSignalDao.traitsRow(post.articleId, it)) }
+                if (post.enclosure) signalDao.updateEnclosure(post.articleId, post.item.enclosure)
+            }
+            rows.count { post ->
+                val content = post.item.content
+                val id = articleDao.insertNew(post.article, post.blocksJson, content.plainText.takeIf { post.blocksJson != null })
+                    ?: return@count false
+                signalDao.addCategories(id, post.item.categories)
+                signalDao.upsertTraits(ArticleSignalDao.traitsRow(id, content.traits))
+                true
             }
         }
+    }
+
+    private class NewPost(val item: ParsedItem, val article: ArticleEntity, val blocksJson: String?)
+
+    /** What a post already held is missing that [item] can supply. */
+    private class Completion(
+        val item: ParsedItem,
+        val articleId: Long,
+        val categories: Boolean,
+        /** No traits, or traits under older rules: compute them from the feed's body, as for a new post. */
+        val traits: Boolean,
+        /** Current traits written without the feed at hand (by `TraitsBackfill`), which cannot know the enclosure. */
+        val enclosure: Boolean,
+    )
+
+    private fun completion(item: ParsedItem, stored: StoredPostRow): Completion? {
+        val categories = !stored.hasCategories && item.categories.isNotEmpty()
+        val traits = stored.traitsVersion != ArticleTraitRules.VERSION
+        val enclosure = !traits && stored.enclosure == EnclosureKind.NONE && item.enclosure != EnclosureKind.NONE
+        return if (categories || traits || enclosure) Completion(item, stored.articleId, categories, traits, enclosure) else null
     }
 
     /**

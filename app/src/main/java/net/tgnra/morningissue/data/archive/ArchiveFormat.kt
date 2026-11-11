@@ -11,7 +11,11 @@ import kotlinx.serialization.json.Json
  *   do not raise it.
  * - `feeds.jsonl`: one [ArchiveFeed] per line.
  * - `posts.jsonl`: one [ArchivePost] per line, with its stored body and the reader's
- *   engagement when there is any.
+ *   engagement when there is any. A post also carries the two things only its feed could
+ *   supply again, its categories and the kind of its enclosure. The rest of what the ranking
+ *   reads (traits, embeddings) is left out and rebuilt from the post after an import. Both
+ *   fields were added without raising the version: files written before them import as posts
+ *   without categories.
  * - `editions.jsonl`: one [ArchiveEdition] per line, with its items.
  *
  * Feeds and posts carry a number that is only meaningful inside the file; posts point at
@@ -75,6 +79,16 @@ data class ArchivePost(
     val contentHash: String? = null,
     val content: ArchiveContent? = null,
     val engagement: ArchiveEngagement? = null,
+    val categories: List<ArchiveCategory> = emptyList(),
+    /** An `EnclosureKind` name; absent when the post has no enclosure or none is known. */
+    val enclosure: String? = null,
+)
+
+/** A feed's category for a post, as in `article_category`. */
+@Serializable
+data class ArchiveCategory(
+    val key: String,
+    val label: String,
 )
 
 @Serializable
