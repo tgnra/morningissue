@@ -542,4 +542,35 @@
     <string name="subscribe_to">Subscribe to %1$s</string>
     <string name="subscribed_to">Subscribed to %1$s.</string>
     <string name="onboarding_discover_detail">Not sure where to start? Browse suggested blogs and small sites.</string>
+
+    <!-- Sync with Kobo -->
+    <string name="settings_kobo">Kobo</string>
+    <string name="settings_kobo_sync">Sync with Kobo</string>
+    <string name="settings_kobo_sync_detail">Sends the latest three editions to a Kobo e-reader on the same Wi-Fi, and brings back what you read, Liked and saved there.</string>
+    <string name="settings_kobo_open">Open</string>
+    <string name="kobo_title">Sync with Kobo</string>
+    <string name="kobo_phone">This phone</string>
+    <string name="kobo_address">Address</string>
+    <string name="kobo_address_detail">The phone listens only while this screen is open. On the Kobo, choose Morning Issue from the main menu; both need to be on the same Wi-Fi. If the Kobo cannot find the phone, put this address in its config.json.</string>
+    <string name="kobo_address_value">%1$s, port %2$d</string>
+    <string name="kobo_no_wifi">Not on Wi-Fi</string>
+    <string name="kobo_status_starting">Starting…</string>
+    <string name="kobo_status_waiting">Waiting for a Kobo.</string>
+    <string name="kobo_status_no_wifi">Connect this phone to Wi-Fi, the same network as the Kobo.</string>
+    <string name="kobo_status_port_in_use">Port %1$d is in use by another app, so a Kobo cannot reach Morning Issue. Close that app and open this screen again.</string>
+    <string name="kobo_status_synced">%1$s synced at %2$s.</string>
+    <plurals name="kobo_status_synced_changes">
+        <item quantity="one">%1$s synced at %2$s, with %3$,d change from its reader.</item>
+        <item quantity="other">%1$s synced at %2$s, with %3$,d changes from its reader.</item>
+    </plurals>
+    <string name="kobo_paired">Paired Kobos</string>
+    <string name="kobo_none_paired">No Kobo is paired yet. The first time a Kobo syncs, it asks here to be allowed.</string>
+    <string name="kobo_last_synced">Last synced %1$s</string>
+    <string name="kobo_never_synced">Not synced yet</string>
+    <string name="kobo_forget">Forget</string>
+    <string name="kobo_forget_description">Forget %1$s</string>
+    <string name="kobo_pair_title">Allow %1$s to sync?</string>
+    <string name="kobo_pair_detail">It will get the latest three editions and send back what is opened, read, Liked and saved on it. Allow only a device you know.</string>
+    <string name="kobo_allow">Allow</string>
+    <string name="kobo_deny">Deny</string>
 </resources>

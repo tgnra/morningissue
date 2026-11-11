@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.db.SyncPeerEntity
 
@@ -63,6 +65,7 @@ class KoboSync(
     private val deviceName: () -> String,
 ) {
     val pairing = Pairing()
+    private val running = Mutex()
 
     private val state = MutableStateFlow(KoboSyncStatus())
     val status: StateFlow<KoboSyncStatus> = state.asStateFlow()
@@ -71,8 +74,12 @@ class KoboSync(
 
     suspend fun forget(deviceId: String) = database.syncPeerDao().forget(deviceId)
 
-    /** Serves and beacons until cancelled. A port another app holds is reported in [status], not thrown. */
-    suspend fun run() {
+    /**
+     * Serves and beacons until cancelled. A port another app holds is reported in [status], not
+     * thrown. A second call waits for the first to finish, so that reopening the screen quickly
+     * does not find its own port still taken.
+     */
+    suspend fun run() = running.withLock {
         val dbId = installId.get()
         val routes = KoboRoutes(database, pairing, { dbId }, imageFile, clock, onActivity = ::record)
         val server = LanHttpServer(KoboProtocol.HTTP_PORT, routes::handle)
@@ -92,7 +99,8 @@ class KoboSync(
                 }
             }
         } finally {
-            pairing.answer(false)
+            // A pairing request still waiting is not denied: its connection closes, and the
+            // Kobo reports that the phone went away rather than that the reader refused.
             state.update { it.copy(state = if (it.state == KoboSyncStatus.State.PORT_IN_USE) it.state else KoboSyncStatus.State.STOPPED) }
         }
     }

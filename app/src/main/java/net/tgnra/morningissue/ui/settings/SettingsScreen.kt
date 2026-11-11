@@ -49,12 +49,14 @@ import net.tgnra.morningissue.ui.layout.LocalPaperLayoutSpec
 import net.tgnra.morningissue.ui.theme.MorningIssueTheme
 
 /**
- * Reset time, edition length, theme and display mode. Every change is written straight to the
- * settings store, and the app re-themes from that, so there is nothing to confirm.
+ * Reset time, edition length, theme and display mode, storage and the archive, and the way to
+ * Sync with Kobo. Every change is written straight to the settings store, and the app
+ * re-themes from that, so there is nothing to confirm.
  */
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onOpenKoboSync: () -> Unit = {},
 ) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
@@ -167,6 +169,11 @@ fun SettingsScreen(
                 }
             }
             StorageSettingsSections(settings.storageBudgetMb)
+            SettingsSection(stringResource(R.string.settings_kobo)) {
+                Setting(stringResource(R.string.settings_kobo_sync), stringResource(R.string.settings_kobo_sync_detail)) {
+                    PaperButton(stringResource(R.string.settings_kobo_open), onClick = onOpenKoboSync)
+                }
+            }
             // Empty in release builds.
             DebugSettingsSection()
         }
