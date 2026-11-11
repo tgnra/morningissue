@@ -37,22 +37,78 @@ internal object XmlText {
      * first tag is dropped. CDATA sections and comments are left alone.
      */
     fun sanitize(xml: String): String {
-        val start = xml.indexOf('<').coerceAtLeast(0)
-        return SANITIZE.replace(xml.substring(start)) { match ->
-            val value = match.value
-            val name = match.groups[1]?.value
-            when {
-                value.startsWith("<") -> value
-                value == "&" -> "&amp;"
-                name == null -> if (isValidCharRef(value)) value else ""
-                name in XML_ENTITIES -> value
-                else -> {
-                    val decoded = Parser.unescapeEntities(value, false)
-                    if (decoded == value) "&amp;$name;" else escape(decoded)
+        // Scanned by hand. The earlier Regex.replace with a lambda took five seconds on a phone
+        // for a 270 kB feed of escaped HTML (about 0.7 ms per entity); this takes under 100 ms.
+        val out = StringBuilder(xml.length + 64)
+        var i = xml.indexOf('<').coerceAtLeast(0)
+        val n = xml.length
+        while (i < n) {
+            val ch = xml[i]
+            if (ch == '<') {
+                val close = when {
+                    xml.startsWith("<![CDATA[", i) -> "]]>"
+                    xml.startsWith("<!--", i) -> "-->"
+                    else -> null
                 }
+                val end = close?.let { xml.indexOf(it, i + 4) } ?: -1
+                if (close != null && end >= 0) {
+                    out.append(xml, i, end + close.length)
+                    i = end + close.length
+                } else {
+                    out.append(ch)
+                    i++
+                }
+            } else if (ch == '&') {
+                val end = referenceEnd(xml, i)
+                if (end < 0) {
+                    out.append("&amp;")
+                    i++
+                } else {
+                    val value = xml.substring(i, end)
+                    if (xml[i + 1] == '#') {
+                        if (isValidCharRef(value)) out.append(value)
+                    } else {
+                        val name = value.substring(1, value.length - 1)
+                        if (name in XML_ENTITIES) {
+                            out.append(value)
+                        } else {
+                            val decoded = Parser.unescapeEntities(value, false)
+                            if (decoded == value) out.append("&amp;").append(name).append(';') else out.append(escape(decoded))
+                        }
+                    }
+                    i = end
+                }
+            } else {
+                out.append(ch)
+                i++
             }
         }
+        return out.toString()
     }
+
+    /**
+     * Where the entity or character reference starting at the `&` at [start] ends (just past
+     * its `;`), or -1 when the ampersand does not begin one.
+     */
+    private fun referenceEnd(xml: String, start: Int): Int {
+        val n = xml.length
+        var i = start + 1
+        if (i >= n) return -1
+        if (xml[i] == '#') {
+            i++
+            val hex = i < n && (xml[i] == 'x' || xml[i] == 'X')
+            if (hex) i++
+            val digits = i
+            while (i < n && (xml[i] in '0'..'9' || (hex && (xml[i] in 'a'..'f' || xml[i] in 'A'..'F')))) i++
+            return if (i > digits && i < n && xml[i] == ';') i + 1 else -1
+        }
+        if (!isAsciiLetter(xml[i])) return -1
+        i++
+        while (i < n && (isAsciiLetter(xml[i]) || xml[i] in '0'..'9')) i++
+        return if (i < n && xml[i] == ';') i + 1 else -1
+    }
+
+    private fun isAsciiLetter(c: Char) = c in 'a'..'z' || c in 'A'..'Z'
 
     private fun isValidCharRef(ref: String): Boolean {
         val digits = ref.substring(2, ref.length - 1)
@@ -89,10 +145,6 @@ internal object XmlText {
     }
 
     private val XML_ENCODING = Regex("""encoding\s*=\s*["']([A-Za-z0-9._-]+)["']""")
-    private val SANITIZE = Regex(
-        """<!\[CDATA\[.*?]]>|<!--.*?-->|&(?:#(?:[0-9]+|[xX][0-9a-fA-F]+);|([A-Za-z][A-Za-z0-9]*);)?""",
-        RegexOption.DOT_MATCHES_ALL,
-    )
     private val XML_ENTITIES = setOf("amp", "lt", "gt", "quot", "apos")
 }
 
@@ -100,7 +152,7 @@ internal object XmlText {
 internal fun XmlPullParser.skipElement() {
     var depth = 1
     while (depth > 0) {
-        when (next()) {
+        when (nextToken()) {
             XmlPullParser.START_TAG -> depth++
             XmlPullParser.END_TAG -> depth--
             XmlPullParser.END_DOCUMENT -> return
@@ -108,15 +160,22 @@ internal fun XmlPullParser.skipElement() {
     }
 }
 
-/** All text inside the current element, nested elements included; ends on its end tag. */
+/**
+ * All text inside the current element, nested elements included; ends on its end tag.
+ *
+ * Reads token by token and joins the pieces here. Asking Android's parser for whole text
+ * runs with `next()` was far slower than linear in the number of entities: a 1.2 MB feed of
+ * escaped HTML (40,000 `&lt;`-style entities) took 97 seconds to read on a phone.
+ */
 internal fun XmlPullParser.readElementText(): String {
     val out = StringBuilder()
     var depth = 1
     while (depth > 0) {
-        when (next()) {
+        when (nextToken()) {
             XmlPullParser.START_TAG -> depth++
             XmlPullParser.END_TAG -> depth--
-            XmlPullParser.TEXT -> out.append(text)
+            XmlPullParser.TEXT, XmlPullParser.CDSECT, XmlPullParser.ENTITY_REF,
+            XmlPullParser.IGNORABLE_WHITESPACE -> text?.let(out::append)
             XmlPullParser.END_DOCUMENT -> break
         }
     }
@@ -128,7 +187,7 @@ internal fun XmlPullParser.readInnerXml(): String {
     val out = StringBuilder()
     var depth = 1
     while (depth > 0) {
-        when (next()) {
+        when (nextToken()) {
             XmlPullParser.START_TAG -> {
                 depth++
                 out.append('<').append(name)
@@ -142,7 +201,8 @@ internal fun XmlPullParser.readInnerXml(): String {
                 depth--
                 if (depth > 0) out.append("</").append(name).append('>')
             }
-            XmlPullParser.TEXT -> out.append(XmlText.escape(text))
+            XmlPullParser.TEXT, XmlPullParser.CDSECT, XmlPullParser.ENTITY_REF,
+            XmlPullParser.IGNORABLE_WHITESPACE -> text?.let { out.append(XmlText.escape(it)) }
             XmlPullParser.END_DOCUMENT -> break
         }
     }
@@ -166,7 +226,7 @@ internal fun XmlPullParser.attr(name: String, ignoreCase: Boolean = false): Stri
 internal inline fun XmlPullParser.forEachChild(onChild: () -> Unit) {
     val parentDepth = depth
     while (true) {
-        when (next()) {
+        when (nextToken()) {
             XmlPullParser.START_TAG -> onChild()
             XmlPullParser.END_TAG -> if (depth <= parentDepth) return
             XmlPullParser.END_DOCUMENT -> return
