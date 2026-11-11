@@ -8,8 +8,10 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import java.time.Instant
 import java.time.LocalTime
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -52,6 +54,10 @@ class DataStoreSettingsRepository(
         dataStore.edit { it[EVENING_EDITION] = enabled }
     }
 
+    override suspend fun setEveningEditionTime(time: LocalTime) {
+        dataStore.edit { it[EVENING_MINUTE_OF_DAY] = time.hour * 60 + time.minute }
+    }
+
     override suspend fun setStorageBudgetMb(megabytes: Int) {
         val clamped = megabytes.coerceIn(AppSettings.MIN_STORAGE_BUDGET_MB, AppSettings.MAX_STORAGE_BUDGET_MB)
         dataStore.edit { it[STORAGE_BUDGET_MB] = clamped }
@@ -61,21 +67,27 @@ class DataStoreSettingsRepository(
         dataStore.edit { it[ONBOARDING_DONE] = done }
     }
 
+    override suspend fun setExtraOfferDismissedAt(at: Instant) {
+        dataStore.edit { it[EXTRA_OFFER_DISMISSED_AT] = at.toEpochMilli() }
+    }
+
     private fun toSettings(prefs: Preferences): AppSettings {
         val defaults = AppSettings()
         return AppSettings(
-            resetTime = prefs[RESET_MINUTE_OF_DAY]
-                ?.takeIf { it in 0 until 24 * 60 }
-                ?.let { LocalTime.of(it / 60, it % 60) }
-                ?: defaults.resetTime,
+            resetTime = timeOr(prefs[RESET_MINUTE_OF_DAY], defaults.resetTime),
             editionLength = enumOr(prefs[EDITION_LENGTH], defaults.editionLength),
             themeMode = enumOr(prefs[THEME_MODE], defaults.themeMode),
             displayMode = enumOr(prefs[DISPLAY_MODE], defaults.displayMode),
             eveningEditionEnabled = prefs[EVENING_EDITION] ?: defaults.eveningEditionEnabled,
+            eveningEditionTime = timeOr(prefs[EVENING_MINUTE_OF_DAY], defaults.eveningEditionTime),
             storageBudgetMb = prefs[STORAGE_BUDGET_MB] ?: defaults.storageBudgetMb,
             onboardingDone = prefs[ONBOARDING_DONE] ?: defaults.onboardingDone,
+            extraOfferDismissedAt = prefs[EXTRA_OFFER_DISMISSED_AT]?.let(Instant::ofEpochMilli),
         )
     }
+
+    private fun timeOr(minuteOfDay: Int?, default: LocalTime): LocalTime =
+        minuteOfDay?.takeIf { it in 0 until 24 * 60 }?.let { LocalTime.of(it / 60, it % 60) } ?: default
 
     private inline fun <reified T : Enum<T>> enumOr(name: String?, default: T): T =
         enumValues<T>().firstOrNull { it.name == name } ?: default
@@ -86,7 +98,9 @@ class DataStoreSettingsRepository(
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val DISPLAY_MODE = stringPreferencesKey("display_mode")
         val EVENING_EDITION = booleanPreferencesKey("evening_edition")
+        val EVENING_MINUTE_OF_DAY = intPreferencesKey("evening_minute_of_day")
         val STORAGE_BUDGET_MB = intPreferencesKey("storage_budget_mb")
         val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
+        val EXTRA_OFFER_DISMISSED_AT = longPreferencesKey("extra_offer_dismissed_at")
     }
 }

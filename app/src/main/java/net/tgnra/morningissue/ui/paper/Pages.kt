@@ -36,6 +36,7 @@ import java.time.ZoneId
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
+import net.tgnra.morningissue.ui.components.editionNumberLabel
 import net.tgnra.morningissue.ui.components.FramedImage
 import net.tgnra.morningissue.ui.components.SectionLabel
 import net.tgnra.morningissue.ui.components.StoryMarks
@@ -133,7 +134,7 @@ fun Masthead(edition: Edition, onBackToStand: () -> Unit, modifier: Modifier = M
         Text(
             text = listOf(
                 PaperFormat.longDate(edition.date),
-                stringResource(R.string.edition_number, edition.number),
+                editionNumberLabel(edition.kind, edition.number),
                 stringResource(R.string.minutes_read, edition.readMinutes),
             ).joinToString("  ·  ").uppercase(),
             style = type.sectionLabel.copy(letterSpacing = 0.08.em),

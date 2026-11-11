@@ -45,6 +45,56 @@ abstract class EditionDao {
     @Query("SELECT * FROM edition ORDER BY cutoffAt DESC LIMIT 1")
     abstract suspend fun getLatestByCutoff(): EditionEntity?
 
+    /** The edition of one of [kinds] with the latest cutoff, released or not. */
+    @Query("SELECT * FROM edition WHERE kind IN (:kinds) ORDER BY cutoffAt DESC LIMIT 1")
+    abstract suspend fun getLatestByCutoffOf(kinds: List<EditionKind>): EditionEntity?
+
+    /** Editions of [kind] built after [after], oldest first. */
+    @Query("SELECT * FROM edition WHERE kind = :kind AND cutoffAt > :after ORDER BY cutoffAt")
+    abstract suspend fun getBuiltAfter(kind: EditionKind, after: Instant): List<EditionEntity>
+
+    /**
+     * The editions no later build has superseded yet: the newest Morning or Evening edition
+     * and every Extra edition printed since. Their untouched stories do not count as ignored,
+     * and their unopened runs have not been counted. An Extra edition supersedes nothing.
+     */
+    @Transaction
+    open suspend fun getPending(): List<EditionEntity> {
+        val scheduled = getLatestByCutoffOf(listOf(EditionKind.MORNING, EditionKind.EVENING))
+        return listOfNotNull(scheduled) + getBuiltAfter(EditionKind.EXTRA, scheduled?.cutoffAt ?: Instant.EPOCH)
+    }
+
+    /** The newest edition of [kind] already released at [now]. */
+    @Query("SELECT * FROM edition WHERE kind = :kind AND releaseAt <= :now ORDER BY releaseAt DESC LIMIT 1")
+    abstract suspend fun getLatestReleasedOf(kind: EditionKind, now: Instant): EditionEntity?
+
+    /**
+     * Editions released in `(since, now]` that the reader never opened, oldest first: the
+     * missed editions behind While you were away.
+     */
+    @Query("SELECT * FROM edition WHERE openedAt IS NULL AND releaseAt > :since AND releaseAt <= :now ORDER BY releaseAt")
+    abstract suspend fun getUnopenedReleasedBetween(since: Instant, now: Instant): List<EditionEntity>
+
+    /**
+     * The untouched stories printed in [editionIds] (the index excluded) that have never been
+     * on a While you were away page of an edition the reader opened: what the pull-out may
+     * draw on. A pull-out in an edition that was itself missed does not use a story up.
+     */
+    @Query(
+        "${ArticleDao.ROW_SELECT} WHERE a.id IN (SELECT articleId FROM edition_item WHERE editionId IN (:editionIds) AND kind != 'INDEX') " +
+            "AND a.id NOT IN (SELECT i.articleId FROM edition_item i JOIN edition e ON e.id = i.editionId " +
+            "WHERE i.kind = 'AWAY' AND e.openedAt IS NOT NULL) " +
+            "AND g.openedAt IS NULL AND g.readAt IS NULL AND g.savedAt IS NULL AND g.likedAt IS NULL",
+    )
+    abstract suspend fun untouchedPrintedIn(editionIds: List<Long>): List<ArticleRow>
+
+    /** Articles printed (index excluded) in any edition built after [after]. */
+    @Query(
+        "SELECT DISTINCT i.articleId FROM edition_item i JOIN edition e ON e.id = i.editionId " +
+            "WHERE e.cutoffAt > :after AND i.kind != 'INDEX'",
+    )
+    abstract suspend fun printedArticleIdsSince(after: Instant): List<Long>
+
     /** The newest edition already released at [now]. */
     @Query("SELECT * FROM edition WHERE releaseAt <= :now ORDER BY releaseAt DESC LIMIT 1")
     abstract suspend fun getLatestReleased(now: Instant): EditionEntity?
@@ -76,6 +126,10 @@ abstract class EditionDao {
 
     @Query("$ITEM_SELECT WHERE i.editionId = :editionId ORDER BY i.page, i.slot")
     abstract fun observeItems(editionId: Long): Flow<List<EditionItemRow>>
+
+    /** Articles printed (index excluded) in any of [editionIds], once per edition they ran in. */
+    @Query("SELECT articleId FROM edition_item WHERE editionId IN (:editionIds) AND kind != 'INDEX'")
+    abstract suspend fun printedRuns(editionIds: List<Long>): List<Long>
 
     /** Articles printed (index excluded) in any of [editionIds]. */
     @Query("SELECT DISTINCT articleId FROM edition_item WHERE editionId IN (:editionIds) AND kind != 'INDEX'")

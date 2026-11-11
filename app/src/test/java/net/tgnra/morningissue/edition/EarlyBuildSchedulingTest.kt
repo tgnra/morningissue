@@ -119,11 +119,11 @@ class EarlyBuildSchedulingTest {
 
     private fun WorkInfo.aimsAt(reset: Instant) = WorkManagerEditionScheduler.resetTag(reset) in tags
 
-    private suspend fun storeEdition(date: LocalDate, releaseAt: Instant) {
+    private suspend fun storeEdition(date: LocalDate, releaseAt: Instant, kind: EditionKind = EditionKind.MORNING) {
         db.editionDao().insertEditionWithItems(
             EditionEntity(
                 date = date,
-                kind = EditionKind.MORNING,
+                kind = kind,
                 cutoffAt = clock.now,
                 releaseAt = releaseAt,
                 builtAt = clock.now,
@@ -198,6 +198,42 @@ class EarlyBuildSchedulingTest {
         assertEquals(0L, work.initialDelayMillis)
         assertEquals(NetworkType.CONNECTED, work.constraints.requiredNetworkType)
         assertTrue(work.aimsAt(nextReset))
+    }
+
+    @Test
+    fun withTheEveningEditionOnItAimsAtWhicheverReleaseComesNext() = runBlocking {
+        val eveningRelease = Instant.parse("2026-11-11T18:00:00Z")
+        settings.setEveningEditionEnabled(true)
+
+        // 20:00: tomorrow's morning reset comes before tomorrow's evening release.
+        scheduler.reschedule()
+        assertTrue(infos().single().aimsAt(nextReset))
+
+        // 07:00 the next day: the evening release at 18:00 is next, built from 16:30.
+        clock.now = Instant.parse("2026-11-11T07:00:00Z")
+        scheduler.reschedule()
+        var work = infos().single()
+        assertTrue(work.aimsAt(eveningRelease))
+        assertEquals(Duration.ofMinutes(9 * 60 + 30).toMillis(), work.initialDelayMillis)
+
+        // Once the evening edition is stored, the following morning is the target.
+        storeEdition(LocalDate.of(2026, 11, 11), releaseAt = eveningRelease, kind = EditionKind.EVENING)
+        scheduler.reschedule()
+        assertTrue(infos().single().aimsAt(followingReset))
+
+        // A morning edition for that date does not count as the evening one, and a new
+        // evening time moves the schedule.
+        clock.now = Instant.parse("2026-11-12T07:00:00Z")
+        storeEdition(LocalDate.of(2026, 11, 12), releaseAt = followingReset)
+        settings.setEveningEditionTime(LocalTime.of(21, 0))
+        scheduler.reschedule()
+        work = infos().single()
+        assertTrue(work.aimsAt(Instant.parse("2026-11-12T21:00:00Z")))
+
+        // Switched off again: back to the morning reset.
+        settings.setEveningEditionEnabled(false)
+        scheduler.reschedule()
+        assertTrue(infos().single().aimsAt(Instant.parse("2026-11-13T06:30:00Z")))
     }
 
     @Test

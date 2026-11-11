@@ -45,6 +45,8 @@ class RoomEditionRepository(
 
     override suspend fun ensureCurrentEdition(): Long? = publisher.ensureCurrentEdition()
 
+    override suspend fun publishExtraEdition(feedIds: Set<Long>): Long? = publisher.publishExtraEdition(feedIds)
+
     override suspend fun markEditionOpened(editionId: Long) = editionDao.markOpened(editionId, clock.instant())
 
     override suspend fun markEditionFinished(editionId: Long) = editionDao.markFinished(editionId, clock.instant())

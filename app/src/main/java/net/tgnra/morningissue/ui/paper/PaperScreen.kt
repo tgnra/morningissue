@@ -68,6 +68,7 @@ import net.tgnra.morningissue.model.Edition
 import net.tgnra.morningissue.model.EditionPage
 import net.tgnra.morningissue.model.Feed
 import net.tgnra.morningissue.ui.LocalAppContainer
+import net.tgnra.morningissue.ui.components.editionNumberLabel
 import net.tgnra.morningissue.ui.components.EmptyMessage
 import net.tgnra.morningissue.ui.components.HairlineRule
 import net.tgnra.morningissue.ui.components.LocalPagedScroller
@@ -312,7 +313,7 @@ private fun FolioLine(edition: Edition, page: Int, pageCount: Int, onBack: () ->
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
             PaperIconButton(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.paper_back_to_stand), onBack)
             SectionLabel(
-                text = PaperFormat.shortDate(edition.date) + "  ·  " + stringResource(R.string.edition_number, edition.number),
+                text = PaperFormat.shortDate(edition.date) + "  ·  " + editionNumberLabel(edition.kind, edition.number),
                 modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
             )
             Row(

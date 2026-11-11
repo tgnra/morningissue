@@ -62,6 +62,7 @@ fun SettingsScreen(
     val stored by container.settings.settings.collectAsStateWithLifecycle(initialValue = null)
     val use24Hour = DateFormat.is24HourFormat(LocalContext.current)
     var pickingTime by rememberSaveable { mutableStateOf(false) }
+    var pickingEveningTime by rememberSaveable { mutableStateOf(false) }
 
     PaperScreenFrame(
         title = stringResource(R.string.settings_title),
@@ -70,12 +71,25 @@ fun SettingsScreen(
             val settings = stored
             if (pickingTime && settings != null) {
                 ResetTimeDialog(
+                    title = stringResource(R.string.settings_reset_time),
                     initial = settings.resetTime,
                     use24Hour = use24Hour,
                     onDismiss = { pickingTime = false },
                     onConfirm = { time ->
                         pickingTime = false
                         scope.launch { container.settings.setResetTime(time) }
+                    },
+                )
+            }
+            if (pickingEveningTime && settings != null) {
+                ResetTimeDialog(
+                    title = stringResource(R.string.settings_evening_time),
+                    initial = settings.eveningEditionTime,
+                    use24Hour = use24Hour,
+                    onDismiss = { pickingEveningTime = false },
+                    onConfirm = { time ->
+                        pickingEveningTime = false
+                        scope.launch { container.settings.setEveningEditionTime(time) }
                     },
                 )
             }
@@ -97,6 +111,24 @@ fun SettingsScreen(
                         selected = settings.editionLength,
                         onSelect = { scope.launch { container.settings.setEditionLength(it) } },
                     )
+                }
+                Setting(stringResource(R.string.settings_evening), stringResource(R.string.settings_evening_detail)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SegmentedChoice(
+                            options = listOf(
+                                false to stringResource(R.string.settings_evening_off),
+                                true to stringResource(R.string.settings_evening_on),
+                            ),
+                            selected = settings.eveningEditionEnabled,
+                            onSelect = { scope.launch { container.settings.setEveningEditionEnabled(it) } },
+                        )
+                        if (settings.eveningEditionEnabled) {
+                            PaperButton(
+                                stringResource(R.string.settings_evening_at, PaperFormat.time(settings.eveningEditionTime, use24Hour)),
+                                onClick = { pickingEveningTime = true },
+                            )
+                        }
+                    }
                 }
             }
             SettingsSection(stringResource(R.string.settings_appearance)) {
@@ -154,7 +186,7 @@ fun Setting(title: String, detail: String?, control: @Composable () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ResetTimeDialog(initial: LocalTime, use24Hour: Boolean, onDismiss: () -> Unit, onConfirm: (LocalTime) -> Unit) {
+private fun ResetTimeDialog(title: String, initial: LocalTime, use24Hour: Boolean, onDismiss: () -> Unit, onConfirm: (LocalTime) -> Unit) {
     val colors = MorningIssueTheme.colors
     val state = rememberTimePickerState(initialHour = initial.hour, initialMinute = initial.minute, is24Hour = use24Hour)
     val pickerColors = TimePickerDefaults.colors(
@@ -173,7 +205,7 @@ private fun ResetTimeDialog(initial: LocalTime, use24Hour: Boolean, onDismiss: (
         timeSelectorUnselectedContainerColor = colors.paper,
         timeSelectorUnselectedContentColor = colors.ink,
     )
-    PaperDialog(title = stringResource(R.string.settings_reset_time), onDismiss = onDismiss) {
+    PaperDialog(title = title, onDismiss = onDismiss) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             // The clock dial animates its hand; E-ink gets the typed fields instead.
             if (MorningIssueTheme.isEink) TimeInput(state, colors = pickerColors) else TimePicker(state, colors = pickerColors)

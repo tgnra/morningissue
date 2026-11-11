@@ -57,6 +57,10 @@ import java.time.ZoneId
 import java.time.format.TextStyle
 import androidx.compose.ui.platform.LocalLocale
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import net.tgnra.morningissue.model.EditionKind
 import kotlinx.coroutines.launch
 import net.tgnra.morningissue.engine.EditionClock
 import net.tgnra.morningissue.ui.components.TextLink
@@ -128,7 +132,8 @@ fun NewsstandScreen(
 
     val now = container.clock.instant()
     val resetTime = settings?.resetTime
-    val newest = editions?.firstOrNull()
+    // An Extra edition is not the day's paper: the notice below is about scheduled editions.
+    val newest = editions?.firstOrNull { it.kind != EditionKind.EXTRA }
     // Set when a reset has passed and the feeds had nothing new to print.
     val noNewEdition = newest != null && resetTime != null &&
         checkedReset == EditionClock.latestReset(now, resetTime, zone).toEpochMilli() &&
@@ -148,6 +153,37 @@ fun NewsstandScreen(
                         ?: resources.getString(if (report.feedsChecked == 0) R.string.refresh_no_sources else R.string.refresh_no_new)
                 } finally {
                     refreshing = false
+                }
+            }
+        }
+    }
+
+    val newSources = remember(feeds, editions, settings?.extraOfferDismissedAt) {
+        ExtraOffer.newSources(
+            feeds = feeds.orEmpty(),
+            editions = editions.orEmpty(),
+            dismissedAt = settings?.extraOfferDismissedAt,
+            today = now.atZone(zone).toLocalDate(),
+        )
+    }
+    var printingExtra by remember { mutableStateOf(false) }
+    val printExtra: () -> Unit = {
+        if (!printingExtra && newSources.isNotEmpty()) {
+            printingExtra = true
+            notice = null
+            val ids = newSources.map { it.id }.toSet()
+            scope.launch {
+                try {
+                    // Fetch the new sources first: an imported list has not been read at all yet.
+                    coroutineScope { ids.map { id -> async { container.feedSyncer.syncFeed(id) } }.awaitAll() }
+                    val printed = container.editions.publishExtraEdition(ids)
+                    if (printed == null) {
+                        // Nothing recent enough to print; do not keep offering the same sources.
+                        container.settings.setExtraOfferDismissedAt(container.clock.instant())
+                    }
+                    notice = resources.getString(if (printed == null) R.string.extra_nothing_to_print else R.string.extra_printed)
+                } finally {
+                    printingExtra = false
                 }
             }
         }
@@ -187,6 +223,15 @@ fun NewsstandScreen(
                             nextEditionAt = EditionClock.nextReset(now, resetTime, zone).atZone(zone).toLocalTime(),
                             refreshing = refreshing,
                             onRefresh = refresh,
+                            modifier = Modifier.padding(horizontal = spec.pageMargin),
+                        )
+                    }
+                    if (newSources.isNotEmpty()) {
+                        ExtraEditionOffer(
+                            sourceCount = newSources.size,
+                            printing = printingExtra,
+                            onPrint = printExtra,
+                            onDismiss = { scope.launch { container.settings.setExtraOfferDismissedAt(container.clock.instant()) } },
                             modifier = Modifier.padding(horizontal = spec.pageMargin),
                         )
                     }
@@ -348,6 +393,36 @@ private fun NoNewEditionNotice(
                 Spacer(Modifier.height(12.dp))
             } else {
                 TextLink(stringResource(R.string.newsstand_refresh), onRefresh)
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.rule))
+        }
+    }
+}
+
+/** Offered after sources are added: a paper from them now, without waiting for the next reset. */
+@Composable
+private fun ExtraEditionOffer(sourceCount: Int, printing: Boolean, onPrint: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = MorningIssueTheme.colors
+    val type = MorningIssueTheme.typography
+    Box(modifier.fillMaxWidth().stepAnchor().padding(top = 12.dp), contentAlignment = Alignment.TopCenter) {
+        Column(Modifier.widthIn(max = 520.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.fillMaxWidth().height(2.dp).background(colors.rule))
+            Spacer(Modifier.height(12.dp))
+            SectionLabel(pluralStringResource(R.plurals.extra_offer_title, sourceCount, sourceCount), color = colors.ink, heading = true)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = stringResource(if (printing) R.string.extra_printing else R.string.extra_offer_detail),
+                style = type.standfirst.copy(fontStyle = FontStyle.Italic),
+                color = colors.ink,
+                textAlign = TextAlign.Center,
+            )
+            if (printing) {
+                Spacer(Modifier.height(12.dp))
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    TextLink(stringResource(R.string.extra_offer_print), onPrint)
+                    TextLink(stringResource(R.string.extra_offer_dismiss), onDismiss)
+                }
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(colors.rule))
         }

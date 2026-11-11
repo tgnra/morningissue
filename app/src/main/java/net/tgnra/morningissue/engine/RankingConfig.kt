@@ -153,6 +153,42 @@ data class RankingConfig(
     val storageTrimTarget: Double = 0.9,
     /** The newest editions (by cutoff) whose stories are never trimmed. */
     val storageKeepEditions: Int = 2,
+
+    // Cross-feed deduplication
+    /**
+     * Two posts of different feeds with the same normalised title are one story only when the
+     * title has at least this many words and characters (so "Links" or "Weekly update" from two
+     * blogs stay apart) and they were published within [dedupeTitleWindowHours] of each other.
+     */
+    val dedupeTitleMinWords: Int = 4,
+    val dedupeTitleMinChars: Int = 20,
+    val dedupeTitleWindowHours: Long = 72,
+
+    // Welcome back
+    /** A feed counts as having gone quiet after this many days without a post. */
+    val comebackQuietDays: Long = 90,
+    /**
+     * The first post after such a silence scores times this, on top of scarcity. At 1.5 a
+     * comeback from a neutral weekly feed scores 0.65 × 1.45 × 1.5 ≈ 1.41, level with a
+     * brand-new post from a Favourite weekly feed (1.45) and above everything else, so with
+     * five front-page slots it all but always makes the front page without being guaranteed
+     * the lead. Not applied when the slider is below Auto.
+     */
+    val comebackBoost: Double = 1.5,
+
+    // While you were away
+    /** The pull-out stops after this many stories at Standard and Long; Short scales it down. */
+    val awayMaxStories: Int = 30,
+    /** A missed story needs at least this score, measured from the reader's last visit. */
+    val awayMinScore: Double = 0.1,
+    /** Only editions released in this many days before the build count as missed. */
+    val awayWindowDays: Long = 30,
+    /** A Firehose feed is let into the pull-out by a Like or a save within this many days. */
+    val awayFirehoseEngagementDays: Long = 30,
+
+    // Evening and Extra editions
+    /** In an Extra edition each feed's newest posts are exempt from the age and freshness limits. */
+    val extraNewestPerFeed: Int = 5,
 ) {
     companion object {
         val Default = RankingConfig()

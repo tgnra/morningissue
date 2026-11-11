@@ -1,5 +1,6 @@
 package net.tgnra.morningissue.data.settings
 
+import java.time.Instant
 import java.time.LocalTime
 import kotlinx.coroutines.flow.Flow
 import net.tgnra.morningissue.model.AppSettings
@@ -24,9 +25,18 @@ interface SettingsRepository {
 
     suspend fun setEveningEditionEnabled(enabled: Boolean)
 
+    /**
+     * Sets the local time at which the Evening edition is released (seconds are dropped).
+     * Has a default body so that test doubles written before it existed still compile.
+     */
+    suspend fun setEveningEditionTime(time: LocalTime) = Unit
+
     /** Clamped to `AppSettings.MIN_STORAGE_BUDGET_MB..MAX_STORAGE_BUDGET_MB`. */
     suspend fun setStorageBudgetMb(megabytes: Int)
 
     /** True once onboarding has finished; the app then starts on the newsstand. */
     suspend fun setOnboardingDone(done: Boolean)
+
+    /** Records that the offer of an Extra edition was turned down, so it is not made again for the same sources. */
+    suspend fun setExtraOfferDismissedAt(at: Instant) = Unit
 }

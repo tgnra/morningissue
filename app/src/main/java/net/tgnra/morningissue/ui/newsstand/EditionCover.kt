@@ -36,7 +36,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import net.tgnra.morningissue.R
+import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionSummary
+import net.tgnra.morningissue.ui.components.editionNumberLabel
 import net.tgnra.morningissue.ui.components.PaperImage
 import net.tgnra.morningissue.ui.components.paperShadow
 import net.tgnra.morningissue.ui.format.PaperFormat
@@ -73,7 +75,7 @@ fun EditionCover(
         ) {
             val dateline = type.sectionLabel.sized(unit * 2.7f).copy(letterSpacing = 0.08.em)
             Text(PaperFormat.longDate(edition.date).uppercase(), style = dateline, color = colors.inkSecondary, maxLines = 1)
-            Text(stringResource(R.string.edition_number, edition.number).uppercase(), style = dateline, color = colors.inkSecondary, maxLines = 1)
+            Text(editionNumberLabel(edition.kind, edition.number).uppercase(), style = dateline, color = colors.inkSecondary, maxLines = 1)
         }
         Box(Modifier.fillMaxWidth().height(hairline(unit)).background(colors.rule))
         Spacer(Modifier.height(unit * 3.5f))
@@ -237,7 +239,12 @@ private fun hairline(unit: Dp): Dp = (unit * 0.3f).coerceAtLeast(1.dp)
 
 @Composable
 private fun coverDescription(edition: EditionSummary): String = buildString {
-    append(stringResource(R.string.cover_description, edition.number, PaperFormat.longDate(edition.date)))
+    val description = when (edition.kind) {
+        EditionKind.MORNING -> R.string.cover_description
+        EditionKind.EVENING -> R.string.cover_description_evening
+        EditionKind.EXTRA -> R.string.cover_description_extra
+    }
+    append(stringResource(description, edition.number, PaperFormat.longDate(edition.date)))
     edition.leadHeadline?.let { append(". ").append(stringResource(R.string.cover_lead, it)) }
     if (edition.isRead) append(". ").append(stringResource(R.string.read_tick))
 }
