@@ -136,6 +136,50 @@ Specified but not built, and not assigned to a milestone.
   - dismiss rate by position (there is no dismiss now; "printed near the front and not opened" is the nearest equivalent);
   - session depth (now: how far through an edition the reader gets).
 
+## Idea, not yet proven: ranking posts within a feed
+
+Today a post's score uses its feed's affinity and its tags' affinity, so two posts from one feed
+on the same day differ only by age. The reader may love some of a feed's posts and skip others.
+Nothing below is built: there is no engagement history yet to show that it would work.
+
+**The label (what "liked this post" means).** Per post that ran in an edition, relative to that
+feed's own baseline so that a feed the reader always opens does not make every post look good:
+
+- Positive: Like (strongest), Save, read to the end, opened and read past the read threshold.
+- Weak negative: ran in an edition and was not opened while another story on the same page was.
+- Negative: opened and abandoned quickly (small read fraction, a few seconds of dwell).
+- No label: ran in an edition the reader never opened, or sat below the fold of a page never reached.
+
+All of these are already recorded in `engagement` except dwell time and "another story on the
+same page was opened", which can be derived from `edition_item`.
+
+**Options for predicting the label for a new post, cheapest first.**
+
+- [ ] *Per-feed category affinity.* Many feeds mark posts with `<category>`. Parse and store them
+  (they are dropped today), then learn an affinity per (feed, category) with the same shrinkage
+  prior as tag affinity. Small, explainable in "Why is this here?", hard to overfit. Does nothing
+  for feeds without categories.
+- [ ] *Embeddings plus a small linear model.* A frozen text-embedding model turns title and
+  opening text into a vector; a regularised logistic model (or simply similarity to the mean of
+  Liked and read posts minus the mean of skipped ones) predicts the label. Candidate: the
+  text-only EmbeddingGemma variant through LiteRT (about 165 MB, so an optional download, not in
+  the APK; roughly 0.2 s a post on a phone CPU by Google's figures, unmeasured here). Embedding
+  runs in the charging sync job; a day's posts take seconds, a first backlog of 1,000 a few minutes.
+- [ ] *A small generative model asked to rank.* Not recommended. Gemini Nano through ML Kit only
+  runs while the app is in the foreground and only on some flagship phones (no Boox), so it cannot
+  run on the charger; a bundled model is over a gigabyte and slow, and its ranking is hard to explain.
+- Gradient-boosted trees were considered and rejected: with tens to hundreds of labels per reader
+  and sparse text features they memorise posts. On a few dense features they add little over the
+  linear model.
+
+**Before building any of it.**
+
+- [ ] Export labels from a few weeks of real use and test offline: train on the first weeks,
+  predict the last, and compare against the current score on "was the opened post ranked above
+  the unopened ones from the same feed". Only ship an option that clearly beats today's ranking.
+- [ ] Cap the effect: a within-feed multiplier of about 0.7 to 1.4 on the existing score, shrunk
+  to 1 until a feed has a few dozen labelled posts, and shown in "Why is this here?".
+
 ## Later
 
 Roadmap ideas, not scheduled.
