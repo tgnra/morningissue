@@ -61,12 +61,21 @@ change the screen mode.
   leaves the list at the next sync.
 - **Settings:** the Wi-Fi state, how to find the phone (automatically, or a typed address
   on a keypad; the port defaults to 47824), **Sync now**, inverting the page-turn buttons,
-  orientation (follow the sensor, portrait or landscape), and the last sync's result.
+  orientation (portrait or landscape), and the last sync's result. On a model with a
+  mapped orientation sensor, the sensor turns the page upside down within the chosen
+  orientation to match how you hold it, once the reading has held for 1.5 s, with a full
+  refresh. Until you choose, the reader keeps the orientation the screen was in when it
+  opened (this is also what 0.2.3's "follow the sensor" becomes).
   Settings, the text size and the light levels are kept in `data/settings.json`.
-- **Leaving:** the power button, closing the sleep cover, **Exit**, or 20 minutes without
-  input all leave the reader. The light goes back to Nickel's levels, Wi-Fi is turned off
-  the way a boot leaves it, and Nickel restarts and sleeps as usual. The reader never
-  suspends the device itself.
+- **Sleep:** the power button, closing the sleep cover, or 20 minutes without input put the
+  Kobo to sleep. The screen goes blank with "Sleeping…" small in the lower right corner, the
+  light and Wi-Fi go off, and the Kobo suspends. The power button or opening the cover wakes
+  it on the page it was showing; touches and page keys made while it sleeps or wakes are
+  ignored. Wi-Fi stays off after waking (the reader never turns it on), so the home screen
+  and Settings say "Offline since sleep": exit and connect in Kobo's settings to sync.
+- **Leaving:** only **Exit**. The light goes back to Nickel's levels, Wi-Fi is turned off
+  the way a boot leaves it, and Nickel restarts. If the reader crashes, the launcher logs
+  why and brings Nickel back the same way; tap the menu entry again to reopen it.
 
 Every action can be done by touch alone. Page buttons and the orientation sensor are used
 when the model has them.
@@ -121,8 +130,10 @@ sources and is unverified.
 
 Known gaps:
 
-- **Orientation:** the sensor is followed only on the Libra 2, where KOReader and Plato
-  agree on its mapping. Elsewhere, choose portrait or landscape in Settings.
+- **Orientation:** the sensor is followed only on the Libra 2. 0.2.3 took its mapping from
+  KOReader's names for the values and drew landscape upside down on the device; the two
+  landscape values are now the other way round (`profile::LIBRA2_SENSOR`), not yet checked
+  on the device. Elsewhere the chosen orientation is fixed.
 - **Touch:** each model's transform comes from KOReader and Plato and is untested. If taps
   land in the wrong place, set `touch` in `config.json`.
 - **Waiting for refreshes:** the Mark 7 "wait for update complete" ioctl is unreliable on
@@ -143,7 +154,8 @@ Known gaps:
 | mxcfb ioctl numbers and struct layouts (V1 Kobo, V2 Mark 7, `WAIT_FOR_UPDATE_COMPLETE`), waveform modes DU 1, GC16 2, GLR16 6, AUTO 257 | Kobo kernel headers as published in FBInk's `eink/` directory | high |
 | MTK hwtcon ioctls and waveforms | the same | medium |
 | Libra 2 touch (Elan): swap X/Y, no mirroring; lift reported with a pressure-0 frame, then `ABS_MT_TRACKING_ID -1`, then `BTN_TOUCH 0` | KOReader `device.lua`, Plato `input.rs` | high |
-| Page keys 193 (back) and 194 (forward), power 116, sleep cover 59; gyro on `EV_MSC/MSC_RAW` | KOReader, Plato | high |
+| Page keys 193 (back) and 194 (forward), power 116, sleep cover 59 (`KEY_F1`: 1 closed, 0 opened; 35 on the Elipsa); gyro on `EV_MSC/MSC_RAW` | KOReader (`[59] = "SleepCover"`), Plato (`SLEEP_COVER = [59, 35]`) | high |
+| Sleep: `1` to `/sys/power/state-extended`, 2 s, `sync`, `mem` to `/sys/power/state` (returns on wake), `0` to `state-extended`; 15 s between the sleep screen and the first try and between retries; on a refusal, clear the flag and retry; Wi-Fi off first ("suspend will at best fail, and at worst deadlock the system if Wi-Fi is on"), then the light | KOReader `Kobo:suspend`, `_doSuspend`, `Kobo:resume`, `Device:onPowerEvent`; Plato `scripts/suspend.sh`, `resume.sh`, `app.rs` | high (both agree), not yet run on a device |
 | Input event numbers differ between hardware revisions, so devices are probed by capability | KOReader | high |
 | Stopping and restarting Nickel: which processes to stop, `/tmp/nickel-hardware-status`, Wi-Fi teardown, `-platform kobo -skipFontLoad` | KOReader `koreader.sh` and `nickel.sh` | high (facts only, rewritten) |
 | NickelMenu: a ':' inside a label breaks the config; `cmd_spawn` detaches; `chain_failure` | NickelMenu docs; the user's device | high |
@@ -199,12 +211,20 @@ cd kobo && cargo test
   - 1264×1680 at 300 dpi in portrait, landscape and inverted;
   - 1404×1872 at 227 dpi.
 
-  It covers home with one, two and three editions, offline, syncing and after an error;
+  It covers the sleep screen at every size; sleeping and waking by the power button, the
+  cover and the idle timeout, with touches made while asleep or waking ignored; a kernel
+  that refuses to suspend; home with one, two and three editions, offline, syncing and after an error;
   Settings and the keypad; Saved; the reader with its chrome hidden and shown; the Aa
   popover, with and without warmth; a background sync against the fake phone (a new
-  edition and pictures arriving while reading); no sync attempt offline; orientation; and
+  edition and pictures arriving while reading); no sync attempt offline; orientation (portrait
+  and landscape, each upside down, a brief tilt ignored, no sensor, the old setting); and
   inverted buttons. It writes every screen, plus a `contact.png` sheet, to
   `kobo/target/screens/<size>/<run>/`.
+- `tests/launch.rs` runs `launch/launch.sh` against a fake root with busybox-like stubs:
+  Exit, a panic and a signal all bring Nickel back with its output on `/dev/null` and free
+  the lock; stale locks (a dead PID, a reused PID, the empty lock 0.2.3 left) are taken
+  over; a running launcher keeps it; a killed launcher still brings Nickel back. Run it
+  under busybox's ash with `nix shell nixpkgs#rustup nixpkgs#busybox -c cargo test --test launch`.
 - Unit tests cover ioctl struct sizes, a recorded Libra 2 touch trace, the reading rules,
   pagination of editions, code blocks, settings, addresses and dates.
 

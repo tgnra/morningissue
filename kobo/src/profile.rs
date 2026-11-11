@@ -53,8 +53,11 @@ pub struct Profile {
     pub page_keys: bool,
     /// Has an orientation sensor.
     pub gyro: bool,
-    /// The sensor's events are mapped from two agreeing sources, so the reader follows it.
-    pub follow_sensor: bool,
+    /// How the sensor's `EV_MSC/MSC_RAW` values 0x17 (portrait, upside down), 0x18
+    /// (portrait), 0x19 and 0x1a (the two landscapes) map to the reader's rotations (quarter
+    /// turns clockwise: rotation 1 puts the top of the page along the panel's right edge).
+    /// None where the mapping has not been checked: the sensor is then ignored.
+    pub sensor: Option<SensorMap>,
     pub touch: TouchQuirk,
     /// FBInk's map from the framebuffer's `rotate` value to the canonical rotation (0 is
     /// portrait upright, 1 a quarter turn clockwise, ...).
@@ -69,13 +72,33 @@ pub struct Profile {
     pub verified: bool,
 }
 
+/// Rotations for the sensor values 0x17, 0x18, 0x19 and 0x1a, in that order.
+pub type SensorMap = [u8; 4];
+
+/// The Libra 2's sensor. 0x18 and 0x17 are portrait and portrait
+/// upside down. 0x19 ("landscape right" in the NTX drivers, KOReader's "rotated clockwise")
+/// means the Kobo was turned a quarter clockwise, so its left edge is now on top and the
+/// page's top must run along the panel's left edge: rotation 3. 0x1a is the other way:
+/// rotation 1. 0.2.3 had the two landscapes the other way round, and on the device the page
+/// was drawn upside down in landscape; this mapping has not yet been run on the device.
+pub const LIBRA2_SENSOR: SensorMap = [2, 0, 3, 1];
+
+/// The rotation for a raw sensor value, if it is one of the four orientations (0x1b and 0x1c,
+/// face up and face down, are not).
+pub fn sensor_rotation(map: &SensorMap, raw: i32) -> Option<u8> {
+    match raw {
+        0x17..=0x1a => Some(map[(raw - 0x17) as usize]),
+        _ => None,
+    }
+}
+
 const SWAP_MX: TouchQuirk = TouchQuirk { swap_xy: true, mirror_x: true, mirror_y: false };
 const SWAP: TouchQuirk = TouchQuirk { swap_xy: true, mirror_x: false, mirror_y: false };
 const SWAP_MY: TouchQuirk = TouchQuirk { swap_xy: true, mirror_x: false, mirror_y: true };
 
 #[allow(clippy::too_many_arguments)]
 const fn p(id: u16, name: &'static str, codename: &'static str, panel: Panel, dpi: f32, size: (i32, i32), page_keys: bool, gyro: bool, touch: TouchQuirk, rotation_map: [u8; 4], wait_reliable: bool) -> Profile {
-    Profile { id, name, codename, panel, dpi, size, page_keys, gyro, follow_sensor: false, touch, rotation_map, wait_reliable, kaleido: false, light: LightSpec::None, verified: false }
+    Profile { id, name, codename, panel, dpi, size, page_keys, gyro, sensor: None, touch, rotation_map, wait_reliable, kaleido: false, light: LightSpec::None, verified: false }
 }
 
 /// Every model NickelMenu 0.6 runs on (firmware 4.6 or newer), which is every Kobo from the
@@ -117,8 +140,8 @@ pub fn table() -> Vec<Profile> {
         match prof.id {
             388 => {
                 prof.verified = true;
-                // KOReader (UP→UR, RIGHT→CW, DOWN→UD, LEFT→CCW) and Plato's Libra 2 transform agree.
-                prof.follow_sensor = true;
+                // The landscape values were swapped in 0.2.3; see LIBRA2_SENSOR.
+                prof.sensor = Some(LIBRA2_SENSOR);
             }
             390 | 393 => prof.kaleido = true,
             _ => {}
@@ -229,5 +252,23 @@ mod tests {
         dedup.sort();
         dedup.dedup();
         assert_eq!(ids.len(), dedup.len());
+    }
+
+    #[test]
+    fn libra2_landscape_is_the_right_way_up() {
+        let map = by_id(388).sensor.expect("the Libra 2 follows its sensor");
+        // Portrait and portrait upside down.
+        assert_eq!(sensor_rotation(&map, 0x18), Some(0));
+        assert_eq!(sensor_rotation(&map, 0x17), Some(2));
+        // Turned a quarter clockwise (0x19): the page's top runs along the panel's left edge,
+        // which is now on top; 0.2.3 drew it along the right edge, upside down.
+        assert_eq!(sensor_rotation(&map, 0x19), Some(3));
+        assert_eq!(crate::device::canvas_to_base((1264, 1680), 3, 0, 0), (0, 1679), "rotation 3 starts the page's top row at the panel's bottom left");
+        assert_eq!(sensor_rotation(&map, 0x1a), Some(1));
+        // Face up and face down say nothing about rotation.
+        assert_eq!(sensor_rotation(&map, 0x1b), None);
+        assert_eq!(sensor_rotation(&map, 0x1c), None);
+        // Models whose mapping has not been checked ignore their sensor.
+        assert!(table().iter().filter(|p| p.id != 388).all(|p| p.sensor.is_none()));
     }
 }

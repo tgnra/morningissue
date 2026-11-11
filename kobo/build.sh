@@ -51,7 +51,8 @@ APP="$DIST/.adds/morningissue"
 mkdir -p "$APP/fonts" "$DIST/.adds/nm"
 cp "target/$TARGET/release/morningissue" "$APP/morningissue"
 cp launch/launch.sh "$APP/launch.sh"
-chmod 755 "$APP/morningissue" "$APP/launch.sh"
+cp launch/wifi-off.sh "$APP/wifi-off.sh"
+chmod 755 "$APP/morningissue" "$APP/launch.sh" "$APP/wifi-off.sh"
 for f in fraunces.ttf fraunces_italic.ttf newsreader.ttf newsreader_italic.ttf inter.ttf; do
     cp "$ROOT/app/src/main/res/font/$f" "$APP/fonts/$f"
 done

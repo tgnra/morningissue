@@ -21,6 +21,10 @@ pub trait Light {
     fn levels(&self) -> (u8, u8);
     /// Puts the light back as the reader found it.
     fn restore(&mut self);
+    /// Turns the light off for sleep, keeping its level for [`Light::on`].
+    fn off(&mut self) {}
+    /// Turns the light back on at its level after sleep.
+    fn on(&mut self) {}
 }
 
 /// No front light (Kobo Touch, Mini, Aura Edition 2, Clara BW without the light, …) or one
@@ -149,6 +153,12 @@ impl Light for KoboLight {
     fn levels(&self) -> (u8, u8) {
         self.level
     }
+    fn off(&mut self) {
+        self.write_brightness(0);
+    }
+    fn on(&mut self) {
+        self.write_brightness(self.level.0);
+    }
     fn restore(&mut self) {
         if self.level == self.original {
             return;
@@ -223,6 +233,13 @@ impl Light for FakeLight {
     }
     fn levels(&self) -> (u8, u8) {
         self.level
+    }
+    fn off(&mut self) {
+        self.writes.borrow_mut().push(('b', 0));
+    }
+    fn on(&mut self) {
+        let b = self.level.0;
+        self.writes.borrow_mut().push(('b', b));
     }
     fn restore(&mut self) {
         let o = self.original;

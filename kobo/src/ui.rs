@@ -548,13 +548,15 @@ pub fn saved_screens(ctx: &Ctx, list: &SavedList) -> Vec<Screen> {
 pub struct SettingsView<'s> {
     pub wifi: String,
     pub online: bool,
+    /// Offline because the reader turned Wi-Fi off to sleep.
+    pub slept: bool,
     pub phone_address: Option<&'s str>,
     pub syncing: bool,
     pub last_result: String,
     pub last_is_error: bool,
     pub invert_buttons: bool,
     pub orientation: Orientation,
-    /// The model's sensor is mapped, so "Follow the sensor" is offered.
+    /// The model's sensor is mapped, so it turns the page upside down within the choice.
     pub sensor: bool,
 }
 
@@ -620,6 +622,8 @@ pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
     y += wifi.height();
     let note = if s.online {
         "Morning Issue uses the Kobo\u{2019}s own connection and never turns Wi-Fi on itself."
+    } else if s.slept {
+        "Wi-Fi was turned off when the Kobo went to sleep, and Morning Issue never turns it on itself. Exit and connect in the Kobo\u{2019}s settings to sync."
     } else {
         "Turn on Wi-Fi in the Kobo\u{2019}s settings before opening Morning Issue to sync."
     };
@@ -649,7 +653,11 @@ pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
     if enabled {
         hits.push((target(ctx, br), Action::SyncNow));
     }
-    let side = if s.online { "" } else { "Offline" };
+    let side = match (s.online, s.slept) {
+        (true, _) => "",
+        (false, true) => "Offline since sleep",
+        (false, false) => "Offline",
+    };
     if !side.is_empty() {
         let l = ctx.line(side, ctx.ty.label.italic().color(MUTED), w as f32 - bw as f32 - m.pt(12.0), Align::Left);
         l.draw(ctx.fonts, canvas, (x + bw) as f32 + m.pt(12.0), br.y as f32 + (bh as f32 - l.height()) / 2.0);
@@ -667,21 +675,21 @@ pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
     rule(ctx, canvas, x, &mut y, w);
 
     section(ctx, canvas, x, &mut y, w, "ORIENTATION");
-    let mut options = Vec::new();
-    if s.sensor {
-        options.push(("Follow the sensor", Orientation::Sensor));
-    }
-    options.push(("Portrait", Orientation::Portrait));
-    options.push(("Landscape", Orientation::Landscape));
-    let sel = if !s.sensor && s.orientation == Orientation::Sensor { Orientation::Portrait } else { s.orientation };
+    let options = [("Portrait", Orientation::Portrait), ("Landscape", Orientation::Landscape)];
     // A segmented row: one box per choice, the chosen one filled.
     let gap = m.pt(6.0) as i32;
     let n = options.len() as i32;
     let ow = (w - gap * (n - 1)) / n;
     for (i, (label, o)) in options.into_iter().enumerate() {
         let r = Rect::new(x + i as i32 * (ow + gap), y as i32, ow, bh);
-        button(ctx, canvas, r, label, o == sel, true);
+        button(ctx, canvas, r, label, o == s.orientation, true);
         hits.push((target(ctx, r), Action::SetOrientation(o)));
+    }
+    if s.sensor {
+        y += bh as f32 + m.pt(6.0);
+        let note = "The page turns upside down to match how you hold the Kobo.";
+        let n = ctx.para(&text::plain(note, ctx.ty.caption.color(MUTED)), w as f32, Align::Left, 1.35, None);
+        n.draw(ctx.fonts, canvas, x as f32, y);
     }
     hits
 }
@@ -869,7 +877,25 @@ pub fn draw_popover(ctx: &Ctx, canvas: &mut Canvas, p: &Popover) -> Hits {
 }
 
 // --------------------------------------------------------------------------------------------
+// The sleep screen
+
+/// What shows while the Kobo sleeps: a blank page with "Sleeping…" small in the lower right
+/// corner.
+pub fn draw_sleep(ctx: &Ctx, canvas: &mut Canvas) {
+    let m = &ctx.m;
+    canvas.clear(WHITE);
+    let margin = m.pt(18.0);
+    let w = m.w as f32 - 2.0 * margin;
+    let l = ctx.line("Sleeping\u{2026}", ctx.ty.caption.italic().color(MUTED), w, Align::Right);
+    l.draw(ctx.fonts, canvas, margin, m.h as f32 - margin - l.height());
+}
+
+// --------------------------------------------------------------------------------------------
 // The status line
+
+/// What the home screen and Settings say when there is no connection because the reader
+/// turned Wi-Fi off to sleep.
+pub const OFFLINE_SINCE_SLEEP: &str = "Offline since sleep. Exit and connect in Kobo\u{2019}s settings to sync";
 
 /// What a running sync shows.
 #[derive(Clone, Debug, Default)]

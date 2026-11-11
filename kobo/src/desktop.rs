@@ -23,6 +23,45 @@ pub struct Shared {
     /// What can be touched on the last frame, as (region, `{:?}` of the action), in the
     /// order the reader looks at them: the last one that contains a point wins.
     pub hits: RefCell<Vec<(Rect, String)>>,
+    /// Every step of going to sleep and waking: "wifi-off", "prepare", "suspend", "resume",
+    /// with "refused" after a step the simulated kernel turned down.
+    pub power: RefCell<Vec<String>>,
+    /// How many of the next `prepare` steps the simulated kernel refuses.
+    pub refuse_prepare: Cell<u32>,
+    /// How many of the next `suspend` steps the simulated kernel refuses (EBUSY).
+    pub refuse_suspend: Cell<u32>,
+}
+
+/// Sleep, simulated: each step is recorded in [`Shared::power`], and the kernel refuses as
+/// many attempts as the test asks. A suspend returns at once, as if a key had woken the
+/// device; the script then says what woke it.
+pub struct DesktopPower(pub Rc<Shared>);
+
+impl DesktopPower {
+    fn step(&self, name: &str, refuse: &Cell<u32>) -> io::Result<()> {
+        if refuse.get() > 0 {
+            refuse.set(refuse.get() - 1);
+            self.0.power.borrow_mut().push(format!("{name} refused"));
+            return Err(io::Error::from_raw_os_error(libc::EBUSY));
+        }
+        self.0.power.borrow_mut().push(name.to_string());
+        Ok(())
+    }
+}
+
+impl device::Power for DesktopPower {
+    fn wifi_off(&mut self) {
+        self.0.power.borrow_mut().push("wifi-off".into());
+    }
+    fn prepare(&mut self) -> io::Result<()> {
+        self.step("prepare", &self.0.refuse_prepare)
+    }
+    fn suspend(&mut self) -> io::Result<()> {
+        self.step("suspend", &self.0.refuse_suspend)
+    }
+    fn resume(&mut self) {
+        self.0.power.borrow_mut().push("resume".into());
+    }
 }
 
 pub struct DesktopDisplay {
@@ -153,8 +192,8 @@ impl Input for ScriptInput {
             }
             match self.steps.pop_front() {
                 None => {
-                    // The script is over: the reader is told the power button was pressed.
-                    return Some(RawEvent::Key(Key::Power));
+                    // The script is over: the reader leaves.
+                    return Some(RawEvent::Quit);
                 }
                 Some(Step::Tap(x, y)) => {
                     let (bx, by) = self.to_base(x, y);

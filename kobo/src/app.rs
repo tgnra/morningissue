@@ -12,7 +12,7 @@
 
 use crate::canvas::{Canvas, Rect};
 use crate::config::Config;
-use crate::device::{self, Clock, Display, Input, Key, RawEvent, Refresh};
+use crate::device::{self, Clock, Display, Input, Key, Power, RawEvent, Refresh};
 use crate::events::{self, ArticleVisit, PageMeter, Recorder};
 use crate::fonts::Fonts;
 use crate::gesture::{Dir, Gesture, Recognizer};
@@ -38,6 +38,50 @@ use std::time::Duration;
 const CHROME_TIMEOUT_MS: u64 = 7_000;
 /// Pictures that arrive in a burst are drawn together at most this often.
 const BATCH_MS: u64 = 2_000;
+/// A sensor reading must hold this long before the page turns upside down to follow it.
+const SENSOR_SETTLE_MS: u64 = 1_500;
+
+// Sleep. The power button, closing the sleep cover, or `idleMinutes` without input put the
+// Kobo to sleep; the power button or opening the cover wakes it on the page it was showing.
+// The timings come from KOReader (`frontend/device/generic/device.lua` `onPowerEvent`,
+// `frontend/device/kobo/device.lua` `Kobo:suspend`, `_doSuspend`, `Kobo:resume`,
+// `checkUnexpectedWakeup`) and Plato (`crates/plato/src/app.rs`, `scripts/suspend.sh`):
+//
+// 1. the sleep screen is drawn with a full refresh;
+// 2. after PREPARE_MS (Plato's PREPARE_SUSPEND_WAIT_DELAY, time for the refresh to finish),
+//    Wi-Fi is turned off and the light goes off;
+// 3. after SUSPEND_WAIT_MS (both projects' 15 s: suspending sooner tends to fail), the
+//    subsystems are flagged (`state-extended` 1);
+// 4. FLAG_MS later (both projects sleep 2 s between the two writes), the device suspends;
+// 5. after it wakes, or when the kernel refuses, the flag is cleared; unless the power button
+//    or the cover wakes the reader within SUSPEND_WAIT_MS, it tries again from step 3, up to
+//    MAX_ATTEMPTS times (KOReader gives up after 20 unexpected wake-ups).
+//
+// A power press or the cover opening at any point wakes the reader at once.
+const PREPARE_MS: u64 = 3_000;
+const SUSPEND_WAIT_MS: u64 = 15_000;
+const FLAG_MS: u64 = 2_000;
+const MAX_ATTEMPTS: u32 = 20;
+/// Touches this soon after waking are dropped, as are the ones queued while asleep.
+const WAKE_TOUCH_GUARD_MS: u64 = 500;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SleepStage {
+    /// The sleep screen is up; Wi-Fi and the light are still on.
+    Screen,
+    /// Wi-Fi and the light are off; waiting to flag the subsystems.
+    Waiting,
+    /// `state-extended` is 1; waiting to suspend.
+    Flagged,
+}
+
+struct Sleep {
+    stage: SleepStage,
+    /// When the next step is due (monotonic ms).
+    at: u64,
+    /// Attempts that ended without the power button or the cover waking the reader.
+    attempts: u32,
+}
 
 struct Ed {
     id: i64,
@@ -96,9 +140,12 @@ enum SyncMsg {
 pub struct Options {
     /// The rotation Nickel left the screen in, as quarter turns from portrait.
     pub rotation: u8,
-    /// The model's orientation sensor is mapped.
+    /// The model's orientation sensor is mapped, so it turns the page upside down within the
+    /// chosen orientation.
     pub follow_sensor: bool,
     pub light: Box<dyn Light>,
+    /// Puts the device to sleep.
+    pub power: Box<dyn Power>,
     /// Asked whether the Kobo is on a network.
     pub network: Box<dyn Fn() -> NetStatus>,
     /// Start a sync as soon as the home screen is up (when online).
@@ -122,7 +169,23 @@ pub struct App {
     nickel_rotation: u8,
     rotation: u8,
     follow_sensor: bool,
+    /// The sensor's last reading, as a rotation.
+    last_sensor: Option<u8>,
+    /// A sensor reading waiting to settle before the page turns to it: (rotation, since).
+    pending_flip: Option<(u8, u64)>,
     light: Box<dyn Light>,
+    power: Box<dyn Power>,
+    /// Set while the Kobo is going to sleep or asleep.
+    sleep: Option<Sleep>,
+    cover_closed: bool,
+    /// The light was turned off for sleep.
+    light_off: bool,
+    /// Wi-Fi has been turned off for sleep once (the reader never turns it back on).
+    wifi_off_done: bool,
+    /// The connection was lost to sleep, so "Offline" says why.
+    offline_since_sleep: bool,
+    /// Touches before this (monotonic ms) are dropped: they were made while waking.
+    ignore_touches_until: u64,
     network: Box<dyn Fn() -> NetStatus>,
     net: NetStatus,
     sync_on_start: bool,
@@ -187,7 +250,16 @@ impl App {
             nickel_rotation: opts.rotation % 4,
             rotation: opts.rotation % 4,
             follow_sensor: opts.follow_sensor,
+            last_sensor: None,
+            pending_flip: None,
             light: opts.light,
+            power: opts.power,
+            sleep: None,
+            cover_closed: false,
+            light_off: false,
+            wifi_off_done: false,
+            offline_since_sleep: false,
+            ignore_touches_until: 0,
             network: opts.network,
             net,
             sync_on_start: opts.sync_on_start,
@@ -215,6 +287,10 @@ impl App {
             refreshes: Vec::new(),
             syncs_started: 0,
         };
+        // Not chosen yet (or 0.2.3's "follow the sensor"): the orientation the screen is in.
+        if app.settings.orientation.is_none() {
+            app.settings.orientation = Some(if app.nickel_rotation % 2 == 1 { Orientation::Landscape } else { Orientation::Portrait });
+        }
         app.rotation = app.wanted_rotation(app.nickel_rotation);
         // The light as last chosen here.
         if app.light.present() {
@@ -228,15 +304,37 @@ impl App {
         Ok(app)
     }
 
-    /// The rotation the Orientation setting asks for, given the current one.
+    fn orientation(&self) -> Orientation {
+        self.settings.orientation.unwrap_or(Orientation::Portrait)
+    }
+
+    /// The rotation the Orientation setting asks for, given the current one: the current one
+    /// if it already belongs to it; else the way the sensor last said the Kobo is held, if
+    /// that belongs to it; else the way Nickel left the screen, if that does; else upright.
     fn wanted_rotation(&self, current: u8) -> u8 {
-        match self.settings.orientation {
-            Orientation::Portrait => 0,
-            Orientation::Landscape if current % 2 == 1 => current,
-            Orientation::Landscape if self.nickel_rotation % 2 == 1 => self.nickel_rotation,
-            Orientation::Landscape => 1,
-            Orientation::Sensor => current,
+        let parity = self.orientation().parity();
+        let held = self.last_sensor.filter(|_| self.follow_sensor);
+        [Some(current), held, Some(self.nickel_rotation)].into_iter().flatten().find(|r| r % 2 == parity).unwrap_or(parity)
+    }
+
+    /// A reading from the orientation sensor. Within the chosen orientation it turns the page
+    /// upside down to match how the Kobo is held, once the reading has held for
+    /// SENSOR_SETTLE_MS (a brief tilt does nothing); the other orientation is ignored.
+    fn sensor(&mut self, r: u8) {
+        self.last_sensor = Some(r % 4);
+        let r = r % 4;
+        self.pending_flip = (self.follow_sensor && r % 2 == self.orientation().parity() && r != self.rotation).then(|| (r, self.clock.mono_ms()));
+    }
+
+    /// Turns the page once a sensor reading has settled; with a full refresh.
+    fn settle_flip(&mut self) -> io::Result<()> {
+        if let Some((r, since)) = self.pending_flip {
+            if self.clock.mono_ms().saturating_sub(since) >= SENSOR_SETTLE_MS {
+                self.pending_flip = None;
+                self.rotate_to(r)?;
+            }
         }
+        Ok(())
     }
 
     fn metrics(&self) -> Metrics {
@@ -360,6 +458,9 @@ impl App {
     // Drawing
 
     fn status(&self) -> (String, bool) {
+        if self.offline_since_sleep && !self.net.online() && self.sync.is_none() {
+            return (ui::OFFLINE_SINCE_SLEEP.to_string(), false);
+        }
         ui::status_line(&self.state, self.clock.wall_ms(), self.sync.as_ref().map(|_| &self.sync_show), self.net.online())
     }
 
@@ -385,12 +486,13 @@ impl App {
                 let view = ui::SettingsView {
                     wifi: self.net.describe(),
                     online: self.net.online(),
+                    slept: self.offline_since_sleep,
                     phone_address: self.settings.phone_address.as_deref(),
                     syncing: self.sync.is_some(),
                     last_result: if self.sync.is_some() { self.status().0 } else { last },
                     last_is_error: err && self.sync.is_none(),
                     invert_buttons: self.settings.invert_buttons,
-                    orientation: self.settings.orientation,
+                    orientation: self.orientation(),
                     sensor: self.follow_sensor,
                 };
                 ui::draw_settings(&ctx, &mut canvas, &view)
@@ -766,9 +868,10 @@ impl App {
                 self.show(Show::Touch)?;
             }
             Action::SetOrientation(o) => {
-                if o != self.settings.orientation {
-                    self.settings.orientation = o;
+                if Some(o) != self.settings.orientation {
+                    self.settings.orientation = Some(o);
                     self.save_settings();
+                    self.pending_flip = None;
                     let r = self.wanted_rotation(self.rotation);
                     if r != self.rotation {
                         self.rotate_to(r)?;
@@ -888,9 +991,182 @@ impl App {
             Key::Forward => self.act(Action::Next, (0, 0)),
             Key::Back => self.act(Action::Prev, (0, 0)),
             Key::Home => self.act(Action::Back, (0, 0)),
-            Key::Power | Key::CoverClosed => Ok(true),
-            Key::CoverOpened => Ok(false),
+            // Sleep and the cover are handled in `run`; neither leaves the reader.
+            Key::Power | Key::CoverClosed | Key::CoverOpened => Ok(false),
         }
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Sleep (see the constants at the top for the sequence and its sources)
+
+    /// The time the page on screen was shown ends (it is recorded as a page view).
+    fn leave_page(&mut self) -> io::Result<()> {
+        let now = self.clock.mono_ms();
+        if let Some(((edition, page), ms)) = self.meter.show(None, now) {
+            self.record("pageView", |e| {
+                e.edition_id = Some(edition);
+                e.page = Some(page);
+                e.ms = Some(ms as i64);
+            })?;
+        }
+        Ok(())
+    }
+
+    fn save_seq(&mut self) -> io::Result<()> {
+        let mut state = self.store.load_state()?;
+        state.next_seq = state.next_seq.max(self.recorder.next_seq());
+        self.store.save_state(&state)
+    }
+
+    /// Shows the sleep screen and starts the way to suspend.
+    fn go_to_sleep(&mut self, why: &str) -> io::Result<()> {
+        eprintln!("sleep: {why}; going to sleep");
+        let now = self.clock.mono_ms();
+        if let Some(v) = self.visit.as_mut() {
+            v.pause(now);
+        }
+        self.leave_page()?;
+        if let Err(e) = self.save_seq() {
+            eprintln!("sleep: cannot save the state: {e}");
+        }
+        self.chrome = false;
+        self.popover = false;
+        let m = self.metrics();
+        let mut canvas = Canvas::new(m.w, m.h);
+        ui::draw_sleep(&Ctx::new(&self.fonts, m, &self.images), &mut canvas);
+        let full = canvas.bounds();
+        self.display.present(&canvas, self.rotation, full, Refresh::Full)?;
+        self.refreshes.push((Refresh::Full, full));
+        // Whatever shows on waking is drawn whole.
+        self.shown = None;
+        self.partials = 0;
+        self.sleep = Some(Sleep { stage: SleepStage::Screen, at: now + PREPARE_MS, attempts: 0 });
+        Ok(())
+    }
+
+    /// An event while going to sleep or asleep. Only the power button (with the cover open)
+    /// and opening the cover wake the reader; touches, page keys and the sensor are dropped.
+    /// Returns true to leave the reader.
+    fn while_asleep(&mut self, ev: Option<RawEvent>) -> io::Result<bool> {
+        match ev {
+            Some(RawEvent::Quit) => return Ok(true),
+            Some(RawEvent::Key(Key::CoverOpened)) => {
+                self.cover_closed = false;
+                return self.wake("sleep cover opened");
+            }
+            Some(RawEvent::Key(Key::CoverClosed)) => self.cover_closed = true,
+            Some(RawEvent::Key(Key::Power)) if self.cover_closed => eprintln!("sleep: power button with the cover closed; staying asleep"),
+            Some(RawEvent::Key(Key::Power)) => return self.wake("power button"),
+            // Remembered, so the page wakes up the way the Kobo is held.
+            Some(RawEvent::Orientation(r)) => self.last_sensor = Some(r % 4),
+            Some(_) | None => {}
+        }
+        if self.sleep.as_ref().is_some_and(|s| self.clock.mono_ms() >= s.at) {
+            return self.sleep_step();
+        }
+        Ok(false)
+    }
+
+    /// The next step towards suspend, when it is due. Returns true to give up and leave the
+    /// reader, so Nickel comes back and handles sleep itself.
+    fn sleep_step(&mut self) -> io::Result<bool> {
+        let Some(mut s) = self.sleep.take() else { return Ok(false) };
+        let now = self.clock.mono_ms();
+        match s.stage {
+            SleepStage::Screen => {
+                if !self.wifi_off_done {
+                    let was_online = (self.network)().online();
+                    self.power.wifi_off();
+                    self.wifi_off_done = true;
+                    self.offline_since_sleep = was_online;
+                    self.net = NetStatus::Offline;
+                }
+                if self.light.present() {
+                    self.light.off();
+                    self.light_off = true;
+                }
+                s.stage = SleepStage::Waiting;
+                s.at = now + SUSPEND_WAIT_MS;
+            }
+            SleepStage::Waiting => match self.power.prepare() {
+                Ok(()) => {
+                    s.stage = SleepStage::Flagged;
+                    s.at = now + FLAG_MS;
+                }
+                Err(e) => {
+                    eprintln!("sleep: the kernel refused to flag subsystems for suspend ({e}); trying again in 15 s");
+                    s.attempts += 1;
+                    s.at = now + SUSPEND_WAIT_MS;
+                }
+            },
+            SleepStage::Flagged => {
+                eprintln!("sleep: suspending");
+                let r = self.power.suspend();
+                self.power.resume();
+                match r {
+                    Ok(()) => eprintln!("sleep: woke up"),
+                    Err(e) => eprintln!("sleep: the kernel refused to suspend ({e}); trying again in 15 s"),
+                }
+                // Counted until the power button or the cover says the wake-up was meant.
+                s.attempts += 1;
+                s.stage = SleepStage::Waiting;
+                s.at = self.clock.mono_ms() + SUSPEND_WAIT_MS;
+            }
+        }
+        let give_up = s.attempts >= MAX_ATTEMPTS;
+        self.sleep = Some(s);
+        if give_up {
+            eprintln!("sleep: gave up after {MAX_ATTEMPTS} attempts; leaving the reader so Nickel can sleep");
+        }
+        Ok(give_up)
+    }
+
+    /// Wakes up on the page the reader was showing. What was queued while asleep or waking
+    /// is dropped, so a touch on the dark screen never turns a page. Returns true to leave
+    /// (only at the end of a desktop script).
+    fn wake(&mut self, why: &str) -> io::Result<bool> {
+        let Some(s) = self.sleep.take() else { return Ok(false) };
+        eprintln!("sleep: {why}; waking up");
+        if s.stage == SleepStage::Flagged {
+            self.power.resume();
+        }
+        if self.light_off {
+            self.light.on();
+            self.light_off = false;
+        }
+        while let Some(ev) = self.input.next(Duration::ZERO) {
+            match ev {
+                RawEvent::Quit => return Ok(true),
+                RawEvent::Key(Key::CoverClosed) => self.cover_closed = true,
+                RawEvent::Key(Key::CoverOpened) => self.cover_closed = false,
+                RawEvent::Orientation(r) => self.last_sensor = Some(r % 4),
+                _ => {}
+            }
+        }
+        // Turned over while asleep: wake up the way it is held now.
+        self.pending_flip = None;
+        let r = self.wanted_rotation(self.last_sensor.filter(|_| self.follow_sensor).unwrap_or(self.rotation));
+        if r != self.rotation {
+            self.rotation = r;
+            self.relayout_all();
+        }
+        let now = self.clock.mono_ms();
+        self.last_input = now;
+        self.last_minute = now;
+        self.ignore_touches_until = now + WAKE_TOUCH_GUARD_MS;
+        self.gestures = Recognizer::new(self.display.dpi());
+        self.net = (self.network)();
+        if let Some(v) = self.visit.as_mut() {
+            v.resume(now);
+        }
+        self.meter_update()?;
+        self.show(Show::Change)?;
+        Ok(false)
+    }
+
+    /// Whether the reader is going to sleep or asleep, for tests.
+    pub fn asleep(&self) -> bool {
+        self.sleep.is_some()
     }
 
     // ----------------------------------------------------------------------------------------
@@ -917,8 +1193,19 @@ impl App {
             let _ = ptx.send(SyncMsg::Progress(p));
         }));
         let home = self.store.home.clone();
-        std::thread::spawn(move || {
-            let r = sync::sync(&Store::new(home), &opts);
+        let spawned = std::thread::Builder::new().name("sync".into()).spawn(move || {
+            // A panic in a sync is logged by the panic hook and ends that sync only; the
+            // reader goes on with what is stored.
+            let store = Store::new(&home);
+            let r = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sync::sync(&store, &opts))) {
+                Ok(r) => r,
+                Err(_) => {
+                    eprintln!("sync: crashed; the reader goes on with what it has");
+                    let _ = std::fs::remove_file(store.home.join("data").join("panic.txt"));
+                    let _ = tx.send(SyncMsg::Done);
+                    return;
+                }
+            };
             match &r {
                 Ok(r) => eprintln!(
                     "synced with {}: {} events sent, editions fetched {:?}, removed {:?}, saved list {}, {} images fetched, {} not on the phone",
@@ -934,6 +1221,10 @@ impl App {
             }
             let _ = tx.send(SyncMsg::Done);
         });
+        if let Err(e) = spawned {
+            eprintln!("sync: cannot start: {e}");
+            return;
+        }
         self.sync = Some(rx);
         self.syncs_started += 1;
         self.sync_show = SyncShow::default();
@@ -1042,7 +1333,8 @@ impl App {
         Ok(())
     }
 
-    /// Runs until Exit, the power button, the sleep cover, or the idle timeout.
+    /// Runs until Exit. The power button, the sleep cover and the idle timeout put the Kobo
+    /// to sleep and back; they never leave the reader.
     pub fn run(&mut self) -> io::Result<()> {
         self.show(Show::Change)?;
         if self.sync_on_start {
@@ -1053,14 +1345,47 @@ impl App {
         }
         let idle = Duration::from_secs(self.config.idle_minutes * 60);
         loop {
-            let wait = if self.sync.is_some() { Duration::from_millis(250) } else { Duration::from_secs(1) };
+            let wait = match &self.sleep {
+                Some(s) => Duration::from_millis(s.at.saturating_sub(self.clock.mono_ms()).clamp(1, 1000)),
+                None if self.sync.is_some() || self.pending_flip.is_some() => Duration::from_millis(250),
+                None => Duration::from_secs(1),
+            };
             let ev = self.input.next(wait);
+            if self.sleep.is_some() {
+                if self.while_asleep(ev)? {
+                    return self.finish();
+                }
+                continue;
+            }
             let now = self.clock.mono_ms();
             let exit = match ev {
-                None => !idle.is_zero() && now.saturating_sub(self.last_input) >= idle.as_millis() as u64,
+                None => {
+                    if !idle.is_zero() && now.saturating_sub(self.last_input) >= idle.as_millis() as u64 {
+                        self.go_to_sleep("no input for a while")?;
+                        continue;
+                    }
+                    false
+                }
+                Some(RawEvent::Quit) => true,
+                Some(RawEvent::Key(Key::Power)) => {
+                    self.go_to_sleep("power button")?;
+                    continue;
+                }
+                Some(RawEvent::Key(Key::CoverClosed)) => {
+                    self.cover_closed = true;
+                    self.go_to_sleep("sleep cover closed")?;
+                    continue;
+                }
+                Some(RawEvent::Key(Key::CoverOpened)) => {
+                    self.cover_closed = false;
+                    false
+                }
+                // Made while waking up; the guard ends a little after the page is back.
+                Some(RawEvent::Touch { .. }) if now < self.ignore_touches_until => false,
                 Some(ev) => {
                     self.last_input = now;
                     match ev {
+                        RawEvent::Quit => true,
                         RawEvent::Touch { phase, x, y } => {
                             let (cx, cy) = device::base_to_canvas(self.display.base_size(), self.rotation, x, y);
                             match self.gestures.feed(phase, cx, cy) {
@@ -1070,9 +1395,7 @@ impl App {
                         }
                         RawEvent::Key(k) => self.key(k)?,
                         RawEvent::Orientation(r) => {
-                            if self.follow_sensor && self.settings.orientation == Orientation::Sensor {
-                                self.rotate_to(r)?;
-                            }
+                            self.sensor(r);
                             false
                         }
                     }
@@ -1081,6 +1404,7 @@ impl App {
             if exit {
                 return self.finish();
             }
+            self.settle_flip()?;
             self.poll_sync()?;
             let now = self.clock.mono_ms();
             if self.stale && now.saturating_sub(self.last_update) >= BATCH_MS {
@@ -1111,18 +1435,18 @@ impl App {
             self.stack.pop();
         }
         // Leaving ends the page's time on screen.
-        let now = self.clock.mono_ms();
-        if let Some(((edition, page), ms)) = self.meter.show(None, now) {
-            self.record("pageView", |e| {
-                e.edition_id = Some(edition);
-                e.page = Some(page);
-                e.ms = Some(ms as i64);
-            })?;
+        self.leave_page()?;
+        if let Some(s) = self.sleep.take() {
+            if s.stage == SleepStage::Flagged {
+                self.power.resume();
+            }
+        }
+        if self.light_off {
+            self.light.on();
+            self.light_off = false;
         }
         self.light.restore();
-        let mut state = self.store.load_state()?;
-        state.next_seq = state.next_seq.max(self.recorder.next_seq());
-        self.store.save_state(&state)
+        self.save_seq()
     }
 
     /// Whether a sync is running, for tests.

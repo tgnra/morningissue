@@ -1,5 +1,6 @@
 //! What the reader needs from the hardware, and nothing more: a screen to present a grey
-//! canvas on, raw input, and clocks. The Kobo backend and the desktop backend implement these.
+//! canvas on, raw input, clocks, and a way to sleep. The Kobo backend and the desktop backend
+//! implement these.
 //!
 //! **Orientation.** The *base* orientation is the panel as the framebuffer is set up when the
 //! reader starts (portrait on every Kobo once the canonical rotation is applied). The reader
@@ -57,11 +58,49 @@ pub enum RawEvent {
     Key(Key),
     /// The orientation sensor's reading, as quarter turns clockwise from base.
     Orientation(u8),
+    /// The input has ended (the end of a desktop script); the reader leaves as on Exit.
+    /// A Kobo never sends it.
+    Quit,
 }
 
 pub trait Input {
     /// The next event, or None when `timeout` passes without one.
     fn next(&mut self, timeout: Duration) -> Option<RawEvent>;
+}
+
+/// Putting the device to sleep. The reader decides *when* (its sleep screen, the delays, the
+/// retries and what wakes it are in `app.rs`); a backend only does each step. The order, from
+/// KOReader (`frontend/device/kobo/device.lua`, `Kobo:suspend`, `Kobo:resume`) and Plato
+/// (`scripts/suspend.sh`, `resume.sh`): Wi-Fi off, light off, then `prepare`, two seconds,
+/// `suspend`, and `resume` after every attempt.
+pub trait Power {
+    /// Turns Wi-Fi off cleanly, the same teardown as on exit. Suspending with Wi-Fi on can
+    /// fail or hang the kernel on several Kobos.
+    fn wifi_off(&mut self);
+    /// Flags the kernel's subsystems for suspend (`1` to `/sys/power/state-extended`). An
+    /// error means the kernel refused and the attempt should be tried again later.
+    fn prepare(&mut self) -> io::Result<()>;
+    /// Syncs the file systems and suspends to RAM (`mem` to `/sys/power/state`). Returns once
+    /// the device is awake again, for whatever reason; an error means the kernel refused
+    /// (usually EBUSY, the EPDC or the touch panel still busy).
+    fn suspend(&mut self) -> io::Result<()>;
+    /// Unflags the subsystems (`0` to `state-extended`) after a wake or a refused attempt.
+    fn resume(&mut self);
+}
+
+/// A device that cannot sleep (and the default in tests that do not care): every step
+/// succeeds at once.
+pub struct NoPower;
+
+impl Power for NoPower {
+    fn wifi_off(&mut self) {}
+    fn prepare(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+    fn suspend(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+    fn resume(&mut self) {}
 }
 
 pub trait Clock {

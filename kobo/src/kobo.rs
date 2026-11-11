@@ -469,7 +469,7 @@ pub struct EvdevInput {
     touch: TouchState,
     quirk: TouchQuirk,
     base: (i32, i32),
-    follow_sensor: bool,
+    sensor: Option<crate::profile::SensorMap>,
     queue: VecDeque<RawEvent>,
     last_pos: (i32, i32),
 }
@@ -544,7 +544,7 @@ impl EvdevInput {
             touch: TouchState { slot: 0, raw: (0, 0), down: false, frame_down: None, frame_pos: false, max, mt },
             quirk,
             base,
-            follow_sensor: profile.follow_sensor,
+            sensor: profile.sensor,
             queue: VecDeque::new(),
             last_pos: (0, 0),
         })
@@ -609,15 +609,9 @@ impl EvdevInput {
                     self.queue.push_back(RawEvent::Key(k));
                 }
             }
-            EV_MSC if code == MSC_RAW && self.follow_sensor => {
-                let r = match value {
-                    0x18 => Some(0), // portrait up
-                    0x19 => Some(1), // landscape right
-                    0x17 => Some(2), // portrait down
-                    0x1a => Some(3), // landscape left
-                    _ => None,
-                };
-                if let Some(r) = r {
+            EV_MSC if code == MSC_RAW => {
+                // The model's own mapping; see `Profile::sensor`.
+                if let Some(r) = self.sensor.as_ref().and_then(|m| crate::profile::sensor_rotation(m, value)) {
                     self.queue.push_back(RawEvent::Orientation(r));
                 }
             }
@@ -678,10 +672,9 @@ impl device::Input for EvdevInput {
             }
             let mut fds: Vec<libc::pollfd> = self.touch_fd.iter().chain(self.key_fds.iter()).map(|&fd| libc::pollfd { fd, events: libc::POLLIN, revents: 0 }).collect();
             fds.dedup_by_key(|p| p.fd);
+            // A zero timeout still polls once, so what the kernel has queued (the touches and
+            // keys of a wake-up, which the reader drains) is read.
             let left = until.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return None;
-            }
             let r = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, left.as_millis().min(i32::MAX as u128) as i32) };
             if r < 0 {
                 if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
@@ -692,7 +685,63 @@ impl device::Input for EvdevInput {
             for p in fds.iter().filter(|p| p.revents & libc::POLLIN != 0) {
                 self.read_fd(p.fd);
             }
+            if self.queue.is_empty() && until.saturating_duration_since(Instant::now()).is_zero() {
+                return None;
+            }
         }
+    }
+}
+
+// --- Sleep ---
+
+/// Suspend to RAM through the NTX kernel's sysfs knobs, as Nickel, KOReader and Plato do:
+/// `1` to `/sys/power/state-extended` (the NTX flag that puts the touch panel, the EPDC and
+/// the other subsystems to sleep and arms the wake-up pins), `mem` to `/sys/power/state`
+/// (which returns on wake), then `0` to `state-extended`. Wi-Fi is turned off by
+/// `wifi-off.sh`, the same teardown `launch.sh` does on exit.
+pub struct KoboPower {
+    /// The directory holding `wifi-off.sh` and the binary.
+    pub home: std::path::PathBuf,
+}
+
+const STATE_EXTENDED: &str = "/sys/power/state-extended";
+const POWER_STATE: &str = "/sys/power/state";
+
+impl device::Power for KoboPower {
+    fn wifi_off(&mut self) {
+        let script = self.home.join("wifi-off.sh");
+        eprintln!("sleep: turning Wi-Fi off");
+        // The script's own output goes to the log (it ends before the reader does).
+        match std::process::Command::new("/bin/sh").arg(&script).stdin(std::process::Stdio::null()).status() {
+            Ok(s) if s.success() => {}
+            Ok(s) => eprintln!("sleep: wifi-off.sh ended with {s}"),
+            Err(e) => eprintln!("sleep: cannot run {}: {e}", script.display()),
+        }
+    }
+
+    fn prepare(&mut self) -> io::Result<()> {
+        std::fs::write(STATE_EXTENDED, "1")
+    }
+
+    fn suspend(&mut self) -> io::Result<()> {
+        unsafe { libc::sync() };
+        // Blocks while the device sleeps.
+        std::fs::write(POWER_STATE, "mem")
+    }
+
+    fn resume(&mut self) {
+        if let Err(e) = std::fs::write(STATE_EXTENDED, "0") {
+            eprintln!("sleep: the kernel refused to resume subsystems: {e}");
+        }
+        // KOReader gives the kernel a moment to catch up, then sets the system clock from
+        // the RTC.
+        std::thread::sleep(Duration::from_millis(100));
+        let _ = std::process::Command::new("hwclock")
+            .args(["-s", "-u"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 }
 
@@ -718,7 +767,7 @@ mod tests {
             touch: TouchState { slot: 0, raw: (0, 0), down: false, frame_down: None, frame_pos: false, max, mt: true },
             quirk,
             base,
-            follow_sensor: true,
+            sensor: Some(crate::profile::LIBRA2_SENSOR),
             queue: VecDeque::new(),
             last_pos: (0, 0),
         }
@@ -742,7 +791,17 @@ mod tests {
         i.handle(false, EV_KEY, KEY_F24, 0);
         i.handle(false, EV_MSC, MSC_RAW, 0x19);
         assert_eq!(i.queue.pop_front(), Some(RawEvent::Key(Key::Forward)));
+        assert_eq!(i.queue.pop_front(), Some(RawEvent::Orientation(3)), "turned clockwise: the top of the page along the panel's left edge");
+        i.handle(false, EV_MSC, MSC_RAW, 0x1a);
+        i.handle(false, EV_MSC, MSC_RAW, 0x1c); // face down: ignored
         assert_eq!(i.queue.pop_front(), Some(RawEvent::Orientation(1)));
+        assert!(i.queue.is_empty());
+        // The sleep cover's hall sensor is KEY_F1 (59): pressed when it closes, released when
+        // it opens; a repeat (value 2) is chatter. The power button acts on its press only.
+        for (c, v) in [(KEY_F1, 1), (KEY_F1, 2), (KEY_F1, 0), (KEY_POWER, 1), (KEY_POWER, 0)] {
+            i.handle(false, EV_KEY, c, v);
+        }
+        assert_eq!(i.queue.drain(..).collect::<Vec<_>>(), [RawEvent::Key(Key::CoverClosed), RawEvent::Key(Key::CoverOpened), RawEvent::Key(Key::Power)]);
     }
 
     #[test]
