@@ -70,7 +70,9 @@ impl Kobo {
         for name in ["nickel", "hindenburg"] {
             script(
                 &root.join("usr/local/Kobo").join(name),
-                &format!("echo \"{name} $*\" >>'{c}'\nreadlink /proc/$$/fd/1 >'{r}/{name}.out'\nreadlink /proc/$$/fd/2 >>'{r}/{name}.out'\nsleep 3", r = root.display()),
+                // Both links are read before anything is written: dash applies a command's
+                // redirection in the shell itself, so `readlink /proc/$$/fd/1 >file` sees the file.
+                &format!("echo \"{name} $*\" >>'{c}'\no=$(readlink /proc/$$/fd/1)\ne=$(readlink /proc/$$/fd/2)\nprintf '%s\\n%s\\n' \"$o\" \"$e\" >'{r}/{name}.out'\nsleep 3", r = root.display()),
             );
         }
         script(&root.join("etc/init.d/on-animator.sh"), "echo 'sh: ON: unknown operand'");
