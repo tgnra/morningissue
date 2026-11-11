@@ -10,12 +10,15 @@ data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.System,
     val displayMode: DisplayMode = DisplayMode.Auto,
     val eveningEditionEnabled: Boolean = false,
+    /** Local time at which the Evening edition is released, when it is switched on. */
+    val eveningEditionTime: LocalTime = DEFAULT_EVENING_TIME,
     /** Budget for stored article text and cached images, in megabytes. */
     val storageBudgetMb: Int = DEFAULT_STORAGE_BUDGET_MB,
     val onboardingDone: Boolean = false,
 ) {
     companion object {
         val DEFAULT_RESET_TIME: LocalTime = LocalTime.of(6, 30)
+        val DEFAULT_EVENING_TIME: LocalTime = LocalTime.of(18, 0)
         const val DEFAULT_STORAGE_BUDGET_MB = 500
         const val MIN_STORAGE_BUDGET_MB = 50
         const val MAX_STORAGE_BUDGET_MB = 4000

@@ -5,6 +5,7 @@ import net.tgnra.morningissue.data.db.EditionCoverRow
 import net.tgnra.morningissue.data.db.EditionItemRow
 import net.tgnra.morningissue.data.db.FeedWithDetails
 import net.tgnra.morningissue.data.db.TagEntity
+import net.tgnra.morningissue.engine.Scorer
 import net.tgnra.morningissue.model.ArticleSummary
 import net.tgnra.morningissue.model.EditionStory
 import net.tgnra.morningissue.model.EditionSummary
@@ -73,6 +74,7 @@ internal fun EditionItemRow.toStory(): EditionStory = EditionStory(
     isRead = row.readAt != null,
     isLiked = row.likedAt != null,
     isSaved = row.savedAt != null,
+    comebackLabel = Scorer.comebackLabelOf(item.reason),
 )
 
 internal fun EditionCoverRow.toSummary(): EditionSummary = EditionSummary(

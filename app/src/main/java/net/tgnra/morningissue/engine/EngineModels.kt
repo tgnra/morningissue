@@ -46,6 +46,35 @@ data class Candidate(
     val isHeldOver: Boolean = false,
     /** Printed in one of the last `archiveCooldownEditions` editions; bars From the archive. */
     val ranRecently: Boolean = false,
+    /** The headline and link, for cross-feed deduplication; a post without either is never a duplicate. */
+    val title: String? = null,
+    val url: String? = null,
+    /**
+     * When the feed last posted before this post, as far as the app knew before this edition's
+     * window opened. Set only on the feed's first new post after that; a gap of
+     * `comebackQuietDays` or more makes this post a comeback ("Back after 2 years").
+     */
+    val previousPostAt: Instant? = null,
+    /**
+     * Exempt from the age limit and the freshness floor without being held over: the newest
+     * posts of each feed in an Extra edition.
+     */
+    val exemptFromAgeLimits: Boolean = false,
+)
+
+/**
+ * What the builder needs for the While you were away pull-out.
+ *
+ * @param candidates the untouched stories printed in the missed editions, minus any that have
+ *   been in a pull-out before
+ * @param lastVisitAt when the reader last opened an edition; freshness is measured from here
+ * @param engagedFeedIds feeds with a post the reader Liked or saved recently; the only
+ *   Firehose feeds allowed in
+ */
+data class AwayPool(
+    val candidates: List<Candidate>,
+    val lastVisitAt: Instant,
+    val engagedFeedIds: Set<Long> = emptySet(),
 )
 
 /** A story's place in an edition draft; mirrors an `edition_item` row (see `ItemKind`). */
@@ -62,6 +91,8 @@ data class DraftItem(
     val score: Double,
     /** One line for "Why is this here?". */
     val reason: String,
+    /** Other feeds that carried the same story and were collapsed into this one. */
+    val alsoInFeeds: Int = 0,
 )
 
 /** The builder's output: every placed post exactly once, ordered by page and slot. */
@@ -73,6 +104,10 @@ data class EditionDraft(
     val mutedSkipped: Int = 0,
     /** Candidates left out because they were published more than `maxAgeDays` before release. */
     val staleSkipped: Int = 0,
+    /** Copies of a syndicated story that were collapsed into the copy that was kept. */
+    val duplicatesDropped: Int = 0,
+    /** Weekly and Rare posts an Evening edition left for the morning paper. */
+    val waitingForMorning: Int = 0,
 ) {
     /** Stories printed on a page of their own kind, i.e. everything but the back-page index. */
     val printed: List<DraftItem> get() = items.filter { it.kind != ItemKind.INDEX }

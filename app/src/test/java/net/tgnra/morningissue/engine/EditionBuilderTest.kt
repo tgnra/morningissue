@@ -115,7 +115,7 @@ class EditionBuilderTest {
     fun limitsScaleWithLength() {
         val config = RankingConfig.Default
         assertEquals(EditionLimits(4, 2, 8, 6, 15), EditionLimits.of(config, EditionLength.STANDARD))
-        assertEquals(EditionLimits(4, 2, 4, 3, 8), EditionLimits.of(config, EditionLength.SHORT))
+        assertEquals(EditionLimits(4, 2, 4, 3, 8, awayStories = 15), EditionLimits.of(config, EditionLength.SHORT))
         assertEquals(EditionLimits(4, 2, 12, 9, 23), EditionLimits.of(config, EditionLength.LONG))
         assertEquals(21, EditionLimits.of(config, EditionLength.STANDARD).maxMixedStories)
     }

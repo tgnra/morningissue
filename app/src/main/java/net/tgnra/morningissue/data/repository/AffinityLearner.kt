@@ -40,12 +40,15 @@ class AffinityLearner(
      *   that the reader has not touched do not count as ignored. Null when every stored
      *   edition counts, which is the case while the next one is being built.
      */
-    suspend fun learn(at: Instant, pendingEditionId: Long?): LearnedAffinities {
+    suspend fun learn(at: Instant, pendingEditionId: Long?): LearnedAffinities = learn(at, setOfNotNull(pendingEditionId))
+
+    /** As above, with every edition that has not been superseded yet (see `EditionDao.getPending`). */
+    suspend fun learn(at: Instant, pendingEditionIds: Set<Long>): LearnedAffinities {
         val since = at.minus(Duration.ofDays(config.affinityWindowDays))
         val evidence = HashMap<Long, ArticleEvidence>()
         for (run in editionDao.getRunsSince(since)) {
             val touched = run.openedAt != null || run.readAt != null || run.savedAt != null || run.likedAt != null
-            if (run.editionId == pendingEditionId && !touched) continue
+            if (run.editionId in pendingEditionIds && !touched) continue
             val known = evidence[run.articleId]
                 ?: ArticleEvidence(run.feedId, emptyList(), run.openedAt, run.readAt, run.savedAt, run.likedAt)
             evidence[run.articleId] = known.copy(ranAt = known.ranAt + run.ranAt)
@@ -77,10 +80,10 @@ class AffinityLearner(
     }
 
     /**
-     * Learns and stores as of [at], between builds: the newest edition (by cutoff) has not
-     * been superseded, so its untouched stories do not count yet.
+     * Learns and stores as of [at], between builds: the newest scheduled edition and any Extra
+     * edition printed since have not been superseded, so their untouched stories do not count yet.
      */
-    suspend fun refresh(at: Instant) = store(learn(at, pendingEditionId = editionDao.getLatestByCutoff()?.id))
+    suspend fun refresh(at: Instant) = store(learn(at, editionDao.getPending().mapTo(HashSet()) { it.id }))
 
     private companion object {
         const val EPSILON = 1e-9

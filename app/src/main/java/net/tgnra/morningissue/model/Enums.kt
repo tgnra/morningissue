@@ -14,7 +14,12 @@ enum class SliderStep {
     fun stepDown(): SliderStep = entries[(ordinal - 1).coerceAtLeast(0)]
 }
 
-enum class EditionKind { MORNING, EVENING }
+/**
+ * [MORNING] is the daily paper. [EVENING] is the optional small paper of Firehose and Daily
+ * feeds. [EXTRA] is printed on request from chosen feeds, outside the schedule; there is at
+ * most one per calendar date.
+ */
+enum class EditionKind { MORNING, EVENING, EXTRA }
 
 enum class EditionLength { SHORT, STANDARD, LONG }
 
