@@ -1,0 +1,106 @@
+# Where the discovery catalogue's candidate feeds come from. Read by build_catalogue.py.
+# Licences and attribution are recorded in SOURCES.md; keep the two in step. Only openly
+# licensed lists belong here. ooh.directory, blogroll.org, Feedspot and Feedly are deliberately
+# absent (no licence, or terms that forbid reuse); see SOURCES.md.
+
+[kagi]
+name = "Kagi Small Web"
+licence = "MIT"
+homepage = "https://github.com/kagisearch/smallweb"
+format = "lines"
+# Blogs only. smallyt.txt (YouTube) and smallcomic.txt (webcomics) are left out on purpose.
+lists = ["https://raw.githubusercontent.com/kagisearch/smallweb/main/smallweb.txt"]
+
+[plenary]
+name = "plenaryapp/awesome-rss-feeds"
+licence = "CC0-1.0"
+homepage = "https://github.com/plenaryapp/awesome-rss-feeds"
+format = "opml"
+base = "https://raw.githubusercontent.com/plenaryapp/awesome-rss-feeds/master/"
+# Each file's name is its category, which labels the clusters. Country files are news and get
+# the category "News"; only countries with English-language outlets are listed, and the
+# language filter still applies to every feed.
+country_category = "News"
+files = [
+  "recommended/with_category/Android Development.opml",
+  "recommended/with_category/Android.opml",
+  "recommended/with_category/Animal & Wildlife.opml",
+  "recommended/with_category/Apple.opml",
+  "recommended/with_category/Architecture.opml",
+  "recommended/with_category/Beauty.opml",
+  "recommended/with_category/Books.opml",
+  "recommended/with_category/Business & Economy.opml",
+  "recommended/with_category/Cars.opml",
+  "recommended/with_category/Chess.opml",
+  "recommended/with_category/Cricket.opml",
+  "recommended/with_category/Cryptocurrency.opml",
+  "recommended/with_category/Cyber security.opml",
+  "recommended/with_category/DIY.opml",
+  "recommended/with_category/Environment.opml",
+  "recommended/with_category/Fashion.opml",
+  "recommended/with_category/Food.opml",
+  "recommended/with_category/Football.opml",
+  "recommended/with_category/Funny.opml",
+  "recommended/with_category/Gaming.opml",
+  "recommended/with_category/History.opml",
+  "recommended/with_category/Interior design.opml",
+  "recommended/with_category/Memes.opml",
+  "recommended/with_category/Movies.opml",
+  "recommended/with_category/Music.opml",
+  "recommended/with_category/Nature.opml",
+  "recommended/with_category/News.opml",
+  "recommended/with_category/Personal finance.opml",
+  "recommended/with_category/Photography.opml",
+  "recommended/with_category/Programming.opml",
+  "recommended/with_category/Science.opml",
+  "recommended/with_category/Space.opml",
+  "recommended/with_category/Sports.opml",
+  "recommended/with_category/Startups.opml",
+  "recommended/with_category/Tech.opml",
+  "recommended/with_category/Television.opml",
+  "recommended/with_category/Tennis.opml",
+  "recommended/with_category/Travel.opml",
+  "recommended/with_category/UI - UX.opml",
+  "recommended/with_category/Web Development.opml",
+  "recommended/with_category/iOS Development.opml",
+  "countries/with_category/Australia.opml",
+  "countries/with_category/Canada.opml",
+  "countries/with_category/India.opml",
+  "countries/with_category/Ireland.opml",
+  "countries/with_category/Nigeria.opml",
+  "countries/with_category/Pakistan.opml",
+  "countries/with_category/Philippines.opml",
+  "countries/with_category/South Africa.opml",
+  "countries/with_category/United Kingdom.opml",
+  "countries/with_category/United States.opml",
+]
+
+[hn]
+name = "outcoldman/hackernews-personal-blogs"
+licence = "MIT"
+homepage = "https://github.com/outcoldman/hackernews-personal-blogs"
+format = "opml"
+lists = ["https://raw.githubusercontent.com/outcoldman/hackernews-personal-blogs/master/list.opml"]
+
+# Not a feed source: the Public Suffix List (MPL-2.0), read at build time to work out each
+# feed's registrable host. Nothing from it ships in the app.
+[public_suffix]
+url = "https://publicsuffix.org/list/public_suffix_list.dat"
+# Hosts where every subdomain or first path segment is a different author, in case the list
+# lacks them. A feed on one of these is keyed by its own subdomain.
+extra_suffixes = [
+  "bearblog.dev", "github.io", "gitlab.io", "codeberg.page", "wordpress.com", "blogspot.com",
+  "substack.com", "micro.blog", "neocities.org", "netlify.app", "pages.dev", "vercel.app",
+  "tumblr.com", "svbtle.com", "prose.sh", "mataroa.blog", "ghost.io", "beehiiv.com",
+  "buttondown.email", "posthaven.com", "typepad.com", "livejournal.com", "dreamwidth.org",
+  "hashnode.dev", "srht.site", "omg.lol", "weblog.lol", "blogs.com",
+]
+# Hosts that serve many authors' feeds by path; deduplication keys these by the first path
+# segment of the site address (medium.com/@alice) instead of by host.
+path_tenants = ["medium.com", "dev.to", "write.as", "tilde.club", "tilde.team", "sdf.org"]
+# Feed proxies: a feed served from one of these takes its host from its site address.
+feed_proxies = [
+  "feeds.feedburner.com", "feedproxy.google.com", "feeds2.feedburner.com", "feeds.feedblitz.com",
+  "feedpress.me", "feed.informer.com", "rss.app", "fetchrss.com", "feeds.simplecast.com",
+  "feeds.megaphone.fm", "anchor.fm", "rss.art19.com", "feeds.buzzsprout.com", "feeds.transistor.fm",
+]
