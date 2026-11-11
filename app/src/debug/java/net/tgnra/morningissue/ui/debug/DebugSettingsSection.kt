@@ -51,6 +51,7 @@ fun DebugSettingsSection() {
                         run {
                             val settings = container.settings.settings.first()
                             SampleDataSeeder(container.core.database, container.clock, settings.resetTime).seed()
+                                .also { container.signals.run() }
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -63,6 +64,7 @@ fun DebugSettingsSection() {
                         run {
                             val settings = container.settings.settings.first()
                             SampleDataSeeder(container.core.database, container.clock, settings.resetTime, newestDaysBehind = 1).seed()
+                                .also { container.signals.run() }
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),

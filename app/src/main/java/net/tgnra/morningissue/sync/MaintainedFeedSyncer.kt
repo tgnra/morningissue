@@ -5,9 +5,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 
 /**
- * A [FeedSyncer] that runs the housekeeping due after every full sync: the feed health check
- * and the storage trim. Both are background work on the sync's own thread; a failure in either
- * never fails the sync, and a run that finds the previous one still going skips its turn.
+ * A [FeedSyncer] that runs the housekeeping due after every full sync: the feed health check,
+ * the traits and embeddings of new posts (`SignalsUpkeep`) and the storage trim. All are
+ * background work on the sync's own thread; a failure in one never fails the sync or stops
+ * the others, and a run that finds the previous one still going skips its turn.
  */
 class MaintainedFeedSyncer(
     private val delegate: FeedSyncer,

@@ -35,6 +35,9 @@ class BenchmarkSeedReceiver : BroadcastReceiver() {
         container.appScope.launch {
             try {
                 seed(context, posts, feeds)
+                // As after a sync: every post has its traits and its embedding before the app
+                // opens, so the build that is measured reads them as a real one does.
+                container.signals.run()
                 container.settings.setOnboardingDone(true)
                 pending.resultCode = Activity.RESULT_OK
                 pending.resultData = "seeded $posts posts in $feeds feeds"

@@ -21,11 +21,15 @@ import net.tgnra.morningissue.data.repository.RoomFeedRepository
 import net.tgnra.morningissue.data.settings.DataStoreSettingsRepository
 import net.tgnra.morningissue.data.settings.SettingsRepository
 import net.tgnra.morningissue.data.settings.settingsDataStore
+import net.tgnra.morningissue.data.signals.EmbeddingBackfill
+import net.tgnra.morningissue.data.signals.SignalsUpkeep
+import net.tgnra.morningissue.data.signals.TraitsBackfill
 import net.tgnra.morningissue.data.storage.RoomStorageRepository
 import net.tgnra.morningissue.data.storage.StorageRepository
 import net.tgnra.morningissue.edition.EditionModule
 import net.tgnra.morningissue.edition.EditionPublisher
 import net.tgnra.morningissue.edition.EditionScheduler
+import net.tgnra.morningissue.embedding.EmbedderAsset
 import net.tgnra.morningissue.sync.FeedDiscovery
 import net.tgnra.morningissue.sync.FeedSyncer
 import net.tgnra.morningissue.sync.FullTextFetcher
@@ -53,6 +57,12 @@ interface AppContainer {
 
     /** Archive export and import to a file the reader picks. */
     val archive: ArchiveController
+
+    /** The text embedder, loaded from its asset on first use. */
+    val embedder: EmbedderAsset
+
+    /** Fills in the traits and embeddings the within-feed ranking reads; see [SignalsUpkeep]. */
+    val signals: SignalsUpkeep
 
     val feedSyncer: FeedSyncer
     val syncScheduler: SyncScheduler
@@ -87,6 +97,8 @@ class CoreComponents(
     val feeds: FeedRepository,
     val articles: ArticleRepository,
     val storage: StorageRepository,
+    /** Run after every full sync, with the other housekeeping. */
+    val signals: SignalsUpkeep,
 )
 
 class DefaultAppContainer(context: Context) : AppContainer {
@@ -119,6 +131,11 @@ class DefaultAppContainer(context: Context) : AppContainer {
         ArchiveController(appScope, appContext.contentResolver, RoomArchiveTransfer(database, clock), storage)
     }
 
+    override val embedder: EmbedderAsset by lazy { EmbedderAsset(appContext) }
+    override val signals: SignalsUpkeep by lazy {
+        SignalsUpkeep(TraitsBackfill(database), EmbeddingBackfill(database, embedder = { embedder.get() }))
+    }
+
     val core: CoreComponents by lazy {
         CoreComponents(
             appContext = appContext,
@@ -131,6 +148,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
             feeds = feeds,
             articles = articles,
             storage = storage,
+            signals = signals,
         )
     }
 

@@ -11,7 +11,12 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import kotlinx.coroutines.runBlocking
+import net.tgnra.morningissue.data.signals.EmbeddingBackfill
+import net.tgnra.morningissue.data.signals.SignalsUpkeep
+import net.tgnra.morningissue.data.signals.StoredEmbedding
 import net.tgnra.morningissue.data.signals.TraitsBackfill
+import net.tgnra.morningissue.embedding.EmbeddingFixtures
+import net.tgnra.morningissue.embedding.StaticEmbedder
 import net.tgnra.morningissue.model.ArticleTraits
 import net.tgnra.morningissue.model.ContentBlock
 import net.tgnra.morningissue.model.ContentBlocks
@@ -166,6 +171,57 @@ class MigrationTest {
         assertEquals(0, dao.categoryCount())
         assertEquals(0, dao.embeddingCount())
         assertEquals(1, dao.traitsCount())
+    }
+
+    @Test
+    fun anUpgradedLibraryGetsItsTraitsAndVectorsFromOnePassOfUpkeep() = runBlocking<Unit> {
+        helper.createDatabase(1).use { v1 ->
+            seedVersion1(v1)
+            // Two more posts as version 1 held them: one in Russian, one with no words at all.
+            v1.execSQL(
+                "INSERT INTO article (id, feedId, guid, url, title, summary, publishedAt, firstSeenAt, wordCount, contentHash) VALUES " +
+                    "(4, 2, 'd', 'https://news.example/d', 'Учёные обнаружили новую экзопланету', 'В зоне обитаемости.', 950, 1000, 3, 'h4'), " +
+                    "(5, 2, 'e', 'https://news.example/e', '🚀🚀🚀', NULL, 950, 1000, 0, NULL)",
+            )
+            v1.execSQL(
+                "INSERT INTO article_fts (rowid, title, summary, author, body) VALUES " +
+                    "(4, 'Учёные обнаружили новую экзопланету', 'В зоне обитаемости.', '', ''), (5, '🚀🚀🚀', '', '', '')",
+            )
+        }
+        val db = Room.databaseBuilder<MorningIssueDatabase>(context, file.absolutePath)
+            .setDriver(AndroidSQLiteDriver())
+            .addMigrations(*Migrations.ALL)
+            .build()
+        helper.closeWhenFinished(db)
+        val dao = db.articleSignalDao()
+        assertEquals(0, dao.traitsCount())
+        assertEquals(0, dao.embeddingCount())
+        val upkeep = SignalsUpkeep(TraitsBackfill(db), EmbeddingBackfill(db, embedder = { EmbeddingFixtures.embedder }))
+
+        // What runs after the first sync, or a few seconds after the app starts.
+        assertEquals(SignalsUpkeep.Result(traits = 5, embedded = 3, marked = 2), upkeep.run())
+
+        val all = listOf(1L, 2L, 3L, 4L, 5L)
+        val signals = dao.signalsFor(all, StaticEmbedder.MODEL_ID).associateBy { it.articleId }
+        assertEquals(all.toSet(), signals.keys)
+        assertTrue(signals.values.all { it.traits?.traitsVersion == net.tgnra.morningissue.model.ArticleTraitRules.VERSION })
+        // Every embeddable post has a vector; it is the one the embedder gives its stored text.
+        for (id in listOf(1L, 2L, 3L)) assertEquals(StaticEmbedder.DIMENSIONS, signals.getValue(id).embedding!!.size)
+        assertEquals(
+            StaticEmbedder.toBytes(EmbeddingFixtures.embedder.embed("Links: something good\nRead this piece on marmalade.")!!).toList(),
+            signals.getValue(1).embedding!!.toList(),
+        )
+        // The two that cannot be embedded are marked, so that they are not tried again.
+        assertEquals(StoredEmbedding.NON_LATIN, StoredEmbedding.markOf(signals.getValue(4).embedding!!))
+        assertEquals(StoredEmbedding.NO_KNOWN_WORDS, StoredEmbedding.markOf(signals.getValue(5).embedding!!))
+        assertEquals(0, dao.countWithoutEmbedding(StaticEmbedder.MODEL_ID))
+        assertEquals(0, dao.articlesNeedingTraits(net.tgnra.morningissue.model.ArticleTraitRules.VERSION, 0, 10).size)
+
+        // A second pass finds nothing to do and changes nothing.
+        assertEquals(SignalsUpkeep.Result(), upkeep.run())
+        assertEquals(5, dao.traitsCount())
+        assertEquals(5, dao.embeddingCount())
+        assertEquals(signals.getValue(1).embedding!!.toList(), dao.getEmbedding(1)!!.vector.toList())
     }
 
     @Test

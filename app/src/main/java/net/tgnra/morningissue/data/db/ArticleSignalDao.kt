@@ -144,6 +144,17 @@ abstract class ArticleSignalDao {
     )
     abstract suspend fun articlesWithoutEmbedding(model: Int, beforeId: Long, limit: Int, bodyChars: Int): List<EmbeddingInputRow>
 
+    /**
+     * Which of [articleIds] still exist and still have no row written by [model]. The
+     * embedding pass asks again inside its write transaction, since a feed may have been
+     * removed while it was computing. At most [MAX_IDS] IDs per call.
+     */
+    @Query(
+        "SELECT a.id FROM article a WHERE a.id IN (:articleIds) AND NOT EXISTS " +
+            "(SELECT 1 FROM article_embedding v WHERE v.articleId = a.id AND v.model = :model)",
+    )
+    abstract suspend fun stillWithoutEmbedding(model: Int, articleIds: List<Long>): List<Long>
+
     // --- Reads for ranking ------------------------------------------------------------------
 
     @Query("$SIGNAL_SELECT WHERE a.id IN (:articleIds)")
