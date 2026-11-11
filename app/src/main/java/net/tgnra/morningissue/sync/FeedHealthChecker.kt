@@ -82,13 +82,6 @@ class FeedHealthChecker(
         repair(feed, feedDao.getAll(), clock.instant())
     }
 
-    /** The feeds a full sync should fetch now: quiet feeds are left longer between checks. */
-    suspend fun dueFeeds(feeds: List<FeedEntity>): List<FeedEntity> {
-        val now = clock.instant()
-        val health = healthDao.getAll().associateBy { it.feedId }
-        return feeds.filter { FeedHealthRules.dueForCheck(it.lastSyncAt, health[it.id]?.lastPostAt, it.addedAt, now, config) }
-    }
-
     private suspend fun repair(feed: FeedEntity, all: List<FeedEntity>, now: Instant): RepairResult {
         val taken = all.filter { it.id != feed.id }.map { FeedUrls.normalize(it.url) }.toSet()
         val result = repairer.repair(feed.url, feed.siteUrl, taken)

@@ -194,7 +194,7 @@
     <string name="desk_flag_loved">Read cover to cover</string>
     <string name="desk_about_broken">These could not be fetched for a week or more. The usual alternative addresses were tried as well and none of them answered with a feed.</string>
     <string name="desk_about_moved">These were found at a new address, which is now the one in use. There is nothing you need to do.</string>
-    <string name="desk_about_quiet">No posts in 90 days. That is not a problem: they are kept, checked less often, and return to the paper when they post again.</string>
+    <string name="desk_about_quiet">No posts in 90 days. That is not a problem: they are kept, checked as often as any source, and return to the paper when they post again.</string>
     <string name="desk_about_ignored">These have run in ten or more editions over the last two months without one of their stories being opened.</string>
     <string name="desk_about_noisy">Thirty or more posts a week, and almost none of them opened.</string>
     <string name="desk_about_loved">You read most of what these publish and Like it often. As a favourite, a feed is always given room.</string>
@@ -226,7 +226,7 @@
         <item quantity="other">%d feeds could do with a look</item>
     </plurals>
     <string name="sources_quiet_heading">Quiet · %1$d</string>
-    <string name="sources_quiet_detail">No posts in 90 days. Kept, and checked less often.</string>
+    <string name="sources_quiet_detail">No posts in 90 days. Kept, and still checked at every sync.</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>

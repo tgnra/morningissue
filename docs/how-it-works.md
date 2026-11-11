@@ -72,7 +72,7 @@ Two subscriptions are the same feed when their normalised URLs match (`model/Fee
 
 ### Sync
 
-`DefaultFeedSyncer` fetches every feed that is due, six at a time, and stores the posts it has not seen before with first-seen time set to now. Every feed is due at every sync except quiet ones, which are checked less often (see [Feed health](#feed-health)). Syncing never builds or changes an edition.
+`DefaultFeedSyncer` fetches every feed, six at a time, and stores the posts it has not seen before with first-seen time set to now. Every sync checks every feed; a quiet feed is checked as often as any other (see [Feed health](#feed-health)). Syncing never builds or changes an edition.
 
 After every full sync, `MaintainedFeedSyncer` runs two pieces of housekeeping on the same background thread: the feed health check, then the trim to the storage budget (see [What is stored](#what-is-stored)). A failure in either does not fail the sync.
 
@@ -116,7 +116,7 @@ A feed carries one flag at a time, the first that applies in the order above. Al
 
 - **Dismiss** hides the flag for six months (183 days, `feed_health.flagDismissedUntil`). The dismissal covers the flag that was dismissed: if a different flag arises in that time it is shown.
 - **Automatic repair** (`sync/FeedRepairer.kt`). A feed that meets the Broken rule is repaired before it is flagged. In order: its own address once more; the same address over the other scheme and with or without `www.`; the feed the site itself declares, through feed discovery on the site's address; then `/feed`, `/rss`, `/atom.xml` and `/index.xml` on the feed's host. Every candidate is fetched and must parse as a feed, and an address another subscription already uses is never taken. If one works the feed's address is updated and the feed is flagged Moved so the reader is told. If none works the feed is flagged Broken. A failed repair is tried again after 7 days, and at most 3 feeds are repaired per health check. "Try again" on the desk runs the repair at once and fetches the feed if it works.
-- **Quiet feeds** sit in a Quiet group at the bottom of Sources and are fetched less often by full syncs: every 6 hours once quiet for 90 days, daily after 180 days, every 3 days after a year, weekly after two years. The wait is measured from the last successful fetch. When a quiet feed posts again it is fetched by every sync again. Syncing one feed directly (after adding it, or "Try again") always fetches.
+- **Quiet feeds** sit in a Quiet group at the bottom of Sources and carry the Gone quiet flag. Quiet is a label and nothing more: a quiet feed is fetched by every sync, exactly like an active one, so the post that ends its silence is found at the next sync and gets the [Welcome back](#welcome-back) boost. (Quiet feeds used to be checked less often, down to weekly; that was removed.)
 - **Once a month the edition carries the desk**: a boxed notice on the back page with the number of feeds needing attention and a link to the desk. The first time the back page of the newest edition is shown in a calendar month while at least one feed has an undismissed flag other than Gone quiet, that edition takes the month's notice and keeps it; no other edition that month shows one, and it goes when nothing needs attention any more. Which edition holds the month is kept in a small preferences file (`desk_notice`).
 
 ### Full text

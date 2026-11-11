@@ -61,7 +61,7 @@ Built; see "Feed health" in `docs/how-it-works.md` for the rules as implemented.
 - [x] **Carried by the edition once a month**, as a notice on the back page of one edition per calendar month (not a page of its own), only while a feed needs attention.
 - [x] Dismissing a flag hides it for 6 months (`feed_health.flagDismissedUntil`).
 - [x] **Automatic repair** of a Broken feed before the reader is asked: retry, scheme and `www` variants, the site's own feed link, then `/feed`, `/rss`, `/atom.xml`, `/index.xml`. Tried again weekly.
-- [x] **Quiet feeds.** A feed with no posts in 90 days moves to a Quiet group at the bottom of Sources and is checked every 6 hours, then daily, every 3 days and weekly as the quiet lengthens.
+- [x] **Quiet feeds.** A feed with no posts in 90 days moves to a Quiet group at the bottom of Sources and carries the Gone quiet flag. It is checked by every sync like any other feed; the reduced cadence (6 hours down to weekly) was removed at the owner's request.
 - [x] **Welcome back, engine.** When a feed posts again after 90 quiet days, the story gets the reason line "Back after 2 years: …" and a comeback boost of 1.5 on top of scarcity, so it almost always makes the front page.
 - [ ] **Welcome back, label.** Show `EditionStory.comebackLabel` on the story block.
 - Differences from the original table: there is no "In brief only" setting for a feed, so Noisy offers Less; Loved offers Favourite only (notifications are out of scope).

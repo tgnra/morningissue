@@ -22,10 +22,10 @@ object SyncModule {
         val fetcher = FeedFetcher(core.okHttpClient)
         val discovery = DefaultFeedDiscovery(fetcher, core.clock)
         val healthChecker = FeedHealthChecker(core.database, FeedRepairer(fetcher, discovery, core.clock), core.clock)
-        // Quiet feeds are fetched less often; after every full sync the health check runs,
-        // then stored text is trimmed to the storage budget.
+        // After every full sync the health check runs, then stored text is trimmed to the
+        // storage budget.
         val syncer = MaintainedFeedSyncer(
-            delegate = DefaultFeedSyncer(core.database, fetcher, core.clock, core.appScope, dueFeeds = healthChecker::dueFeeds),
+            delegate = DefaultFeedSyncer(core.database, fetcher, core.clock, core.appScope),
             afterSync = listOf({ healthChecker.run() }, { core.storage.trimToBudget() }),
         )
         return SyncComponents(

@@ -103,44 +103,6 @@ class FeedHealthRulesTest {
     }
 
     @Test
-    fun quietFeedsAreCheckedLessOftenInSteps() {
-        fun hours(quietDays: Long) = FeedHealthRules.checkInterval(Duration.ofDays(quietDays), config).toHours()
-        assertEquals(0, hours(0))
-        assertEquals(0, hours(89))
-        assertEquals(6, hours(90))
-        assertEquals(6, hours(179))
-        assertEquals(24, hours(180))
-        assertEquals(72, hours(365))
-        assertEquals(72, hours(729))
-        assertEquals("weekly at the slowest", 168, hours(730))
-        assertEquals(168, hours(5000))
-    }
-
-    @Test
-    fun dueForCheckFollowsTheStepAndRecoversWithANewPost() {
-        val added = daysAgo(1000)
-        fun due(lastPostDaysAgo: Long, lastSyncHoursAgo: Long) = FeedHealthRules.dueForCheck(
-            lastSyncAt = now.minus(Duration.ofHours(lastSyncHoursAgo)),
-            lastPostAt = daysAgo(lastPostDaysAgo),
-            addedAt = added,
-            now = now,
-            config = config,
-        )
-        assertTrue("an active feed is fetched by every sync", due(lastPostDaysAgo = 2, lastSyncHoursAgo = 0))
-        assertFalse(due(lastPostDaysAgo = 100, lastSyncHoursAgo = 5))
-        assertTrue(due(lastPostDaysAgo = 100, lastSyncHoursAgo = 6))
-        assertFalse(due(lastPostDaysAgo = 200, lastSyncHoursAgo = 23))
-        assertTrue(due(lastPostDaysAgo = 200, lastSyncHoursAgo = 24))
-        assertFalse(due(lastPostDaysAgo = 800, lastSyncHoursAgo = 167))
-        assertTrue(due(lastPostDaysAgo = 800, lastSyncHoursAgo = 168))
-        // It posted again: back to every sync, however recently it was checked.
-        assertTrue(due(lastPostDaysAgo = 0, lastSyncHoursAgo = 1))
-        assertTrue("never fetched", FeedHealthRules.dueForCheck(null, null, added, now, config))
-    }
-
-    // --- Ignored -----------------------------------------------------------------------------
-
-    @Test
     fun ignoredMeansTenEditionsAndNoOpens() {
         val ignored = healthy().copy(ignoredRuns = FeedRunStats(editions = 10, stories = 14, opened = 0))
         assertEquals(HealthFlag.IGNORED, flag(ignored))

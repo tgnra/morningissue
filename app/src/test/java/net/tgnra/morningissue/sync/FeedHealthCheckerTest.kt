@@ -64,7 +64,7 @@ class FeedHealthCheckerTest {
         val fetcher = FeedFetcher(OkHttpClient())
         checker = FeedHealthChecker(db, FeedRepairer(fetcher, DefaultFeedDiscovery(fetcher, clock), clock), clock)
         syncer = MaintainedFeedSyncer(
-            DefaultFeedSyncer(db, fetcher, clock, scope, dueFeeds = checker::dueFeeds),
+            DefaultFeedSyncer(db, fetcher, clock, scope),
             afterSync = listOf({ checker.run() }),
         )
         health = DefaultFeedHealthRepository(db, checker, syncer, noticeStore, clock)
@@ -204,7 +204,7 @@ class FeedHealthCheckerTest {
     // --- Quiet feeds -------------------------------------------------------------------------
 
     @Test
-    fun aQuietFeedIsCheckedLessOftenAndReturnsToNormalWhenItPosts() = runBlocking<Unit> {
+    fun aQuietFeedIsFetchedByEverySyncLikeAnyOther() = runBlocking<Unit> {
         val feedId = addFeed("/quiet")
         val lastPost = clock.now.minus(Duration.ofDays(100))
         var body = rssOf("old", pubDate = { rfc822(lastPost) })
@@ -214,40 +214,31 @@ class FeedHealthCheckerTest {
         assertEquals(HealthFlag.QUIET, flagOf(feedId))
         assertEquals(1, routes.hits("/quiet"))
 
-        // Quiet for 100 days: every six hours, not every sync.
-        advance(Duration.ofHours(2))
-        assertEquals(0, syncer.syncAll().feedsChecked)
-        advance(Duration.ofHours(2))
-        syncer.syncAll()
-        assertEquals(1, routes.hits("/quiet"))
+        // Quiet for 100 days, and still fetched by the very next sync and the one after.
+        advance(Duration.ofMinutes(1))
+        assertEquals(1, syncer.syncAll().feedsChecked)
         advance(Duration.ofHours(2))
         assertEquals(1, syncer.syncAll().feedsChecked)
-        assertEquals(2, routes.hits("/quiet"))
-
-        // A sync of that one feed (the reader asked) always fetches.
-        syncer.syncFeed(feedId)
         assertEquals(3, routes.hits("/quiet"))
+        assertEquals("checking it does not end the quiet", HealthFlag.QUIET, flagOf(feedId))
 
-        // It posts again: found at the next check, and from then on it is fetched by every sync.
+        // It posts again: the next sync finds the post, and the flag goes.
         body = rssOf("new", "old", pubDate = { if (it == 0) rfc822(clock.now) else rfc822(lastPost) })
-        advance(Duration.ofHours(6))
+        advance(Duration.ofMinutes(30))
         assertEquals(1, syncer.syncAll().newArticles)
         assertNull(flagOf(feedId))
-        advance(Duration.ofMinutes(30))
-        assertEquals(1, syncer.syncAll().feedsChecked)
-        advance(Duration.ofMinutes(30))
-        assertEquals(1, syncer.syncAll().feedsChecked)
     }
 
     @Test
-    fun aFeedQuietForYearsIsCheckedWeekly() = runBlocking<Unit> {
+    fun aFeedQuietForYearsIsStillFetchedByEverySync() = runBlocking<Unit> {
         addFeed("/quiet", addedDaysAgo = 1200)
         routes["/quiet"] = { response(rssOf("old", pubDate = { rfc822(NOW.minus(Duration.ofDays(900))) })) }
         syncer.syncAll()
-        advance(Duration.ofDays(6))
-        assertEquals(0, syncer.syncAll().feedsChecked)
+        advance(Duration.ofMinutes(5))
+        assertEquals(1, syncer.syncAll().feedsChecked)
         advance(Duration.ofDays(1))
         assertEquals(1, syncer.syncAll().feedsChecked)
+        assertEquals(3, routes.hits("/quiet"))
     }
 
     // --- Ignored, Noisy, Loved from stored data ------------------------------------------------
