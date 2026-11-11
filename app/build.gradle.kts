@@ -77,6 +77,12 @@ android {
     buildFeatures {
         compose = true
     }
+    androidResources {
+        // The embedding table (assets/embedding/*.bin) is memory-mapped out of the APK, which only
+        // works for an entry stored as is. It is 8-bit noise to a compressor anyway: deflate
+        // would save about an eighth of its 7.9 MB.
+        noCompress += "bin"
+    }
     testOptions {
         unitTests {
             // Robolectric needs merged resources and the manifest for Room/WorkManager tests.
