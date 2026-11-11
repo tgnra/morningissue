@@ -412,3 +412,22 @@ class DiscoveryCandidateEntity(
     val lastPostAt: Instant? = null,
     val centroid: ByteArray? = null,
 )
+
+/**
+ * A Kobo paired with this phone for local-network sync (`docs/kobo-sync.md`). [deviceId] is
+ * the random ID the Kobo made for itself; [tokenHash] is the SHA-256 of the token it was given,
+ * in hex, so the token itself is never stored. [ackedSeq] is the highest event `seq` from this
+ * device that has been merged; it is written in the same transaction as the events it covers.
+ */
+@Entity(tableName = "sync_peer")
+data class SyncPeerEntity(
+    @PrimaryKey val deviceId: String,
+    /** What the Kobo calls itself ("Kobo Libra 2"), as the Sync screen shows it. */
+    val name: String,
+    val tokenHash: String,
+    @ColumnInfo(defaultValue = "0") val ackedSeq: Long = 0,
+    /** When the reader last allowed this device; pairing again replaces the token and this. */
+    val pairedAt: Instant,
+    /** When the device last fetched the manifest or sent events; null until its first sync. */
+    val lastSyncAt: Instant? = null,
+)

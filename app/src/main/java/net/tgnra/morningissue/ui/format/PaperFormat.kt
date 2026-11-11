@@ -36,6 +36,13 @@ object PaperFormat {
             DateTimeFormatter.ofPattern("h:mm a", locale).format(time).lowercase(locale)
         }
 
+    /** "07:02" for a time today, "Tue 10 Nov, 07:02" for another day: when a Kobo last synced. */
+    fun syncTime(at: Instant, now: Instant, zone: ZoneId, use24Hour: Boolean, locale: Locale = Locale.getDefault()): String {
+        val local = at.atZone(zone)
+        val clock = time(local.toLocalTime(), use24Hour, locale)
+        return if (local.toLocalDate() == now.atZone(zone).toLocalDate()) clock else "${shortDate(local.toLocalDate(), locale)}, $clock"
+    }
+
     /** The next time the clock reads [resetTime] after [now]: when the next edition is due. */
     fun nextReset(now: Instant, resetTime: LocalTime, zone: ZoneId): Instant {
         val today = now.atZone(zone).toLocalDate().atTime(resetTime).atZone(zone).toInstant()

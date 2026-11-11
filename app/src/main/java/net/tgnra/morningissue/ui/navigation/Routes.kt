@@ -25,6 +25,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable data object SettingsRoute
 
+@Serializable data object KoboSyncRoute
+
 @Serializable data object DiscoverRoute
 
 @Serializable data object DiscoverPassedRoute

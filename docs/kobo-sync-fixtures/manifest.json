@@ -1,0 +1,23 @@
+{
+    "v": 1,
+    "dbId": "3f0c6f2e-6c55-4f7b-9d1e-0a6f2b9e5c11",
+    "ackedSeq": 41,
+    "editions": [
+        {
+            "id": 2,
+            "date": "2026-11-11",
+            "kind": "MORNING",
+            "number": 120,
+            "releaseAt": "2026-11-11T06:30:00Z",
+            "version": "a72604dc988e4bbcd29fae347f64c9cb"
+        },
+        {
+            "id": 1,
+            "date": "2026-11-10",
+            "kind": "MORNING",
+            "number": 119,
+            "releaseAt": "2026-11-10T06:30:00Z",
+            "version": "25c4931079567e9be25c1f12161003af"
+        }
+    ]
+}

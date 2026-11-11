@@ -133,6 +133,26 @@ object Migrations {
         }
     }
 
+    /**
+     * Version 5 adds `sync_peer`, the Kobos paired for local-network sync
+     * (`docs/kobo-sync.md`).
+     *
+     * - It starts empty. Version 4 had no sync, so there is nothing to fill it from: a Kobo
+     *   pairs from the Sync screen after the upgrade.
+     * - The install's `dbId`, which a Kobo checks so that it never sends events to another
+     *   database, lives in the settings store, not here, so this step has nothing to do for
+     *   it. It is created the first time the Sync screen opens.
+     */
+    val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+        override suspend fun migrate(connection: SQLiteConnection) {
+            connection.execSQL(
+                "CREATE TABLE IF NOT EXISTS `sync_peer` (`deviceId` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+                    "`tokenHash` TEXT NOT NULL, `ackedSeq` INTEGER NOT NULL DEFAULT 0, `pairedAt` INTEGER NOT NULL, " +
+                    "`lastSyncAt` INTEGER, PRIMARY KEY(`deviceId`))",
+            )
+        }
+    }
+
     /** Every step, for `RoomDatabase.Builder.addMigrations`. */
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 }

@@ -13,7 +13,7 @@ There is no internet service. Sync happens only while the phone's **Sync with Ko
 
 ## Discovery
 
-While the Sync screen is open the phone sends a UDP broadcast to `255.255.255.255:47823` once a second:
+While the Sync screen is open the phone sends a UDP broadcast to `255.255.255.255:47823` once a second, and the same datagram to its Wi-Fi subnet's broadcast address (for example `192.168.1.255:47823`), since some routers pass only one of the two:
 
 ```json
 {"app": "morningissue", "v": 1, "port": 47824, "name": "Pixel 9", "dbId": "3f0c…"}
@@ -25,7 +25,9 @@ While the Sync screen is open the phone sends a UDP broadcast to `255.255.255.25
 
 Plain HTTP/1.1 on the phone's port (default 47824), JSON bodies in UTF-8. Every request except `POST /v1/pair` carries `Authorization: Bearer <token>`. A missing or unknown token gets `401`, which tells the Kobo to pair again. The token is the only secret. Traffic is not encrypted, which is acceptable for a LAN-only v1.
 
-Times are ISO-8601 instants in UTC (`2026-11-11T06:30:00Z`). IDs are the phone's Room row IDs (`Long`).
+The phone serves one request per connection and answers with `Connection: close`. A request body must have a `Content-Length` (chunked bodies get `411`) of at most 1 MiB (larger gets `413`).
+
+Times are ISO-8601 instants in UTC (`2026-11-11T06:30:00Z`). The phone writes whole seconds; it reads fractions of a second and offsets too. IDs are the phone's Room row IDs (`Long`).
 
 ### `POST /v1/pair`
 
@@ -38,8 +40,9 @@ Times are ISO-8601 instants in UTC (`2026-11-11T06:30:00Z`). IDs are the phone's
 - Allow → `200 {"token": "<32 random bytes, base64url>", "dbId": "…"}`
 - Deny → `403`
 - No answer in time → `408`
+- Another pairing request is already waiting → `409`
 
-The phone stores a hash of the token, never the token itself. Pairing the same `deviceId` again replaces the old token. The Sync screen lists paired devices and can forget one.
+The phone stores a hash of the token, never the token itself. Pairing the same `deviceId` again replaces the old token and keeps that device's `ackedSeq`. The Sync screen lists paired devices and can forget one.
 
 ### `GET /v1/manifest`
 
@@ -80,13 +83,14 @@ The phone stores a hash of the token, never the token itself. Pairing the same `
 }
 ```
 
+- An edition that does not exist, or is not released yet, gets `404`.
 - `pages` and `items` mirror `edition_item`, sorted by `page` then `slot`. `kind` and `section` mean the same as in the app (`ItemKind`).
-- `blocks` is `article_content.blocksJson` as stored, in the `ContentBlocks` JSON format (`model/Content.kt`, discriminator `"t"`: `p`, `h`, `img`, `quote`, `list`, `pre`; inline spans `b`, `i`, `code`, `a`, `s`, `sup`, `sub`). It is `[]` when the article has no stored content; the Kobo then shows `summary`. Kobo readers must ignore block types and fields they don't know.
+- `blocks` is `article_content.blocksJson` as stored, in the `ContentBlocks` JSON format (`model/Content.kt`, discriminator `"t"`: `p`, `h`, `img`, `quote`, `list`, `pre`; inline spans `b`, `i`, `code`, `a`, `s`, `sup`, `sub`). It is `[]` when the article has no stored content; the Kobo then shows `summary`. Kobo readers must ignore block types and fields they don't know. As stored, fields at their default are left out: an empty `spans`, and a null `href`, `alt`, `caption`, `width`, `height`, `citation` or `language` are absent rather than `[]` or `null`. `docs/kobo-sync-fixtures/edition.json` has every block type.
 - `engagement` is the phone's current state, so the Kobo can show what is already read, liked or saved.
 
 ### `GET /v1/images?url=<urlencoded>`
 
-This returns the bytes from the phone's image store for that source URL, with the stored `Content-Type` (usually `image/webp`, or JPEG, PNG or GIF). It returns `404` if the image isn't stored. The Kobo fetches every `img` block URL and every `imageUrl` in a bundle during sync, and skips the ones that 404. The phone never fetches anything from the internet for the Kobo.
+This returns the bytes from the phone's image store for that source URL, with the `Content-Type` that the stored file's first bytes show (usually `image/webp`, or JPEG, PNG, GIF or SVG; `application/octet-stream` for anything else). It returns `404` if the image isn't stored. The Kobo fetches every `img` block URL and every `imageUrl` in a bundle during sync, and skips the ones that 404. The phone never fetches anything from the internet for the Kobo.
 
 ### `POST /v1/events`
 
@@ -105,9 +109,11 @@ This returns the bytes from the phone's image store for that source URL, with th
 
 Response: `200 {"ackedSeq": 49}`.
 
+A request carries at most 500 events; more gets `413` and nothing is merged. The Kobo sends its unsent events in batches of up to 500, oldest first, until all are acknowledged.
+
 `seq` starts at 1 per `deviceId` and only goes up. The phone merges, in one database transaction, every event with `seq > ackedSeq` for that device and stores the new `ackedSeq` in the same transaction. Events at or below `ackedSeq` are skipped, so a retry after a dropped response is harmless. The Kobo deletes events up to the returned `ackedSeq`.
 
-An event naming an article or edition the phone no longer has is skipped but still counts as merged. An unknown `type` is skipped and counts as merged too. These are the only writes the protocol allows.
+An event naming an article or edition the phone no longer has is skipped but still counts as merged. An unknown `type` is skipped and counts as merged too, and so does an event missing a field its type needs (or with one that cannot be read), since sending it again would not change that. These are the only writes the protocol allows.
 
 | Event | Merge on the phone |
 |---|---|
@@ -126,7 +132,7 @@ Known v1 limit: events that arrive after the next edition is built have already 
 
 1. Find the phone (beacon, then the last address, then the configured one).
 2. Pair if there is no token, or on `401`.
-3. `POST /v1/events` with everything unsent, so the phone's state is current before export.
+3. `POST /v1/events` with everything unsent, in batches of up to 500, so the phone's state is current before export.
 4. `GET /v1/manifest`. On a `dbId` change, wipe and start over.
 5. Fetch each edition whose `version` differs from the stored one, then its images.
 6. Delete local editions that aren't in the manifest, and images nothing refers to.
