@@ -1,10 +1,13 @@
 #!/bin/sh
-# Morning Issue launcher. NickelMenu runs this with cmd_spawn after asking Nickel to bring
-# Wi-Fi up. It syncs with the phone, stops Nickel, runs the reader on the bare framebuffer,
-# then brings Nickel back. See docs/kobo-sync.md, "Launch flow".
+# Morning Issue launcher. NickelMenu runs this with cmd_spawn. It stops Nickel, keeping the
+# Wi-Fi connection Nickel had (if any), runs the reader on the bare framebuffer (the reader
+# syncs in the background when there is a connection), then tears Wi-Fi down the way a
+# boot leaves it and brings Nickel back. See docs/kobo-sync.md, "Launch flow".
 #
 # Nickel's environment (PLATFORM, INTERFACE, WIFI_MODULE, ...) is inherited through
-# NickelMenu; every use below has a fallback in case a firmware leaves one out.
+# NickelMenu; every use below has a fallback in case a firmware leaves one out. The Wi-Fi
+# handling follows KOReader's (platform/kobo/koreader.sh, enable-wifi.sh, disable-wifi.sh
+# and nickel.sh).
 
 DIR=/mnt/onboard/.adds/morningissue
 BIN="$DIR/morningissue"
@@ -32,65 +35,105 @@ if ! "$BIN" check; then
     exit 0
 fi
 
-# 1. Wait up to 20 seconds for a default route, then sync. A failed sync is not fatal.
-has_route() {
-    # /proc/net/route: Iface Destination Gateway ...; destination 00000000 is the default.
+IFACE="${INTERFACE:-wlan0}"
+
+# Is Nickel's Wi-Fi connected? A default route through an interface with a carrier.
+# The reader never turns Wi-Fi on: no connection now means it shows Offline.
+wifi_up() {
     while read -r iface dest rest; do
-        [ "$dest" = "00000000" ] && [ "$iface" != "lo" ] && return 0
+        if [ "$dest" = "00000000" ] && [ "$iface" != "lo" ]; then
+            [ "$(cat "/sys/class/net/$iface/carrier" 2>/dev/null)" = "1" ] && return 0
+        fi
     done </proc/net/route
     return 1
 }
-i=0
-while [ $i -lt 20 ] && ! has_route; do
-    sleep 1
-    i=$((i + 1))
-done
-if has_route; then
-    "$BIN" sync
-else
-    echo "no network after 20 s; reading what is stored"
-fi
 
-# 2. Stop Nickel and the services that draw on the screen or hold the Wi-Fi.
+# 1. Stop Nickel and the services that draw on the screen.
+#    With Wi-Fi connected, the link stays as it is: the module, wpa_supplicant (which keeps
+#    the association) and dhcpcd (which renews the lease) keep running. dhcpcd-dbus always
+#    goes: it is Nickel's D-Bus bridge to dhcpcd and has nothing to talk to without Nickel.
+#    Without a connection, dhcpcd goes too, so nothing tries to bring a lease up behind the
+#    reader's back.
 sync
+if wifi_up; then
+    echo "wi-fi connected on $IFACE; keeping it for the reader"
+    NET_KILL=""
+else
+    echo "wi-fi not connected; the reader will show Offline"
+    NET_KILL="dhcpcd"
+fi
 killall -q -TERM nickel hindenburg sickel fickel strickel fontickel adobehost foxitpdf iink \
-    dhcpcd-dbus dhcpcd bluealsa bluetoothd fmon nanoclock.lua memorylogger QtWebEngineProcess
+    dhcpcd-dbus $NET_KILL bluealsa bluetoothd fmon nanoclock.lua memorylogger QtWebEngineProcess
 i=0
 while [ $i -lt 16 ] && pidof nickel >/dev/null 2>&1; do
     usleep 250000 2>/dev/null || sleep 1
     i=$((i + 1))
 done
+# Without Nickel nothing reads this pipe, and udev's and udhcpc's scripts that write to it
+# would hang.
 rm -f /tmp/nickel-hardware-status
 
-# 3. Read. The reader returns on Exit, the power button, the sleep cover or after the idle
-#    timeout in config.json.
+# dhcpcd -k (below) empties resolv.conf; keep Nickel's to put back.
+[ -f /etc/resolv.conf ] && cp -f /etc/resolv.conf /tmp/morningissue-resolv.conf
+
+# 2. Read. The reader shows the home screen at once and syncs in the background when online.
+#    It returns on Exit, the power button, the sleep cover or after the idle timeout in
+#    config.json.
 "$BIN" read
 echo "reader exited with $?"
 
-# 4. Bring Nickel back, as it expects to find the device after a boot: Wi-Fi off and its
-#    module unloaded, the SD card unmounted, the hardware-status pipe present.
+# 3. Wi-Fi off, as a boot leaves it, so Nickel can bring it up itself. Nickel finding the
+#    modules half unloaded (moal gone, mlan still there) or the chip still powered trips
+#    its own Wi-Fi script; the "insmod: short read" in older logs came after such a teardown.
 cd / || true
-export LD_LIBRARY_PATH=/usr/local/Kobo
-[ -x /etc/init.d/on-animator.sh ] && /etc/init.d/on-animator.sh &
-
-IFACE="${INTERFACE:-wlan0}"
 if grep -q "^ *$IFACE:" /proc/net/dev 2>/dev/null; then
     if pidof dhcpcd >/dev/null 2>&1; then
         dhcpcd -d -k "$IFACE"
     else
         killall -q udhcpc
     fi
-    # A wpa_supplicant left running stops Nickel bringing Wi-Fi up again.
     wpa_cli -i "$IFACE" terminate >/dev/null 2>&1
+    usleep 250000 2>/dev/null || sleep 1
     killall -q wpa_supplicant
+    [ "$WIFI_MODULE" = "dhd" ] && wlarm_le -i "$IFACE" down
     ifconfig "$IFACE" down
 fi
-if [ -n "$WIFI_MODULE" ] && grep -q "^$WIFI_MODULE " /proc/modules; then
-    rmmod "$WIFI_MODULE"
+[ -f /tmp/morningissue-resolv.conf ] && cp -f /tmp/morningissue-resolv.conf /etc/resolv.conf
+usleep 250000 2>/dev/null || sleep 1
+case "$WIFI_MODULE" in
+    wlan_drv_gen4m)
+        # MediaTek (Clara 2E, Clara BW/Colour, Libra Colour): the driver stays loaded and
+        # Wi-Fi is switched off through its control node.
+        [ -e /dev/wmtWifi ] && echo 0 >/dev/wmtWifi
+        ;;
+    moal)
+        # NXP (Libra 2, Sage, Elipsa): moal sits on mlan, and both must go.
+        grep -q "^moal " /proc/modules && rmmod moal
+        grep -q "^mlan " /proc/modules && rmmod mlan
+        ;;
+    *)
+        if [ -n "$WIFI_MODULE" ] && grep -q "^$WIFI_MODULE " /proc/modules; then
+            rmmod "$WIFI_MODULE"
+        fi
+        ;;
+esac
+if [ "$WIFI_MODULE" != "wlan_drv_gen4m" ]; then
+    usleep 250000 2>/dev/null || sleep 1
+    # Power the chip down: older boards through the sdio_wifi_pwr module, newer ones through
+    # ntx_io (ioctl 208), which the reader's binary does for this script.
+    if [ -e "/drivers/$PLATFORM/wifi/sdio_wifi_pwr.ko" ]; then
+        grep -q "^sdio_wifi_pwr " /proc/modules && rmmod sdio_wifi_pwr
+    else
+        "$BIN" wifi-off
+    fi
 fi
-if grep -q "^sdio_wifi_pwr " /proc/modules; then
-    rmmod sdio_wifi_pwr
-fi
+
+# 4. Bring Nickel back, as it expects to find the device after a boot: Wi-Fi off, the SD
+#    card unmounted, the hardware-status pipe present.
+export LD_LIBRARY_PATH=/usr/local/Kobo
+# The boot animation script prints "sh: ON: unknown operand" for every frame on models
+# whose hwconfig has no colour flag; at boot rcS throws that away, and so do we.
+[ -x /etc/init.d/on-animator.sh ] && /etc/init.d/on-animator.sh >/dev/null 2>&1 &
 
 if grep -q " /mnt/sd " /proc/mounts; then
     umount /mnt/sd
@@ -99,6 +142,8 @@ rm -f /tmp/nickel-hardware-status
 mkfifo /tmp/nickel-hardware-status
 sync
 
+# What a shell leaves behind that a freshly booted Nickel would not have.
+unset OLDPWD LOCK NET_KILL
 /usr/local/Kobo/hindenburg &
 LIBC_FATAL_STDERR_=1 /usr/local/Kobo/nickel -platform kobo -skipFontLoad &
 if [ -n "$PLATFORM" ] && [ "$PLATFORM" != "freescale" ]; then

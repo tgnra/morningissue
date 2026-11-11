@@ -2,10 +2,11 @@
 # Labels must not contain a colon (NickelMenu reads it as a field separator); build.sh checks.
 #
 # 1. Check this Kobo can run the reader (it leaves Nickel alone if not).
-# 2. Ask Nickel to bring Wi-Fi up, so the sync can reach the phone.
-# 3. Spawn the launcher: sync, stop Nickel, read, restart Nickel.
+# 2. Spawn the launcher: stop Nickel, read (syncing in the background over the Wi-Fi
+#    connection Nickel already has, if any), restart Nickel.
+#
+# There is no nickel_wifi step: the reader never turns Wi-Fi on, and asking Nickel to
+# connect just before stopping it would leave a half-made connection behind.
 menu_item:main:Morning Issue:cmd_output:5000:quiet:/mnt/onboard/.adds/morningissue/morningissue check
-  chain_success:nickel_wifi:autoconnect
-  chain_success:dbg_toast:Morning Issue - syncing with your phone
   chain_success:cmd_spawn:quiet:exec /bin/sh /mnt/onboard/.adds/morningissue/launch.sh
   chain_failure:dbg_toast:Morning Issue does not support this Kobo yet
