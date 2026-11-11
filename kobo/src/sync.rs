@@ -102,6 +102,8 @@ pub struct Options {
     pub beacon_port: u16,
     /// How long to wait for any one response; pairing waits for the person at the phone.
     pub request_timeout: Duration,
+    /// How long to wait for a picture: the phone may have to download it first (up to 30 s).
+    pub image_timeout: Duration,
     pub pair_timeout: Duration,
     /// The whole sync gives up after this.
     pub deadline: Duration,
@@ -123,6 +125,7 @@ impl Options {
             beacon_wait: Duration::from_secs(c.beacon_seconds),
             beacon_port: c.beacon_port,
             request_timeout: Duration::from_secs(30),
+            image_timeout: Duration::from_secs(60),
             pair_timeout: Duration::from_secs(75),
             deadline: Duration::from_secs(600),
             configured_phone: c.phone.clone(),
@@ -450,7 +453,7 @@ impl<'a> Session<'a> {
                         return fail(SyncError::TimedOut);
                     }
                     let path = format!("/v1/images?url={}&w={}", http::url_encode(&url), opts.image_width);
-                    match http::request(&address, "GET", &path, token.as_deref(), None, opts.request_timeout) {
+                    match http::request(&address, "GET", &path, token.as_deref(), None, opts.image_timeout) {
                         Ok(r) if r.status == 200 && !r.body.is_empty() => {
                             if let Err(e) = store::atomic_write(&store.image_path(&url), &r.body) {
                                 return fail(e.into());

@@ -25,6 +25,7 @@ fn opts(beacon_port: u16, beacon_secs: u64, phone: Option<String>) -> Options {
         beacon_wait: Duration::from_secs(beacon_secs),
         beacon_port,
         request_timeout: Duration::from_secs(5),
+        image_timeout: Duration::from_secs(5),
         pair_timeout: Duration::from_secs(5),
         deadline: Duration::from_secs(60),
         configured_phone: phone,
