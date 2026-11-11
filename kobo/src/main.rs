@@ -162,7 +162,8 @@ fn read(home: &Path, config: Config) -> ExitCode {
         Some(l) => Box::new(l),
         None => Box::new(NoLight),
     };
-    let opts = app::Options { rotation, follow_sensor: p.follow_sensor, light, network: Box::new(net::probe), sync_on_start: true, hit_probe: None };
+    let power = Box::new(kobo::KoboPower { home: home.to_path_buf() });
+    let opts = app::Options { rotation, follow_sensor: p.follow_sensor, light, power, network: Box::new(net::probe), sync_on_start: true, hit_probe: None };
     let mut app = match App::new(Box::new(fb), Box::new(input), Box::new(SystemClock::new()), store, config, &home.join("fonts"), opts) {
         Ok(a) => a,
         Err(e) => {

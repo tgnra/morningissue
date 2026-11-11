@@ -15,8 +15,8 @@ pub struct Config {
     pub beacon_port: u16,
     /// Full flash after this many partial page turns.
     pub flash_every: u32,
-    /// Leave the reader (back to Nickel, which then sleeps as usual) after this many minutes
-    /// without input. 0 never does.
+    /// Put the Kobo to sleep after this many minutes without input, as the power button
+    /// does. 0 never does.
     pub idle_minutes: u64,
     /// Overrides for the touch panel; see README "Input".
     pub touch: TouchOverride,

@@ -7,7 +7,7 @@ mod fakephone;
 use fakephone::FakePhone;
 use morningissue::app::{self, App};
 use morningissue::config::Config;
-use morningissue::desktop::{self, DesktopDisplay, ScriptClock, ScriptInput, Shared, Step};
+use morningissue::desktop::{self, DesktopDisplay, DesktopPower, ScriptClock, ScriptInput, Shared, Step};
 use morningissue::device::{Key, Refresh};
 use morningissue::light::FakeLight;
 use morningissue::net::NetStatus;
@@ -154,11 +154,14 @@ struct Setup {
     warmth: bool,
     /// A sync has never succeeded; this was the last error.
     last_error: Option<&'static str>,
+    /// How many suspend and prepare attempts the simulated kernel refuses.
+    refuse_suspend: u32,
+    refuse_prepare: u32,
 }
 
 impl Default for Setup {
     fn default() -> Setup {
-        Setup { editions: 3, saved: true, online: true, phone: None, sync_on_start: false, warmth: true, last_error: None }
+        Setup { editions: 3, saved: true, online: true, phone: None, sync_on_start: false, warmth: true, last_error: None, refuse_suspend: 0, refuse_prepare: 0 }
     }
 }
 
@@ -226,6 +229,8 @@ struct Outcome {
     events: Vec<Value>,
     syncs_started: usize,
     light: Vec<(char, u8)>,
+    /// The sleep steps the device was asked for.
+    power: Vec<String>,
 }
 
 fn run(dir: &str, size: &Size, s: &Setup, script: Vec<Step>) -> Outcome {
@@ -234,6 +239,8 @@ fn run(dir: &str, size: &Size, s: &Setup, script: Vec<Step>) -> Outcome {
     let shared = Rc::new(Shared::default());
     shared.wall_ms.set(now);
     shared.rotation.set(size.rotation);
+    shared.refuse_suspend.set(s.refuse_suspend);
+    shared.refuse_prepare.set(s.refuse_prepare);
     let display = DesktopDisplay::new(size.w, size.h, size.dpi, shared.clone());
     let panel = display.panel.clone();
     let out = manifest_dir().join("target/screens").join(dir);
@@ -248,12 +255,15 @@ fn run(dir: &str, size: &Size, s: &Setup, script: Vec<Step>) -> Outcome {
     let writes = Rc::new(RefCell::new(Vec::new()));
     let light = FakeLight { warmth: s.warmth, level: (40, 30), original: (40, 30), writes: writes.clone() };
     let online = s.online;
-    let network = move || if online { NetStatus::Online { iface: "wlan0".into(), ip: Some("192.168.1.31".into()), ssid: Some("Harbour Lane".into()) } } else { NetStatus::Offline };
+    // Wi-Fi stays up until the reader turns it off to sleep.
+    let shared4 = shared.clone();
+    let network = move || if online && !shared4.power.borrow().iter().any(|p| p == "wifi-off") { NetStatus::Online { iface: "wlan0".into(), ip: Some("192.168.1.31".into()), ssid: Some("Harbour Lane".into()) } } else { NetStatus::Offline };
     let shared3 = shared.clone();
     let opts = app::Options {
         rotation: size.rotation,
         follow_sensor: true,
         light: Box::new(light),
+        power: Box::new(DesktopPower(shared.clone())),
         network: Box::new(network),
         sync_on_start: s.sync_on_start,
         hit_probe: Some(Box::new(move |hits| *shared3.hits.borrow_mut() = hits.to_vec())),
@@ -263,7 +273,8 @@ fn run(dir: &str, size: &Size, s: &Setup, script: Vec<Step>) -> Outcome {
     contact_sheet(&out);
     let events: Vec<Value> = std::fs::read_to_string(home.join("data/events.jsonl")).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     let light = writes.borrow().clone();
-    Outcome { out, home, refreshes: app.refreshes.clone(), events, syncs_started: app.syncs_started, light }
+    let power = shared.power.borrow().clone();
+    Outcome { out, home, refreshes: app.refreshes.clone(), events, syncs_started: app.syncs_started, light, power }
 }
 
 /// Every picture in `dir`, scaled down onto one sheet (`contact.png`), for review.
@@ -583,4 +594,142 @@ fn popover_without_warmth() {
         assert!(o.light.contains(&('b', 30)), "{:?}", o.light);
         assert!(!o.light.iter().any(|w| w.0 == 'w'));
     }
+}
+
+/// The bounding box (x0, y0, x1, y1) of the pixels that are not white, if any.
+fn ink_box(path: &std::path::Path) -> Option<(u32, u32, u32, u32)> {
+    let img = image::open(path).unwrap().to_luma8();
+    let mut b: Option<(u32, u32, u32, u32)> = None;
+    for (x, y, p) in img.enumerate_pixels() {
+        if p.0[0] < 200 {
+            b = Some(match b {
+                None => (x, y, x, y),
+                Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x), y1.max(y)),
+            });
+        }
+    }
+    b
+}
+
+fn same_picture(a: &std::path::Path, b: &std::path::Path) -> bool {
+    image::open(a).unwrap().to_luma8() == image::open(b).unwrap().to_luma8()
+}
+
+/// Long enough for the whole way to suspend: the sleep screen, 3 s, 15 s, 2 s.
+const TO_SUSPEND_MS: u64 = 21_000;
+
+/// The power button puts the Kobo to sleep behind a blank page that says "Sleeping…" in its
+/// lower right corner, and wakes it on the same page, at every size.
+#[test]
+fn sleep_screen_at_every_size() {
+    for size in &SIZES {
+        let script = vec![tap_on("OpenEdition(0)"), mark("01-front-page"), Step::Key(Key::Power), mark("02-sleeping"), Step::Wait(TO_SUSPEND_MS), Step::Key(Key::Power), Step::Wait(1000), mark("03-awake")];
+        let o = run(&format!("{}/sleep", size.name), size, &Setup::default(), script);
+        let (w, h) = dims(size);
+        // Blank but for the word, which sits in the lower right corner.
+        let (x0, y0, x1, y1) = ink_box(&o.out.join("02-sleeping.png")).expect("the sleep screen says Sleeping");
+        assert!(x0 as i32 > w * 2 / 3 && y0 as i32 > h * 9 / 10, "{}: sleeping text at {x0},{y0}", size.name);
+        assert!((x1 as i32) < w && (y1 as i32) < h);
+        assert!(same_picture(&o.out.join("01-front-page.png"), &o.out.join("03-awake.png")), "{}: woke on the same screen", size.name);
+        assert_eq!(o.power, ["wifi-off", "prepare", "suspend", "resume"], "{}", size.name);
+        // The sleep screen and the screen after waking are both full refreshes.
+        assert!(o.refreshes.iter().filter(|r| r.0 == Refresh::Full).count() >= 3);
+        // The light went off for sleep and came back at its level.
+        let i = o.light.iter().position(|w| *w == ('b', 0)).expect("light off");
+        assert_eq!(o.light[i + 1], ('b', 40), "{:?}", o.light);
+    }
+}
+
+/// Power, the cover and the idle timeout sleep and wake; touches and keys made while asleep
+/// or waking never turn a page; and only Exit leaves.
+#[test]
+fn sleep_and_wake_by_power_cover_and_idle() {
+    let size = &SIZES[2];
+    let (w, h) = dims(size);
+    let swipe = || Step::Swipe(w * 3 / 4, h / 2, w / 4, h / 2 + 10);
+    let script = vec![
+        tap_on("OpenEdition(0)"),
+        Step::Wait(2000),
+        mark("01-page-1"),
+        // Power: asleep; a swipe and a page key on the dark screen do nothing.
+        Step::Key(Key::Power),
+        Step::Wait(5000),
+        swipe(),
+        Step::Key(Key::Forward),
+        Step::Wait(TO_SUSPEND_MS),
+        // Woken by the power button, with a swipe queued as it wakes: dropped too.
+        Step::Key(Key::Power),
+        swipe(),
+        Step::Wait(1000),
+        mark("02-awake-still-page-1"),
+        // The cover: closing it sleeps, the power button with it closed does not wake,
+        // opening it does.
+        Step::Key(Key::CoverClosed),
+        Step::Wait(TO_SUSPEND_MS),
+        Step::Key(Key::Power),
+        Step::Wait(1000),
+        mark("03-cover-closed-power-pressed"),
+        Step::Key(Key::CoverOpened),
+        Step::Wait(1000),
+        mark("04-cover-opened"),
+        // Twenty minutes without input: asleep, not gone.
+        Step::Wait(20 * 60_000 + TO_SUSPEND_MS),
+        mark("05-idle-asleep"),
+        Step::Key(Key::Power),
+        Step::Wait(1000),
+        mark("06-awake-after-idle"),
+        // Awake, a swipe turns the page again.
+        swipe(),
+        Step::Wait(1000),
+        mark("07-page-2"),
+        Step::Key(Key::Home),
+        mark("08-home-offline-since-sleep"),
+        tap_on("OpenSettings"),
+        mark("09-settings-offline-since-sleep"),
+    ];
+    let o = run("sleep-wake", size, &Setup::default(), script);
+    for n in ["03-cover-closed-power-pressed", "05-idle-asleep"] {
+        let (x0, y0, ..) = ink_box(&o.out.join(format!("{n}.png"))).unwrap();
+        assert!(x0 as i32 > w * 2 / 3 && y0 as i32 > h * 9 / 10, "{n} is the sleep screen");
+    }
+    for n in ["02-awake-still-page-1", "04-cover-opened", "06-awake-after-idle"] {
+        assert!(same_picture(&o.out.join("01-page-1.png"), &o.out.join(format!("{n}.png"))), "{n} is page 1 again");
+    }
+    // Only the swipe made awake turned the page.
+    assert!(!same_picture(&o.out.join("01-page-1.png"), &o.out.join("07-page-2.png")));
+    // Asleep time is not reading time. (The twenty idle minutes before the idle sleep count,
+    // as they did when the idle timeout left the reader.)
+    let ms: Vec<i64> = o.events.iter().filter(|e| e["type"] == "pageView").map(|e| e["ms"].as_i64().unwrap()).collect();
+    assert_eq!(ms.iter().filter(|m| **m >= 10_000).count(), 1, "{ms:?}");
+    assert!(ms.iter().all(|m| *m < 10_000 || (20 * 60_000..20 * 60_000 + 5_000).contains(m)), "{ms:?}");
+    // Wi-Fi went off once, before the first suspend; three suspends, each resumed.
+    assert_eq!(o.power.iter().filter(|p| *p == "wifi-off").count(), 1, "{:?}", o.power);
+    assert_eq!(o.power[0], "wifi-off");
+    assert_eq!(o.power.iter().filter(|p| *p == "suspend").count(), 3, "{:?}", o.power);
+    assert_eq!(o.power.iter().filter(|p| *p == "resume").count(), 3, "{:?}", o.power);
+}
+
+/// When the kernel refuses, the reader tries again 15 s later, as KOReader does.
+#[test]
+fn a_refused_suspend_is_tried_again() {
+    let size = &SIZES[2];
+    let setup = Setup { refuse_suspend: 2, refuse_prepare: 1, ..Default::default() };
+    let script = vec![Step::Key(Key::Power), Step::Wait(TO_SUSPEND_MS + 3 * 17_000), Step::Key(Key::Power), mark("awake")];
+    let o = run("sleep-refused", size, &setup, script);
+    assert_eq!(o.power, ["wifi-off", "prepare refused", "prepare", "suspend refused", "resume", "prepare", "suspend refused", "resume", "prepare", "suspend", "resume"]);
+}
+
+/// A kernel that never lets the Kobo sleep: after twenty attempts the reader hands back to
+/// Nickel, which sleeps on its own, instead of keeping the device awake behind the sleep
+/// screen.
+#[test]
+fn a_kernel_that_never_sleeps_hands_back_to_nickel() {
+    let size = &SIZES[0];
+    let setup = Setup { refuse_prepare: 1000, ..Default::default() };
+    let script = vec![Step::Key(Key::Power), Step::Wait(30 * 60_000), mark("never-reached")];
+    let o = run("sleep-never", size, &setup, script);
+    assert_eq!(o.power.iter().filter(|p| *p == "prepare refused").count(), 20, "{:?}", o.power);
+    assert!(!o.out.join("never-reached.png").exists());
+    // The light went back to Nickel's levels on the way out.
+    assert_eq!(o.light.last(), Some(&('w', 30)), "{:?}", o.light);
 }

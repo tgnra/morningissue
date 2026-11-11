@@ -548,6 +548,8 @@ pub fn saved_screens(ctx: &Ctx, list: &SavedList) -> Vec<Screen> {
 pub struct SettingsView<'s> {
     pub wifi: String,
     pub online: bool,
+    /// Offline because the reader turned Wi-Fi off to sleep.
+    pub slept: bool,
     pub phone_address: Option<&'s str>,
     pub syncing: bool,
     pub last_result: String,
@@ -620,6 +622,8 @@ pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
     y += wifi.height();
     let note = if s.online {
         "Morning Issue uses the Kobo\u{2019}s own connection and never turns Wi-Fi on itself."
+    } else if s.slept {
+        "Wi-Fi was turned off when the Kobo went to sleep, and Morning Issue never turns it on itself. Exit and connect in the Kobo\u{2019}s settings to sync."
     } else {
         "Turn on Wi-Fi in the Kobo\u{2019}s settings before opening Morning Issue to sync."
     };
@@ -649,7 +653,11 @@ pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
     if enabled {
         hits.push((target(ctx, br), Action::SyncNow));
     }
-    let side = if s.online { "" } else { "Offline" };
+    let side = match (s.online, s.slept) {
+        (true, _) => "",
+        (false, true) => "Offline since sleep",
+        (false, false) => "Offline",
+    };
     if !side.is_empty() {
         let l = ctx.line(side, ctx.ty.label.italic().color(MUTED), w as f32 - bw as f32 - m.pt(12.0), Align::Left);
         l.draw(ctx.fonts, canvas, (x + bw) as f32 + m.pt(12.0), br.y as f32 + (bh as f32 - l.height()) / 2.0);
@@ -869,7 +877,25 @@ pub fn draw_popover(ctx: &Ctx, canvas: &mut Canvas, p: &Popover) -> Hits {
 }
 
 // --------------------------------------------------------------------------------------------
+// The sleep screen
+
+/// What shows while the Kobo sleeps: a blank page with "Sleeping…" small in the lower right
+/// corner.
+pub fn draw_sleep(ctx: &Ctx, canvas: &mut Canvas) {
+    let m = &ctx.m;
+    canvas.clear(WHITE);
+    let margin = m.pt(18.0);
+    let w = m.w as f32 - 2.0 * margin;
+    let l = ctx.line("Sleeping\u{2026}", ctx.ty.caption.italic().color(MUTED), w, Align::Right);
+    l.draw(ctx.fonts, canvas, margin, m.h as f32 - margin - l.height());
+}
+
+// --------------------------------------------------------------------------------------------
 // The status line
+
+/// What the home screen and Settings say when there is no connection because the reader
+/// turned Wi-Fi off to sleep.
+pub const OFFLINE_SINCE_SLEEP: &str = "Offline since sleep. Exit and connect in Kobo\u{2019}s settings to sync";
 
 /// What a running sync shows.
 #[derive(Clone, Debug, Default)]

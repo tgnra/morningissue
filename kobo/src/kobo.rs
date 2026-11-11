@@ -678,10 +678,9 @@ impl device::Input for EvdevInput {
             }
             let mut fds: Vec<libc::pollfd> = self.touch_fd.iter().chain(self.key_fds.iter()).map(|&fd| libc::pollfd { fd, events: libc::POLLIN, revents: 0 }).collect();
             fds.dedup_by_key(|p| p.fd);
+            // A zero timeout still polls once, so what the kernel has queued (the touches and
+            // keys of a wake-up, which the reader drains) is read.
             let left = until.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return None;
-            }
             let r = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, left.as_millis().min(i32::MAX as u128) as i32) };
             if r < 0 {
                 if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
@@ -692,7 +691,63 @@ impl device::Input for EvdevInput {
             for p in fds.iter().filter(|p| p.revents & libc::POLLIN != 0) {
                 self.read_fd(p.fd);
             }
+            if self.queue.is_empty() && until.saturating_duration_since(Instant::now()).is_zero() {
+                return None;
+            }
         }
+    }
+}
+
+// --- Sleep ---
+
+/// Suspend to RAM through the NTX kernel's sysfs knobs, as Nickel, KOReader and Plato do:
+/// `1` to `/sys/power/state-extended` (the NTX flag that puts the touch panel, the EPDC and
+/// the other subsystems to sleep and arms the wake-up pins), `mem` to `/sys/power/state`
+/// (which returns on wake), then `0` to `state-extended`. Wi-Fi is turned off by
+/// `wifi-off.sh`, the same teardown `launch.sh` does on exit.
+pub struct KoboPower {
+    /// The directory holding `wifi-off.sh` and the binary.
+    pub home: std::path::PathBuf,
+}
+
+const STATE_EXTENDED: &str = "/sys/power/state-extended";
+const POWER_STATE: &str = "/sys/power/state";
+
+impl device::Power for KoboPower {
+    fn wifi_off(&mut self) {
+        let script = self.home.join("wifi-off.sh");
+        eprintln!("sleep: turning Wi-Fi off");
+        // The script's own output goes to the log (it ends before the reader does).
+        match std::process::Command::new("/bin/sh").arg(&script).stdin(std::process::Stdio::null()).status() {
+            Ok(s) if s.success() => {}
+            Ok(s) => eprintln!("sleep: wifi-off.sh ended with {s}"),
+            Err(e) => eprintln!("sleep: cannot run {}: {e}", script.display()),
+        }
+    }
+
+    fn prepare(&mut self) -> io::Result<()> {
+        std::fs::write(STATE_EXTENDED, "1")
+    }
+
+    fn suspend(&mut self) -> io::Result<()> {
+        unsafe { libc::sync() };
+        // Blocks while the device sleeps.
+        std::fs::write(POWER_STATE, "mem")
+    }
+
+    fn resume(&mut self) {
+        if let Err(e) = std::fs::write(STATE_EXTENDED, "0") {
+            eprintln!("sleep: the kernel refused to resume subsystems: {e}");
+        }
+        // KOReader gives the kernel a moment to catch up, then sets the system clock from
+        // the RTC.
+        std::thread::sleep(Duration::from_millis(100));
+        let _ = std::process::Command::new("hwclock")
+            .args(["-s", "-u"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 }
 
