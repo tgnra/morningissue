@@ -152,6 +152,14 @@ private fun Reader(article: ReaderArticle, fullText: FullText, onOpenSource: (Lo
 
     var sizeStep by remember { mutableIntStateOf(ReaderTextSize.load(context)) }
     var sizeControlsOpen by rememberSaveable { mutableStateOf(false) }
+    // The picture shown full screen over the article, if any. The article stays composed
+    // beneath it, so closing the picture returns to the same place.
+    var viewing by rememberSaveable(articleId) { mutableStateOf<String?>(null) }
+    var viewingDescription by rememberSaveable(articleId) { mutableStateOf<String?>(null) }
+    val openImage: (String, String?) -> Unit = { url, description ->
+        viewingDescription = description
+        viewing = url
+    }
     val textScale = ReaderTextSize.steps[sizeStep]
 
     // One line of body text of overlap between E-ink steps.
@@ -195,8 +203,9 @@ private fun Reader(article: ReaderArticle, fullText: FullText, onOpenSource: (Lo
         }
     }
 
-    val forward: () -> Unit = { scope.launch { scroller.stepForward() } }
-    val backward: () -> Unit = { scope.launch { scroller.stepBackward() } }
+    // Page keys move the article only while it is what is on screen, not under a full-screen picture.
+    val forward: () -> Unit = { if (viewing == null) scope.launch { scroller.stepForward() } }
+    val backward: () -> Unit = { if (viewing == null) scope.launch { scroller.stepBackward() } }
     val openInBrowser: (() -> Unit)? = article.url?.let { url -> { runCatching { uriHandler.openUri(url) } } }
 
     Box(Modifier.fillMaxSize().background(colors.paper).pagedKeys(forward, backward)) {
@@ -239,10 +248,10 @@ private fun Reader(article: ReaderArticle, fullText: FullText, onOpenSource: (Lo
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Column(Modifier.measure(spec.readerMaxMeasure)) {
-                            ArticleHeader(article, onOpenSource)
+                            ArticleHeader(article, onOpenSource, openImage)
                             Spacer(Modifier.height(20.dp))
                             ArticleStatus(article, fullText)
-                            ArticleBody(article.blocks, textScale)
+                            ArticleBody(article.blocks, textScale, onImageClick = openImage)
                             Spacer(Modifier.height(36.dp))
                             ArticleFooter(
                                 article = article,
@@ -259,6 +268,7 @@ private fun Reader(article: ReaderArticle, fullText: FullText, onOpenSource: (Lo
                 PagedFooter(scroller.canStepBackward, scroller.canStepForward, backward, forward)
             }
         }
+        viewing?.let { url -> ImageViewer(url, viewingDescription, onClose = { viewing = null }) }
     }
 }
 
@@ -272,7 +282,7 @@ private fun Modifier.measure(max: Dp): Modifier =
     if (max == Dp.Unspecified) fillMaxWidth() else widthIn(max = max).fillMaxWidth()
 
 @Composable
-private fun ArticleHeader(article: ReaderArticle, onOpenSource: (Long) -> Unit) {
+private fun ArticleHeader(article: ReaderArticle, onOpenSource: (Long) -> Unit, onOpenImage: (String, String?) -> Unit) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
     Box(
@@ -303,7 +313,13 @@ private fun ArticleHeader(article: ReaderArticle, onOpenSource: (Long) -> Unit) 
     if (article.imageUrl != null && !opensWithImage) {
         Spacer(Modifier.height(20.dp))
         // In the article a picture is shown whole: a tall one may take most of a screen.
-        FramedImage(article.imageUrl, contentDescription = null, preferredRatio = 3f / 2f, tallestRatio = 0.6f)
+        FramedImage(
+            article.imageUrl,
+            contentDescription = null,
+            preferredRatio = 3f / 2f,
+            tallestRatio = 0.6f,
+            onClick = { onOpenImage(article.imageUrl, null) },
+        )
     }
 }
 

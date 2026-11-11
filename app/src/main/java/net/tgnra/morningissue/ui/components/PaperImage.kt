@@ -12,9 +12,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import coil3.PlatformContext
 import coil3.compose.AsyncImage
@@ -22,6 +25,7 @@ import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import coil3.request.transformations
 import coil3.size.Precision
+import net.tgnra.morningissue.R
 import net.tgnra.morningissue.ui.theme.LocalGreyscaleImages
 import net.tgnra.morningissue.ui.learning.ImageFrame
 import net.tgnra.morningissue.ui.theme.MorningIssueTheme
@@ -95,6 +99,8 @@ object ImageTreatment {
  *
  * The picture comes from the image store when it is there and from the network when it is not
  * (`StoredImageFetcher`); nothing here knows which.
+ *
+ * @param onClick makes the picture a button, for "tap to see the original"
  */
 @Composable
 fun PaperImage(
@@ -103,16 +109,18 @@ fun PaperImage(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
     onSize: ((width: Int, height: Int) -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
 ) {
     val colors = MorningIssueTheme.colors
     val placeholder = if (colors.isEink) Modifier.border(1.dp, colors.ink) else Modifier.background(colors.hairline.copy(alpha = 0.45f))
     val tone = ImageTreatment.tone
     val context = LocalPlatformContext.current
     val request = remember(context, url, tone) { ImageTreatment.request(context, url, tone).build() }
+    val tap = if (onClick != null) Modifier.clickable(role = Role.Image, onClickLabel = stringResource(R.string.image_open_original), onClick = onClick) else Modifier
     AsyncImage(
         model = request,
         contentDescription = contentDescription,
-        modifier = modifier.then(placeholder),
+        modifier = modifier.then(placeholder).then(tap),
         contentScale = contentScale,
         // A dithered bitmap is made for these very pixels; smoothing would blur the pattern.
         filterQuality = if (tone == ImageTone.COLOUR) DrawScope.DefaultFilterQuality else FilterQuality.None,
@@ -135,6 +143,7 @@ fun FramedImage(
     preferredRatio: Float,
     modifier: Modifier = Modifier,
     tallestRatio: Float = 1f,
+    onClick: (() -> Unit)? = null,
 ) {
     var shape by remember(url) { mutableStateOf(url?.let { knownShapes.get(it) }) }
     val frame = shape?.let { ImageFrame.of(it, 1f, preferredRatio, tallestRatio) } ?: ImageFrame(preferredRatio, fit = false)
@@ -143,6 +152,7 @@ fun FramedImage(
         contentDescription = contentDescription,
         modifier = modifier.fillMaxWidth().aspectRatio(frame.ratio),
         contentScale = if (frame.fit) ContentScale.Fit else ContentScale.Crop,
+        onClick = onClick,
         onSize = { width, height ->
             if (url != null && width > 0 && height > 0) {
                 val ratio = width.toFloat() / height

@@ -120,7 +120,13 @@ private fun BodyText(text: RichText, style: TextStyle, modifier: Modifier = Modi
  * [textScale] is the reader's text-size setting.
  */
 @Composable
-fun ArticleBody(blocks: List<ContentBlock>, textScale: Float, modifier: Modifier = Modifier) {
+fun ArticleBody(
+    blocks: List<ContentBlock>,
+    textScale: Float,
+    modifier: Modifier = Modifier,
+    /** Called with a picture's address and description when it is tapped; null leaves pictures inert. */
+    onImageClick: ((url: String, description: String?) -> Unit)? = null,
+) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
     val body = type.reader.scaled(textScale)
@@ -144,14 +150,16 @@ fun ArticleBody(blocks: List<ContentBlock>, textScale: Float, modifier: Modifier
                     Column(Modifier.fillMaxWidth().stepAnchor(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         val width = block.width
                         val height = block.height
+                        val open = onImageClick?.let { open -> { open(block.url, block.alt) } }
                         if (width != null && height != null && width > 0 && height > 0) {
                             PaperImage(
                                 url = block.url,
                                 contentDescription = block.alt,
                                 modifier = Modifier.fillMaxWidth().aspectRatio((width.toFloat() / height).coerceIn(0.5f, 3f)),
+                                onClick = open,
                             )
                         } else {
-                            PaperImage(block.url, block.alt, Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+                            PaperImage(block.url, block.alt, Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth, onClick = open)
                         }
                         block.caption?.takeIf { it.text.isNotBlank() }?.let {
                             BodyText(it, type.caption.scaled(textScale), color = colors.inkSecondary)
