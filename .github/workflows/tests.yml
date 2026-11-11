@@ -1,0 +1,62 @@
+# Runs the unit tests, the 180-day ranking simulation among them, on every push and pull request.
+# The simulation's per-persona reports (how affinity and W moved) and the test reports are kept
+# as workflow artifacts, so a failing ranking check can be diagnosed from the run's page.
+name: Tests
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      # The same JDK as the release build; the app compiles for Java 17.
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # Caches the Gradle distribution, dependencies and build cache between runs.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest -PsimulationReport
+
+      - name: Upload the ranking simulation reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ranking-simulation-reports
+          path: app/build/reports/simulation/
+          if-no-files-found: ignore
+
+      - name: Upload the test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-test-reports
+          path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
