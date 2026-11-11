@@ -1,4 +1,5 @@
-# Pushing a tag that starts with "v" builds a signed APK and publishes it as a GitHub release.
+# Pushing a tag that starts with "v" builds a signed APK and publishes it as a GitHub release,
+# then builds the Kobo reader zip and attaches it to the same release.
 # Running the workflow by hand (Actions > Release > Run workflow) builds the same signed APK
 # and uploads it as a workflow artifact, without creating a release.
 name: Release
@@ -116,3 +117,53 @@ jobs:
             --title "Morning Issue $GITHUB_REF_NAME" \
             --generate-notes \
             --verify-tag
+
+  # The Kobo reader (kobo/): one static ARM binary, packaged as a zip to unzip at the root of
+  # the KOBOeReader drive. It waits for the release job so the release exists to attach to.
+  kobo:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Work out the version
+        id: version
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "name=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=0.0.0-dev.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run the Kobo tests
+        working-directory: kobo
+        run: cargo test --locked
+
+      - name: Build the Kobo zip
+        env:
+          VERSION: ${{ steps.version.outputs.name }}
+        run: |
+          rustup target add armv7-unknown-linux-musleabihf
+          kobo/build.sh
+          zip="kobo/dist/morningissue-kobo-$VERSION.zip"
+          test -f "$zip"
+          unzip -l "$zip"
+
+      - name: Upload the zip as a workflow artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: morningissue-kobo-${{ steps.version.outputs.name }}
+          path: kobo/dist/morningissue-kobo-${{ steps.version.outputs.name }}.zip
+          if-no-files-found: error
+
+      - name: Attach the zip to the GitHub release
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.name }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" "kobo/dist/morningissue-kobo-$VERSION.zip" \
+            --repo "$GITHUB_REPOSITORY"

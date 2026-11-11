@@ -1,4 +1,5 @@
-# Runs the unit tests, the 180-day ranking simulation among them, on every push and pull request.
+# Runs the unit tests, the 180-day ranking simulation among them, and the Kobo reader's tests on
+# every push and pull request.
 # The simulation's per-persona reports (how affinity and W moved) and the test reports are kept
 # as workflow artifacts, so a failing ranking check can be diagnosed from the run's page.
 name: Tests
@@ -59,4 +60,25 @@ jobs:
         with:
           name: unit-test-reports
           path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+
+  # The Kobo reader's tests: sync against a fake phone, the phone's golden fixtures, and the
+  # screenshot walks at every supported screen size.
+  kobo-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Run the Kobo tests
+        working-directory: kobo
+        run: cargo test --locked
+
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: kobo-screens
+          path: kobo/target/screens/
           if-no-files-found: ignore
