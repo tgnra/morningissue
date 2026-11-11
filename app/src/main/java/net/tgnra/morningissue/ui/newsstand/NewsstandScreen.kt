@@ -1,6 +1,9 @@
 package net.tgnra.morningissue.ui.newsstand
 
+import android.text.format.DateFormat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -16,21 +19,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -38,48 +40,56 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import android.text.format.DateFormat
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontStyle
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.TextStyle
-import androidx.compose.ui.platform.LocalLocale
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import net.tgnra.morningissue.model.EditionKind
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import net.tgnra.morningissue.engine.EditionClock
-import net.tgnra.morningissue.ui.components.TextLink
-import net.tgnra.morningissue.ui.components.retainedState
 import net.tgnra.morningissue.R
+import net.tgnra.morningissue.edition.BuildStage
+import net.tgnra.morningissue.edition.DueEditions
+import net.tgnra.morningissue.edition.DueRelease
+import net.tgnra.morningissue.edition.DueStatus
+import net.tgnra.morningissue.edition.PrintResult
+import net.tgnra.morningissue.edition.PrintState
+import net.tgnra.morningissue.engine.schedule
+import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionSummary
-import net.tgnra.morningissue.sync.SyncReport
 import net.tgnra.morningissue.sync.SyncStatus
 import net.tgnra.morningissue.ui.LocalAppContainer
 import net.tgnra.morningissue.ui.components.LocalPagedScroller
-import net.tgnra.morningissue.ui.components.NoticeLine
+import net.tgnra.morningissue.ui.components.boxOutlineColor
 import net.tgnra.morningissue.ui.components.PaperButton
-import net.tgnra.morningissue.ui.components.PaperIconButton
 import net.tgnra.morningissue.ui.components.PaperIcons
 import net.tgnra.morningissue.ui.components.SectionLabel
+import net.tgnra.morningissue.ui.components.TextLink
 import net.tgnra.morningissue.ui.components.ThinProgressBar
 import net.tgnra.morningissue.ui.components.pagedKeys
 import net.tgnra.morningissue.ui.components.pagedVerticalScroll
 import net.tgnra.morningissue.ui.components.rememberPagedScroller
+import net.tgnra.morningissue.ui.components.retainedState
 import net.tgnra.morningissue.ui.components.stepAnchor
 import net.tgnra.morningissue.ui.format.PaperFormat
 import net.tgnra.morningissue.ui.layout.LocalPaperLayoutSpec
@@ -92,8 +102,13 @@ private const val RACKED_EDITIONS = 6
 /**
  * Home: today's edition facing out, the last six racked below or beside it newest first, an
  * "Older issues" tile to the calendar, and the button bar (Search, Saved, Sources, Settings).
+ *
+ * The stand never builds an edition by being opened, and it has no refresh: editions are
+ * printed in the background ahead of their release. When the one that is due failed to build
+ * (`DueEditions` has the rule), an unprinted cover stands in its place with a Print now
+ * button, which hands the work to the app-wide `EditionPrinter`; this screen only shows where
+ * that has got to, so leaving or rotating it loses nothing.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NewsstandScreen(
     onOpenEdition: (editionId: Long) -> Unit,
@@ -106,7 +121,6 @@ fun NewsstandScreen(
     val container = LocalAppContainer.current
     val spec = LocalPaperLayoutSpec.current
     val colors = MorningIssueTheme.colors
-    val eink = MorningIssueTheme.isEink
     val scope = rememberCoroutineScope()
     val resources = LocalResources.current
 
@@ -114,48 +128,82 @@ fun NewsstandScreen(
     val feeds by retainedState("feeds") { container.feeds.observeFeeds() }
     val syncStatus by container.feedSyncer.status.collectAsStateWithLifecycle()
     val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = null)
+    val printState by container.editionPrinter.state.collectAsStateWithLifecycle()
     val zone = ZoneId.systemDefault()
 
-    // The reset for which the release check below has finished. Until it has, a missing edition
-    // may simply not have been printed yet, so nothing is said about it.
-    var checkedReset by rememberSaveable { mutableStateOf<Long?>(null) }
+    // Every release time below comes from the schedule, which knows how a time changed in
+    // Settings takes effect: from the next release, never for one that has already come.
+    val schedule = settings?.schedule
 
-    // Release is a clock check on coming to the foreground; it never syncs.
-    LifecycleStartEffect(container) {
+    // Release is a clock check, taken when the stand comes to the foreground and again each
+    // time a release time passes while it is on screen. Nothing is built or fetched here.
+    var clockCheck by remember { mutableIntStateOf(0) }
+    LifecycleStartEffect(container, settings?.resetTime, settings?.eveningEditionEnabled, settings?.eveningEditionTime, settings?.resetChange, settings?.eveningChange) {
+        clockCheck++
         val job = scope.launch {
-            container.editions.ensureCurrentEdition()
-            val resetTime = container.settings.settings.first().resetTime
-            checkedReset = EditionClock.latestReset(container.clock.instant(), resetTime, zone).toEpochMilli()
+            if (schedule == null) return@launch
+            while (true) {
+                val next = schedule.nextRelease(container.clock.instant(), zone).at
+                delay(Duration.between(container.clock.instant(), next).toMillis().coerceAtLeast(0) + 1)
+                clockCheck++
+            }
         }
         onStopOrDispose { job.cancel() }
     }
+    val now = remember(clockCheck) { container.clock.instant() }
 
-    val now = container.clock.instant()
-    val resetTime = settings?.resetTime
+    val printing = printState as? PrintState.Printing
+    // An edition Print now has stored but is still fetching stories for stays behind the
+    // placeholder until the run is over.
+    val onStand = editions?.filter { it.id != printing?.editionId }
+    val subscribed = feeds
+
+    // Null until the editions, the sources and the settings have all been read: until then a
+    // missing edition may simply not have been loaded, so nothing is said about it.
+    val status = if (onStand != null && subscribed != null && schedule != null) {
+        DueEditions.status(
+            now = now,
+            schedule = schedule,
+            zone = zone,
+            released = onStand,
+            nothingNewFor = settings?.nothingNewFor.orEmpty(),
+            hasSources = subscribed.isNotEmpty(),
+        )
+    } else {
+        null
+    }
+    // The edition the placeholder stands in for: one that failed to build, or one being
+    // printed at the reader's request after a "nothing new" verdict.
+    val unprinted: DueRelease? = when (status) {
+        is DueStatus.NotPrinted -> status.release
+        is DueStatus.NothingNew -> status.release.takeIf { printing != null }
+        else -> null
+    }
+
+    // What the last Print now run came to, while it is still about the paper that is due.
+    val lastResult = (printState as? PrintState.Finished)
+        ?.takeIf { schedule != null && !it.at.isBefore(DueEditions.due(now, schedule, zone).first().at) }
+        ?.result
+    val printMessage = when (lastResult) {
+        PrintResult.PrintedFromStored -> R.string.print_from_stored
+        PrintResult.NothingNew -> R.string.print_nothing_new
+        PrintResult.Unreachable -> R.string.print_unreachable
+        PrintResult.Failed -> R.string.print_failed
+        PrintResult.Printed, null -> null
+    }
+    val printFailed = lastResult == PrintResult.Unreachable || lastResult == PrintResult.Failed
+
     // An Extra edition is not the day's paper: the notice below is about scheduled editions.
-    val newest = editions?.firstOrNull { it.kind != EditionKind.EXTRA }
+    val newest = onStand?.firstOrNull { it.kind != EditionKind.EXTRA }
     // Set when a reset has passed and the feeds had nothing new to print.
-    val noNewEdition = newest != null && resetTime != null &&
-        checkedReset == EditionClock.latestReset(now, resetTime, zone).toEpochMilli() &&
-        StandEditions.of(newest.date, now, resetTime, zone) == StandEdition.NoNewEdition
+    val noNewEdition = status is DueStatus.NothingNew && unprinted == null && newest != null && schedule != null &&
+        StandEditions.of(newest.date, status.release.date) == StandEdition.NoNewEdition
 
-    var refreshing by remember { mutableStateOf(false) }
     var notice by rememberSaveable { mutableStateOf<String?>(null) }
-    val refresh: () -> Unit = {
-        if (!refreshing) {
-            refreshing = true
-            notice = null
-            scope.launch {
-                try {
-                    // Fetches for the next edition; today's is frozen and stays as it is.
-                    val report = container.feedSyncer.syncAll()
-                    notice = refreshMessage(report) { id, count -> resources.getQuantityString(id, count, count) }
-                        ?: resources.getString(if (report.feedsChecked == 0) R.string.refresh_no_sources else R.string.refresh_no_new)
-                } finally {
-                    refreshing = false
-                }
-            }
-        }
+    val printNow: () -> Unit = {
+        notice = null
+        // Does nothing if a run is already under way.
+        container.editionPrinter.printNow()
     }
 
     val newSources = remember(feeds, editions, settings?.extraOfferDismissedAt) {
@@ -163,9 +211,10 @@ fun NewsstandScreen(
             feeds = feeds.orEmpty(),
             editions = editions.orEmpty(),
             dismissedAt = settings?.extraOfferDismissedAt,
-            today = now.atZone(zone).toLocalDate(),
         )
     }
+    // Today's Extra edition, if there is one, is reprinted with the new sources.
+    val reprintsExtra = ExtraOffer.reprints(editions.orEmpty(), now.atZone(zone).toLocalDate())
     var printingExtra by remember { mutableStateOf(false) }
     val printExtra: () -> Unit = {
         if (!printingExtra && newSources.isNotEmpty()) {
@@ -181,7 +230,13 @@ fun NewsstandScreen(
                         // Nothing recent enough to print; do not keep offering the same sources.
                         container.settings.setExtraOfferDismissedAt(container.clock.instant())
                     }
-                    notice = resources.getString(if (printed == null) R.string.extra_nothing_to_print else R.string.extra_printed)
+                    notice = resources.getString(
+                        when {
+                            printed == null -> R.string.extra_nothing_to_print
+                            reprintsExtra -> R.string.extra_reprinted
+                            else -> R.string.extra_printed
+                        },
+                    )
                 } finally {
                     printingExtra = false
                 }
@@ -198,7 +253,7 @@ fun NewsstandScreen(
 
     val stand: @Composable (Modifier) -> Unit = { modifier ->
         val scroller = rememberPagedScroller()
-        val body: @Composable () -> Unit = {
+        Box(modifier) {
             CompositionLocalProvider(LocalPagedScroller provides scroller) {
                 Column(
                     Modifier
@@ -210,42 +265,83 @@ fun NewsstandScreen(
                         .pagedVerticalScroll(scroller)
                         .padding(bottom = 24.dp),
                 ) {
-                    StandHeader(refreshing = refreshing, onRefresh = refresh)
-                    StandStatus(
-                        status = syncStatus.takeIf { refreshing },
-                        notice = notice,
-                        modifier = Modifier.padding(horizontal = spec.pageMargin),
-                    )
+                    StandHeader()
+                    if (printing == null) {
+                        // A Print now result outranks an older Extra edition notice. Closing
+                        // one forgets that result: the printer's is held by the printer and the
+                        // Extra's is saved with the screen, so neither comes back on rotation
+                        // or on returning to the stand, only when there is a new result.
+                        val extraNotice = notice
+                        if (printMessage != null) {
+                            ResultNotice(
+                                text = stringResource(printMessage),
+                                onDismiss = { container.editionPrinter.dismissResult() },
+                                modifier = Modifier.padding(horizontal = spec.pageMargin).padding(top = 8.dp),
+                                isError = printFailed,
+                            )
+                        } else if (extraNotice != null) {
+                            ResultNotice(
+                                text = extraNotice,
+                                onDismiss = { notice = null },
+                                modifier = Modifier.padding(horizontal = spec.pageMargin).padding(top = 8.dp),
+                            )
+                        }
+                    }
                     if (noNewEdition) {
                         NoNewEditionNotice(
                             newestDate = newest.date,
-                            expectedDate = StandEditions.expectedDate(now, resetTime, zone),
-                            nextEditionAt = EditionClock.nextReset(now, resetTime, zone).atZone(zone).toLocalTime(),
-                            refreshing = refreshing,
-                            onRefresh = refresh,
+                            expectedDate = status.release.date,
+                            nextEditionAt = schedule.nextReset(now, zone).atZone(zone).toLocalTime(),
+                            onCheck = printNow,
                             modifier = Modifier.padding(horizontal = spec.pageMargin),
                         )
                     }
-                    if (newSources.isNotEmpty()) {
+                    // While today's edition is unprinted, Print now is the offer: it takes the
+                    // new sources too, so an Extra edition from them is not offered beside it.
+                    if (newSources.isNotEmpty() && unprinted == null) {
                         ExtraEditionOffer(
                             sourceCount = newSources.size,
+                            reprint = reprintsExtra,
                             printing = printingExtra,
                             onPrint = printExtra,
                             onDismiss = { scope.launch { container.settings.setExtraOfferDismissedAt(container.clock.instant()) } },
                             modifier = Modifier.padding(horizontal = spec.pageMargin),
                         )
                     }
-                    val list = editions
                     when {
-                        list == null -> Unit
-                        list.isEmpty() -> EmptyStand(
-                            hasSources = !feeds.isNullOrEmpty(),
-                            refreshing = refreshing,
+                        onStand == null || status == null -> Unit
+                        unprinted != null -> Rack(
+                            front = { frontModifier, maxCoverWidth ->
+                                UnprintedDisplay(
+                                    release = unprinted,
+                                    today = now.atZone(zone).toLocalDate(),
+                                    stage = printing?.stage,
+                                    syncStatus = syncStatus,
+                                    tryAgain = printFailed,
+                                    onPrint = printNow,
+                                    modifier = frontModifier,
+                                    maxCoverWidth = maxCoverWidth,
+                                )
+                            },
+                            earlier = onStand.take(RACKED_EDITIONS),
+                            // With nothing printed yet there are no shelves to show beneath it.
+                            shelves = onStand.isNotEmpty(),
+                            arrangement = spec.newsstand,
+                            margin = spec.pageMargin,
+                            onOpenEdition = onOpenEdition,
+                            onOpenBackIssues = onOpenBackIssues,
+                        )
+                        onStand.isEmpty() -> EmptyStand(
+                            hasSources = !subscribed.isNullOrEmpty(),
                             onAddSources = onOpenSources,
-                            onRefresh = refresh,
+                            onCheck = printNow,
                         )
                         else -> Rack(
-                            editions = list,
+                            front = { frontModifier, maxCoverWidth ->
+                                TodayDisplay(onStand.first(), onOpenEdition, frontModifier, maxCoverWidth)
+                            },
+                            earlier = onStand.drop(1).take(RACKED_EDITIONS),
+                            shelves = true,
                             arrangement = spec.newsstand,
                             margin = spec.pageMargin,
                             onOpenEdition = onOpenEdition,
@@ -254,27 +350,6 @@ fun NewsstandScreen(
                     }
                 }
             }
-        }
-        if (eink) {
-            // No pull gesture on e-ink (its indicator is an animation); the header button refreshes.
-            Box(modifier) { body() }
-        } else {
-            val pullState = rememberPullToRefreshState()
-            PullToRefreshBox(
-                isRefreshing = refreshing,
-                onRefresh = refresh,
-                modifier = modifier,
-                state = pullState,
-                indicator = {
-                    PullToRefreshDefaults.Indicator(
-                        state = pullState,
-                        isRefreshing = refreshing,
-                        modifier = Modifier.align(Alignment.TopCenter),
-                        containerColor = colors.paperRaised,
-                        color = colors.accent,
-                    )
-                },
-            ) { body() }
         }
     }
 
@@ -298,74 +373,86 @@ fun NewsstandScreen(
     }
 }
 
-/** "12 new posts saved for tomorrow", with unreachable sources appended; null when nothing is new. */
-internal fun refreshMessage(report: SyncReport, plural: (id: Int, count: Int) -> String): String? {
-    val failed = report.feedsFailed.takeIf { it > 0 }?.let { plural(R.plurals.sources_unreachable, it) }
-    val saved = report.newArticles.takeIf { it > 0 }?.let { plural(R.plurals.new_posts_saved, it) }
-    return when {
-        saved != null && failed != null -> "$saved · $failed"
-        saved != null -> saved
-        failed != null -> failed
-        else -> null
+/**
+ * How far a Print now run has got, 0..1, as one bar that only moves forward: the sync is the
+ * first half, the build a step, the stories' text most of the rest, the pictures the end.
+ * [sync] is the syncer's own count of feeds, which only matters during [BuildStage.Syncing].
+ */
+internal fun printProgress(stage: BuildStage, sync: SyncStatus): Float = when (stage) {
+    BuildStage.Syncing -> {
+        val running = sync as? SyncStatus.Running
+        if (running != null && running.feedsTotal > 0) 0.5f * running.feedsDone / running.feedsTotal else 0f
     }
+    BuildStage.Building -> 0.5f
+    is BuildStage.FetchingText -> 0.55f + if (stage.total > 0) 0.35f * stage.done / stage.total else 0.35f
+    is BuildStage.FetchingImages -> 0.95f
 }
 
+/**
+ * A result said once under the header (an edition printed from stored posts, nothing new to
+ * print, an error, an Extra edition printed), boxed like `NoticeLine`, with a close button at
+ * its end. The button is a 48 dp square with its own description; it has no animation, so it
+ * is the same in E-ink mode. [onDismiss] must forget the result, not just hide it.
+ */
 @Composable
-private fun StandHeader(refreshing: Boolean, onRefresh: () -> Unit) {
+private fun ResultNotice(text: String, onDismiss: () -> Unit, modifier: Modifier = Modifier, isError: Boolean = false) {
     val colors = MorningIssueTheme.colors
-    val spec = LocalPaperLayoutSpec.current
+    val ink = if (isError) colors.accent else colors.ink
     Row(
-        Modifier.fillMaxWidth().padding(start = spec.pageMargin, end = spec.pageMargin - 12.dp, top = 12.dp, bottom = 4.dp),
+        modifier
+            .fillMaxWidth()
+            .border(1.dp, if (isError) colors.accent else boxOutlineColor)
+            .semantics { liveRegion = LiveRegionMode.Polite },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.app_name),
-                style = MorningIssueTheme.typography.masthead,
-                color = colors.ink,
-                modifier = Modifier.semantics { heading() },
-            )
-            SectionLabel(PaperFormat.longDate(LocalDate.now()))
-        }
-        PaperIconButton(
-            icon = Icons.Filled.Refresh,
-            contentDescription = stringResource(R.string.newsstand_refresh),
-            onClick = onRefresh,
-            enabled = !refreshing,
+        Text(
+            text = text,
+            style = MorningIssueTheme.typography.label,
+            color = ink,
+            modifier = Modifier.weight(1f).padding(start = 12.dp, top = 10.dp, bottom = 10.dp),
         )
+        val dismiss = stringResource(R.string.notice_dismiss)
+        Box(
+            Modifier
+                .size(48.dp)
+                .clickable(onClickLabel = dismiss, role = Role.Button, onClick = onDismiss)
+                .semantics { contentDescription = dismiss },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Close, contentDescription = null, tint = ink, modifier = Modifier.size(20.dp))
+        }
     }
 }
 
-/** The line under the header: sync progress while refreshing, then its result. */
 @Composable
-private fun StandStatus(status: SyncStatus?, notice: String?, modifier: Modifier = Modifier) {
-    val type = MorningIssueTheme.typography
+private fun StandHeader() {
     val colors = MorningIssueTheme.colors
-    when {
-        status is SyncStatus.Running -> Column(modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-                pluralStringResource(R.plurals.fetching_feeds, status.feedsTotal, status.feedsTotal),
-                style = type.label,
-                color = colors.ink,
-            )
-            ThinProgressBar(if (status.feedsTotal > 0) status.feedsDone.toFloat() / status.feedsTotal else 0f)
-        }
-        notice != null -> NoticeLine(notice, modifier.padding(top = 8.dp))
+    val spec = LocalPaperLayoutSpec.current
+    Column(Modifier.fillMaxWidth().padding(start = spec.pageMargin, end = spec.pageMargin, top = 12.dp, bottom = 4.dp)) {
+        Text(
+            text = stringResource(R.string.app_name),
+            style = MorningIssueTheme.typography.masthead,
+            color = colors.ink,
+            modifier = Modifier.semantics { heading() },
+        )
+        SectionLabel(PaperFormat.longDate(LocalDate.now()))
     }
 }
 
 /**
  * Said above the cover when a reset has passed without a new edition because the feeds had
  * nothing new. Set like a notice in the paper itself, between rules, not like an error: there
- * is nothing wrong, and the way to look again is right under it.
+ * is nothing wrong. It has no close button, unlike a result notice: it is not news of something
+ * that happened but the standing reason the cover is an old one, and it goes when the next
+ * edition comes. The link under it looks again: it runs Print now, which fetches every
+ * source and prints today's edition if anything has arrived since.
  */
 @Composable
 private fun NoNewEditionNotice(
     newestDate: LocalDate,
     expectedDate: LocalDate,
     nextEditionAt: LocalTime,
-    refreshing: Boolean,
-    onRefresh: () -> Unit,
+    onCheck: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MorningIssueTheme.colors
@@ -389,19 +476,26 @@ private fun NoNewEditionNotice(
                 color = colors.ink,
                 textAlign = TextAlign.Center,
             )
-            if (refreshing) {
-                Spacer(Modifier.height(12.dp))
-            } else {
-                TextLink(stringResource(R.string.newsstand_refresh), onRefresh)
-            }
+            TextLink(stringResource(R.string.newsstand_check), onCheck)
             Box(Modifier.fillMaxWidth().height(1.dp).background(colors.rule))
         }
     }
 }
 
-/** Offered after sources are added: a paper from them now, without waiting for the next reset. */
+/**
+ * Offered after sources are added: a paper from them now, without waiting for the next reset.
+ * With [reprint], today's Extra edition was printed before they were added, and the offer is
+ * to print it again with them in it.
+ */
 @Composable
-private fun ExtraEditionOffer(sourceCount: Int, printing: Boolean, onPrint: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+private fun ExtraEditionOffer(
+    sourceCount: Int,
+    reprint: Boolean,
+    printing: Boolean,
+    onPrint: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
     Box(modifier.fillMaxWidth().stepAnchor().padding(top = 12.dp), contentAlignment = Alignment.TopCenter) {
@@ -411,7 +505,14 @@ private fun ExtraEditionOffer(sourceCount: Int, printing: Boolean, onPrint: () -
             SectionLabel(pluralStringResource(R.plurals.extra_offer_title, sourceCount, sourceCount), color = colors.ink, heading = true)
             Spacer(Modifier.height(6.dp))
             Text(
-                text = stringResource(if (printing) R.string.extra_printing else R.string.extra_offer_detail),
+                text = stringResource(
+                    when {
+                        printing && reprint -> R.string.extra_reprinting
+                        printing -> R.string.extra_printing
+                        reprint -> R.string.extra_reprint_detail
+                        else -> R.string.extra_offer_detail
+                    },
+                ),
                 style = type.standfirst.copy(fontStyle = FontStyle.Italic),
                 color = colors.ink,
                 textAlign = TextAlign.Center,
@@ -420,7 +521,11 @@ private fun ExtraEditionOffer(sourceCount: Int, printing: Boolean, onPrint: () -
                 Spacer(Modifier.height(12.dp))
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    TextLink(stringResource(R.string.extra_offer_print), onPrint)
+                    TextLink(
+                        if (reprint) pluralStringResource(R.plurals.extra_reprint, sourceCount, sourceCount)
+                        else stringResource(R.string.extra_offer_print),
+                        onPrint,
+                    )
                     TextLink(stringResource(R.string.extra_offer_dismiss), onDismiss)
                 }
             }
@@ -429,8 +534,12 @@ private fun ExtraEditionOffer(sourceCount: Int, printing: Boolean, onPrint: () -
     }
 }
 
+/**
+ * The stand with no edition on it and none that failed to build: either there are no sources
+ * yet, or they have been checked and had nothing recent to print.
+ */
 @Composable
-private fun EmptyStand(hasSources: Boolean, refreshing: Boolean, onAddSources: () -> Unit, onRefresh: () -> Unit) {
+private fun EmptyStand(hasSources: Boolean, onAddSources: () -> Unit, onCheck: () -> Unit) {
     val colors = MorningIssueTheme.colors
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 24.dp),
@@ -448,46 +557,56 @@ private fun EmptyStand(hasSources: Boolean, refreshing: Boolean, onAddSources: (
         )
         Spacer(Modifier.height(20.dp))
         if (hasSources) {
-            PaperButton(stringResource(R.string.newsstand_refresh), onRefresh, icon = Icons.Filled.Refresh, enabled = !refreshing)
+            PaperButton(stringResource(R.string.newsstand_check), onCheck)
         } else {
             PaperButton(stringResource(R.string.newsstand_add_sources), onAddSources, icon = PaperIcons.Feed, primary = true)
         }
     }
 }
 
-/** Today's cover and the shelves, arranged for the window. */
+/**
+ * The front display and the shelves, arranged for the window. [front] is today's cover or the
+ * unprinted placeholder, given the modifier and the widest cover its place allows; [earlier]
+ * are the covers racked behind it. With [shelves] off only the front display is shown.
+ */
 @Composable
 private fun Rack(
-    editions: List<EditionSummary>,
+    front: @Composable (modifier: Modifier, maxCoverWidth: Dp) -> Unit,
+    earlier: List<EditionSummary>,
+    shelves: Boolean,
     arrangement: NewsstandArrangement,
     margin: Dp,
     onOpenEdition: (Long) -> Unit,
     onOpenBackIssues: () -> Unit,
 ) {
-    val today = editions.first()
-    val earlier = editions.drop(1).take(RACKED_EDITIONS)
     val eink = MorningIssueTheme.isEink
+    val twoShelves = arrangement == NewsstandArrangement.TwoShelves
 
-    if (arrangement == NewsstandArrangement.CoverWithShelfGrid) {
+    if (!shelves) {
+        Box(Modifier.fillMaxWidth().padding(horizontal = margin).padding(top = 12.dp), contentAlignment = Alignment.TopCenter) {
+            front(
+                Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+                when (arrangement) {
+                    NewsstandArrangement.CoverWithShelfGrid -> 420.dp
+                    NewsstandArrangement.TwoShelves -> 340.dp
+                    else -> 264.dp
+                },
+            )
+        }
+    } else if (arrangement == NewsstandArrangement.CoverWithShelfGrid) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = margin).padding(top = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(margin * 1.5f),
         ) {
-            TodayDisplay(today, onOpenEdition, Modifier.weight(0.42f), maxCoverWidth = 420.dp)
+            front(Modifier.weight(0.42f), 420.dp)
             Column(Modifier.weight(0.58f)) {
                 ShelfHeading()
                 ShelfGrid(earlier, onOpenEdition, onOpenBackIssues, targetCoverWidth = 128.dp)
             }
         }
     } else {
-        val twoShelves = arrangement == NewsstandArrangement.TwoShelves
         Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
-            TodayDisplay(
-                edition = today,
-                onOpenEdition = onOpenEdition,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = margin),
-                maxCoverWidth = if (twoShelves) 340.dp else 264.dp,
-            )
+            front(Modifier.fillMaxWidth().padding(horizontal = margin), if (twoShelves) 340.dp else 264.dp)
             Spacer(Modifier.height(20.dp))
             ShelfHeading(Modifier.padding(horizontal = margin))
             if (twoShelves || eink) {
@@ -542,5 +661,93 @@ private fun TodayDisplay(
             style = MorningIssueTheme.typography.caption,
             color = colors.inkSecondary,
         )
+    }
+}
+
+/**
+ * The placeholder in today's place on the rack: the unprinted cover on its shelf and, where
+ * a printed edition has its caption, the line that says it has not been printed and the
+ * Print now button. While a run is under way ([stage] is set) the button gives way to its
+ * progress: a line naming the stage and one bar. Nothing in it is animated, so it is the
+ * same in E-ink mode; the bar is redrawn only when a feed or a story finishes.
+ *
+ * It takes the same [modifier] and [maxCoverWidth] as [TodayDisplay], so it sits where the
+ * cover would in all three window classes; its words are capped at a readable width for the
+ * wide column of the landscape tablet.
+ */
+@Composable
+private fun UnprintedDisplay(
+    release: DueRelease,
+    today: LocalDate,
+    stage: BuildStage?,
+    syncStatus: SyncStatus,
+    tryAgain: Boolean,
+    onPrint: () -> Unit,
+    modifier: Modifier = Modifier,
+    maxCoverWidth: Dp,
+) {
+    val colors = MorningIssueTheme.colors
+    val type = MorningIssueTheme.typography
+    val title = when {
+        release.date != today -> stringResource(R.string.newsstand_unprinted_date, PaperFormat.shortDate(release.date))
+        release.kind == EditionKind.EVENING -> stringResource(R.string.newsstand_unprinted_evening)
+        else -> stringResource(R.string.newsstand_unprinted_today)
+    }
+    Column(modifier.stepAnchor(), horizontalAlignment = Alignment.CenterHorizontally) {
+        BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+            val coverWidth = (maxWidth - 48.dp).coerceAtMost(maxCoverWidth)
+            UnprintedCover(release.date, Modifier.width(coverWidth))
+        }
+        ShelfBoard()
+        Spacer(Modifier.height(12.dp))
+        Column(
+            Modifier.widthIn(max = 360.dp).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = title,
+                style = type.standfirst.copy(fontStyle = FontStyle.Italic),
+                color = colors.ink,
+                textAlign = TextAlign.Center,
+            )
+            if (stage == null) {
+                PaperButton(
+                    text = stringResource(if (tryAgain) R.string.print_try_again else R.string.print_now),
+                    onClick = onPrint,
+                    icon = PaperIcons.Newspaper,
+                    primary = true,
+                )
+            } else {
+                PrintProgress(stage, syncStatus)
+            }
+        }
+    }
+}
+
+/** Where a Print now run has got to: the stage in words, a count where there is one, and the bar. */
+@Composable
+private fun PrintProgress(stage: BuildStage, syncStatus: SyncStatus) {
+    val colors = MorningIssueTheme.colors
+    val type = MorningIssueTheme.typography
+    val running = syncStatus as? SyncStatus.Running
+    val line = when (stage) {
+        BuildStage.Syncing ->
+            if (running != null) pluralStringResource(R.plurals.fetching_feeds, running.feedsTotal, running.feedsTotal)
+            else stringResource(R.string.print_stage_syncing)
+        BuildStage.Building -> stringResource(R.string.print_stage_building)
+        is BuildStage.FetchingText -> stringResource(R.string.print_stage_text)
+        is BuildStage.FetchingImages -> pluralStringResource(R.plurals.print_stage_images, stage.count, stage.count)
+    }
+    val count = when (stage) {
+        BuildStage.Syncing -> running?.let { stringResource(R.string.fetching_progress, it.feedsDone, it.feedsTotal) }
+        is BuildStage.FetchingText -> stringResource(R.string.fetching_progress, stage.done, stage.total)
+        else -> null
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Announced when the stage changes, not at every count.
+        Text(line, style = type.label, color = colors.ink, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        ThinProgressBar(printProgress(stage, syncStatus), height = 4.dp)
+        Text(count ?: stringResource(R.string.print_stay), style = type.byline, color = colors.inkSecondary)
     }
 }

@@ -30,9 +30,11 @@ import net.tgnra.morningissue.engine.EditionDraft
 import net.tgnra.morningissue.engine.FeedProfile
 import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.engine.Scorer
+import net.tgnra.morningissue.engine.schedule
 import net.tgnra.morningissue.model.AppSettings
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
+import net.tgnra.morningissue.model.ItemKind
 
 /** The trace section around the on-open fallback build; `:macrobenchmark` measures it by this name. */
 const val TRACE_ON_OPEN_BUILD = "MorningIssue.onOpenEditionBuild"
@@ -57,7 +59,8 @@ private val traceCookies = AtomicInteger()
  *
  * **Extra edition** (on request). Printed at once from the chosen feeds' posts first seen in
  * the last `firstEditionWindowDays` days and not printed before. It moves no cutoff and
- * supersedes nothing. What it printed is not new in the next scheduled edition (a loved slow
+ * supersedes nothing. Asked for again on the same date, it is reprinted in place to take in
+ * the further feeds (see [build]); it is the only edition that is ever rewritten. What it printed is not new in the next scheduled edition (a loved slow
  * feed's untouched posts are held over as usual); what it only indexed still is.
  *
  * **Superseding.** A Morning or Evening build supersedes every pending edition (the newest
@@ -113,7 +116,7 @@ class RoomEditionPublisher(
         val now = clock.instant()
         val settings = settings.settings.first()
         val zone = zone()
-        val reset = EditionClock.latestReset(now, settings.resetTime, zone)
+        val reset = settings.schedule.latestReset(now, zone)
         val date = EditionClock.editionDate(reset, zone)
 
         val released = editionDao.getLatestReleasedOf(EditionKind.MORNING, now)
@@ -123,10 +126,9 @@ class RoomEditionPublisher(
                 build(EditionKind.MORNING, date, releaseAt = reset, now = now, length = settings.editionLength)
             }
         }
-        if (settings.eveningEditionEnabled) {
-            EditionClock.currentEveningRelease(now, settings.resetTime, settings.eveningEditionTime, zone)?.let { evening ->
-                build(EditionKind.EVENING, EditionClock.editionDate(evening, zone), releaseAt = evening, now = now, length = settings.editionLength)
-            }
+        // Null when the Evening edition is switched off.
+        settings.schedule.currentEveningRelease(now, zone)?.let { evening ->
+            build(EditionKind.EVENING, EditionClock.editionDate(evening, zone), releaseAt = evening, now = now, length = settings.editionLength)
         }
         // Whatever is newest on the stand, of any kind. An edition whose own release time is
         // still ahead (built early, or see "Time zones") is not shown yet.
@@ -137,13 +139,13 @@ class RoomEditionPublisher(
         val now = clock.instant()
         val settings = settings.settings.first()
         val zone = zone()
-        val next = EditionClock.nextRelease(now, settings.resetTime, settings.eveningTimeIfEnabled, zone)
+        val next = settings.schedule.nextRelease(now, zone)
         build(next.kind, EditionClock.editionDate(next.at, zone), releaseAt = next.at, now = now, length = settings.editionLength)?.id
     }
 
     override suspend fun nextReleaseAt(): Instant? {
         val settings = settings.settings.first()
-        return EditionClock.nextRelease(clock.instant(), settings.resetTime, settings.eveningTimeIfEnabled, zone()).at
+        return settings.schedule.nextRelease(clock.instant(), zone()).at
     }
 
     override suspend fun publishExtraEdition(feedIds: Set<Long>): Long? = mutex.withLock {
@@ -154,16 +156,24 @@ class RoomEditionPublisher(
         build(EditionKind.EXTRA, date, releaseAt = now, now = now, length = settings.editionLength, extraFeedIds = feedIds)?.id
     }
 
-    private val AppSettings.eveningTimeIfEnabled get() = eveningEditionTime.takeIf { eveningEditionEnabled }
-
     /**
      * Returns the [kind] edition for [date], building and storing it first if it is missing;
      * null when it is missing and there is nothing to build. Reading the pool, the check for
      * an existing edition and every write share one transaction, so concurrent callers (even
      * through different publisher instances) end up with a single edition per date and kind.
      *
-     * A second Extra edition on a date that already has one is refused (null): the schema
-     * allows one edition per date and kind.
+     * **Reprinting an Extra edition.** The schema allows one edition per date and kind, and a
+     * scheduled edition is frozen once stored. An Extra edition is the one exception: asked for
+     * again on its date (sources were added after it was printed), it is reprinted in place.
+     * The whole paper is set again from the feeds it had plus [extraFeedIds], and stored under
+     * the same ID and number with a new cutoff and release time, so it is the newest paper on
+     * the stand. It is a new printing, not an addition: stories the reader has finished drop
+     * out and the rest compete with the new feeds' for their places. What the reader did with
+     * each story is kept with the story, not the edition, and is untouched; the edition keeps
+     * the time it was first opened and loses its "read" tick. A story the reprint drops is no
+     * longer in any printing, so it gets no unopened run and does not count against its feed.
+     * If the new feeds have nothing printable the old printing is left exactly as it was
+     * (null). Like the first printing it moves no cutoff and supersedes nothing.
      */
     private suspend fun build(
         kind: EditionKind,
@@ -173,24 +183,31 @@ class RoomEditionPublisher(
         length: EditionLength,
         extraFeedIds: Set<Long> = emptySet(),
     ): EditionEntity? = database.withWriteTransaction {
-        editionDao.getByDate(date, kind)?.let { return@withWriteTransaction it.takeIf { kind != EditionKind.EXTRA } }
+        val existing = editionDao.getByDate(date, kind)
+        if (existing != null && kind != EditionKind.EXTRA) return@withWriteTransaction existing
+        // Set only for an Extra edition that today already has: see "Reprinting" above.
+        val reprintOf = existing
+        val reprinted = reprintOf?.let { editionDao.getItems(it.id) }.orEmpty()
+        val extraFeeds = extraFeedIds + reprinted.map { it.row.article.feedId }
 
         // The window: posts first seen in (after, now].
-        val firstWindow = now.minus(Duration.ofDays(config.firstEditionWindowDays))
+        val window = Duration.ofDays(config.firstEditionWindowDays)
+        val firstWindow = now.minus(window)
         val after = when (kind) {
             EditionKind.MORNING -> editionDao.getLatestByCutoffOf(listOf(EditionKind.MORNING))?.cutoffAt ?: firstWindow
             // An evening paper follows a morning one; it is never the first edition.
             EditionKind.EVENING -> editionDao.getLatestByCutoffOf(SCHEDULED)?.cutoffAt ?: return@withWriteTransaction null
-            EditionKind.EXTRA -> firstWindow
+            // A reprint keeps the first printing's window, so none of its stories ages out of it.
+            EditionKind.EXTRA -> reprintOf?.cutoffAt?.minus(window) ?: firstWindow
         }
         // The clock was set back past the last cutoff: nothing can be new yet.
         if (!now.isAfter(after)) return@withWriteTransaction null
 
         // Stories an edition since [after] already printed (an Evening or Extra edition, or for
         // an Extra any edition of the last few days) are not new again.
-        val printedSince = editionDao.printedArticleIdsSince(after).toSet()
+        val printedSince = if (reprintOf == null) editionDao.printedArticleIdsSince(after).toSet() else printedSinceExcept(after, reprintOf.id)
         val seen = articleDao.firstSeenBetween(after, now)
-        val rows = seen.filter { it.article.id !in printedSince && (kind != EditionKind.EXTRA || it.article.feedId in extraFeedIds) }
+        val rows = seen.filter { it.article.id !in printedSince && (kind != EditionKind.EXTRA || it.article.feedId in extraFeeds) }
         if (rows.isEmpty()) return@withWriteTransaction null
 
         // A scheduled build supersedes the pending editions, so their untouched stories now
@@ -230,7 +247,9 @@ class RoomEditionPublisher(
             alreadyRun = shadows,
             away = away,
         )
-        if (draft.printed.none { it.articleId in newIds }) return@withWriteTransaction null
+        // A reprint has to print something from the feeds it was asked for; otherwise the first
+        // printing stands.
+        if (draft.printed.none { it.articleId in newIds && (reprintOf == null || it.feedId in extraFeedIds) }) return@withWriteTransaction null
 
         if (supersedes) {
             // Each untouched story of a superseded edition counts one more run.
@@ -238,18 +257,30 @@ class RoomEditionPublisher(
             learner.store(learned)
         }
 
-        val edition = EditionEntity(
-            date = date,
-            kind = kind,
-            cutoffAt = now,
-            releaseAt = releaseAt,
-            builtAt = now,
-            length = length,
-            number = editionDao.maxNumber() + 1,
-        )
+        val edition = reprintOf?.copy(cutoffAt = now, releaseAt = releaseAt, builtAt = now, length = length, finishedAt = null)
+            ?: EditionEntity(
+                date = date,
+                kind = kind,
+                cutoffAt = now,
+                releaseAt = releaseAt,
+                builtAt = now,
+                length = length,
+                number = editionDao.maxNumber() + 1,
+            )
+        // A reprint takes the first printing's place: the old row and its items go, and the
+        // new one is stored under the same ID.
+        if (reprintOf != null) editionDao.delete(reprintOf.id)
         val id = editionDao.insertEditionWithItems(edition, draft.toEntities())
-        draft.lead?.let { engagementDao.incrementLeadCount(it.articleId) }
+        // A story that led the first printing and leads the reprint has led once.
+        val ledBefore = reprinted.firstOrNull { it.item.kind == ItemKind.LEAD }?.item?.articleId
+        draft.lead?.takeIf { it.articleId != ledBefore }?.let { engagementDao.incrementLeadCount(it.articleId) }
         edition.copy(id = id)
+    }
+
+    /** What every edition built since [after] printed, leaving out the edition being reprinted. */
+    private suspend fun printedSinceExcept(after: Instant, editionId: Long): Set<Long> {
+        val others = EditionKind.entries.flatMap { editionDao.getBuiltAfter(it, after) }.map { it.id }.filter { it != editionId }
+        return if (others.isEmpty()) emptySet() else editionDao.printedArticleIds(others).toSet()
     }
 
     /**

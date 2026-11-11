@@ -36,17 +36,17 @@ Everything runs on the device. There is no account and no server; the only netwo
 
 ## What the reader sees
 
-1. **First launch.** Onboarding asks for feeds, by address or by importing an OPML file. It then fetches every feed, builds the first edition and opens the newsstand. This is the only time the app waits on the network.
+1. **First launch.** Onboarding asks for feeds, by address or by importing an OPML file. It then fetches every feed, builds the first edition and opens the newsstand. This is the only time the app waits on the network unasked; Print now, when the reader presses it, is the other.
 2. **The newsstand** is the home screen: the latest edition facing out, the six before it racked behind, and four labelled buttons (Search, Saved, Sources, Settings).
 3. **The paper.** Tapping a cover opens that edition. Pages turn with a horizontal swipe, from the front page to the back page, which says "That's today's edition" and when the next one is due.
 4. **The reader.** Tapping a story opens it in the paper's typography, with Like and Save at the end.
-5. **The next morning**, at the reset time (06:30 by default), a new edition takes over. Until then the edition never changes, whatever arrives in the feeds.
+5. **The next morning**, at the reset time (06:30 by default), a new edition takes over. Until then the edition never changes, whatever arrives in the feeds. If that edition could not be built overnight, an unprinted cover stands in its place with a Print now button.
 
 ## Terms
 
 | Term | Meaning |
 | --- | --- |
-| Edition | One day's paper. Once built it is frozen: its stories and their order never change. |
+| Edition | One day's paper. Once built it is frozen: its stories and their order never change. The one exception is an Extra edition reprinted the same day (see [The Extra edition](#the-extra-edition)). |
 | Reset time | The local time at which a new edition is released. 06:30 by default, set in Settings. |
 | Release | The moment an edition becomes visible (its `releaseAt`). An edition built ahead of time is hidden until then. |
 | First-seen time | When the app first fetched a post (`article.firstSeenAt`). This, not the publish date, decides which edition a post belongs to. |
@@ -75,7 +75,7 @@ Two subscriptions are the same feed when their normalised URLs match (`model/Fee
 
 ### Sync
 
-`DefaultFeedSyncer` fetches every feed that is due, six at a time, and stores the posts it has not seen before with first-seen time set to now, each with its categories and traits (see [Post signals](#post-signals)). Every feed is due at every sync except quiet ones, which are checked less often (see [Feed health](#feed-health)). Syncing never builds or changes an edition.
+`DefaultFeedSyncer` fetches every feed, six at a time, and stores the posts it has not seen before with first-seen time set to now, each with its categories and traits (see [Post signals](#post-signals)). Every sync checks every feed; a quiet feed is checked as often as any other (see [Feed health](#feed-health)). Syncing never builds or changes an edition.
 
 After every full sync, `MaintainedFeedSyncer` runs four pieces of housekeeping on the same background thread, in this order: the feed health check, the signals upkeep (traits and embeddings for posts that lack them, see [Post signals](#post-signals)), the sweep of the [image store](#the-image-store), then the trim to the storage budget (see [What is stored](#what-is-stored)). The upkeep comes before the trim because the trim removes the text that embeddings are computed from. A failure in one does not fail the sync or stop the others.
 
@@ -83,12 +83,12 @@ After every full sync, `MaintainedFeedSyncer` runs four pieces of housekeeping o
 | --- | --- |
 | Every 2 hours on any connection, unless the battery is low | Periodic `SyncWorker` (`periodic-sync`) |
 | Every hour while charging on an unmetered network | A second periodic `SyncWorker` (`periodic-sync-charging`) |
-| Pull to refresh, or the refresh button, on the newsstand | The same sync; reports "12 new posts saved for tomorrow" |
+| Print now on the newsstand, when an edition failed to build | The same sync, then the build and the prefetch (see [When an edition failed to build](#when-an-edition-failed-to-build)) |
 | After adding a feed or importing OPML in Sources | That feed, or all feeds |
 | About 90 minutes before the reset time | The early build's final sync (see [Timing](#timing)) |
 | Onboarding | The first sync |
 
-WorkManager's periodic work is inexact and can be delayed by Doze, so these are intervals, not guarantees. Runs that overlap share one sync. Opening the app never syncs, apart from first launch.
+WorkManager's periodic work is inexact and can be delayed by Doze, so these are intervals, not guarantees. Runs that overlap share one sync. Opening the app never syncs, apart from first launch, and the newsstand has no refresh button or pull gesture: a sync there could only fetch posts for the next edition.
 
 Fetching (`sync/FeedFetcher.kt`) uses the shared OkHttp client with conditional requests (`ETag` and `Last-Modified`), a 45-second timeout and an 8 MB size limit. Plain `http` feeds are allowed (`usesCleartextTraffic` in the manifest). A permanent redirect (301 or 308) updates the stored feed address.
 
@@ -120,7 +120,7 @@ A feed carries one flag at a time, the first that applies in the order above. Al
 
 - **Dismiss** hides the flag for six months (183 days, `feed_health.flagDismissedUntil`). The dismissal covers the flag that was dismissed: if a different flag arises in that time it is shown.
 - **Automatic repair** (`sync/FeedRepairer.kt`). A feed that meets the Broken rule is repaired before it is flagged. In order: its own address once more; the same address over the other scheme and with or without `www.`; the feed the site itself declares, through feed discovery on the site's address; then `/feed`, `/rss`, `/atom.xml` and `/index.xml` on the feed's host. Every candidate is fetched and must parse as a feed, and an address another subscription already uses is never taken. If one works the feed's address is updated and the feed is flagged Moved so the reader is told. If none works the feed is flagged Broken. A failed repair is tried again after 7 days, and at most 3 feeds are repaired per health check. "Try again" on the desk runs the repair at once and fetches the feed if it works.
-- **Quiet feeds** sit in a Quiet group at the bottom of Sources and are fetched less often by full syncs: every 6 hours once quiet for 90 days, daily after 180 days, every 3 days after a year, weekly after two years. The wait is measured from the last successful fetch. When a quiet feed posts again it is fetched by every sync again. Syncing one feed directly (after adding it, or "Try again") always fetches.
+- **Quiet feeds** sit in a Quiet group at the bottom of Sources and carry the Gone quiet flag. Quiet is a label and nothing more: a quiet feed is fetched by every sync, exactly like an active one, so the post that ends its silence is found at the next sync and gets the [Welcome back](#welcome-back) boost. (Quiet feeds used to be checked less often, down to weekly; that was removed.)
 - **Once a month the edition carries the desk**: a boxed notice on the back page with the number of feeds needing attention and a link to the desk. The first time the back page of the newest edition is shown in a calendar month while at least one feed has an undismissed flag other than Gone quiet, that edition takes the month's notice and keeps it; no other edition that month shows one, and it goes when nothing needs attention any more. Which edition holds the month is kept in a small preferences file (`desk_notice`).
 
 ### Post signals
@@ -491,6 +491,30 @@ The length is a setting. It applies to editions built from then on; a stored edi
 
 Daylight saving: on the day the clocks go forward, a reset time inside the skipped hour moves to the first valid moment after it. On the day they go back, a reset time that happens twice uses the first.
 
+### Changing a release time
+
+A changed reset time, and likewise a changed Evening edition time, **applies from the next release and never to one that has already come** (`engine/ReleaseSchedule.kt`, a pure class; `edition/ReleaseTimes.kt` is what Settings calls). The latest release at the moment of the change stays the latest release, so whatever was settled for it (printed, nothing new, or failed to build) stays settled, and no edition becomes due, or due again, on the day of the change.
+
+With the reset at 06:30:
+
+| Changed at | New time | Today | Tomorrow |
+| --- | --- | --- | --- |
+| 09:00 (today's edition has come) | 08:00, earlier and already passed | Stays the 06:30 release. Nothing new is due | 08:00 |
+| 09:00 | 10:00, later today | Stays the 06:30 release. No second release at 10:00 | 10:00 |
+| 05:00 (today's edition still to come) | 07:00, or 05:30: still ahead today | The edition comes at the new time | The new time |
+| 05:00 | 04:00, already passed today | The edition still comes at 06:30: making it due at once would be retroactive, and skipping it would lose a day | 04:00 |
+| 05:30, with today's edition already built ahead of time | Any | The built edition is released at 06:30, the time it was built for. It is not re-timed, rebuilt or discarded | The new time |
+
+So there is exactly one release per date across any change. Changing the time again before the first change has taken effect starts from the same settled release.
+
+The mechanism is a small record stored beside each time (`resetChange`, `eveningChange` in the settings store): the release instants on either side of the change, namely the latest release when it was made, a coming release that stays at the old time if there is one, and the first release at the new time. Until that first release the schedule is read from those instants; after it, from the plain time. Keeping the instants (rather than the old time) is what makes the settled release still match its edition and its "nothing new" record.
+
+Everything that asks for a release time goes through the schedule: the publisher (which edition to build, and its release time), the early build's scheduler (which run to queue; it is re-aimed when a time changes), the newsstand (what is due, and the "Next edition at" in its notice) and the back page's "next edition" time.
+
+**Evening edition.** Its time follows the same rule. Switching it on counts as a change: switched on at 19:00 with the time at 18:00, tonight's edition is not due and the first one is tomorrow's. Switching it off takes effect at once.
+
+Not covered: a time changed in the few minutes while the early build is running may or may not see that run's edition as built.
+
 ### Early build
 
 Android will not reliably run a job at an exact time, so the edition is built ahead of time and released by a clock check.
@@ -500,28 +524,76 @@ Android will not reliably run a job at an exact time, so the edition is built ah
 - The job (`edition/EarlyBuild.kt`) does a final sync, builds the next edition with `cutoffAt` = now and `releaseAt` = the coming reset, and stores it unreleased. It then prefetches full text for every printed story (briefs included) and puts those stories' pictures in the [image store](#the-image-store), so the edition reads offline. Last, it schedules the next run.
 - Each stage is isolated. A failed or slow sync (four-minute limit) does not stop the build, and a failed prefetch does not undo it.
 - If the job runs so late that the reset it aimed for has passed, or the next reset is more than 3 hours away, it makes sure the current edition exists instead of freezing tomorrow's paper a day early.
-- The schedule is renewed on process start, when the reset time or an Evening edition setting changes, and when the device's clock or time zone changes (`TimeChangeReceiver`).
+- When its sync reached the feeds and there was still nothing new to print, it writes that down for the release it was for. That record is what separates "nothing new" from a build that failed; see [When an edition failed to build](#when-an-edition-failed-to-build).
+- The schedule is renewed on process start, when the reset time or an Evening edition setting changes (see [Changing a release time](#changing-a-release-time) for which release it then aims at), and when the device's clock or time zone changes (`TimeChangeReceiver`).
 
 Anything fetched after the early build belongs to the following edition, because posts are assigned by first-seen time.
 
-### Release and the on-open fallback
+### Release
 
-Release needs no job. Whenever the newsstand comes to the foreground it calls `EditionPublisher.ensureCurrentEdition()`:
-
-- If a released edition exists for the date of the latest reset, it is shown.
-- Otherwise the edition is built on the spot from stored posts, with `cutoffAt` = now and `releaseAt` = the latest reset. This never touches the network.
-
-With the Evening edition switched on, the same call then makes sure the evening edition exists once its release time has passed (see below). It returns the newest released edition of any kind.
-
-The newsstand also notices when a stored edition's release time passes while it is on screen.
+Release needs no job and no build. An edition built ahead of time carries its release time, and the newsstand lists the editions whose release time has passed; it looks again when it comes to the foreground and whenever a release time passes while it is on screen. Opening the app never builds an edition and never touches the network.
 
 Opening the app before the reset time shows the current edition, whose back page gives the time of the next one.
+
+### When an edition failed to build
+
+The early build is best effort. When a scheduled edition is due (its release time has passed) and was not built in the background, the app does not build it silently on open, as it used to. The newsstand shows a **placeholder** in today's place on the rack: an unprinted cover (masthead, date, "Not printed", and dashed outlines where the photo and columns would be) with the line "Today's edition has not been printed." and a **Print now** button beneath it.
+
+**What "failed to build" means** (`edition/DueEditions.kt`, a pure function over what is stored). Once a release time has passed, exactly one of these holds:
+
+| Case | What is stored | The stand shows |
+| --- | --- | --- |
+| Printed | A released edition of that kind for that date (or a later one) | The cover |
+| Nothing new to print: a run reached the feeds, built, and no new post was printable | No edition; the release time is in `nothingNewFor` | The previous paper and "No new edition today" (see below). Not a failure |
+| Failed to build | No edition and no such record | The placeholder and Print now |
+
+"Failed to build" therefore covers, without telling them apart: the build threw; the sync reached no feed and nothing stored was printable (the run cannot know there was nothing new); WorkManager never started the run (Doze, a force stop, the device off or without a network); the run started too late or was stopped part-way. The remedy is the same for all of them.
+
+The one thing added to storage for this is `nothingNewFor` in the settings store: the release times (the newest four) for which a run found nothing new. An edition's existence was already stored; a failure needs no record, because it is the absence of both. A sync "reached the feeds" when it finished within its four minutes and at least one feed answered, or there were no feeds to ask.
+
+Special cases:
+
+- **No sources.** Never a failure: nothing can be new. A brand-new install shows the empty stand with "Add sources".
+- **Sources but no edition yet** (onboarding skipped, or its first sync failed or found nothing recent). The latest reset is due like any other, so the placeholder shows. After a Print now that reaches the feeds and finds nothing, the empty stand says the sources have had nothing recent and offers "Check for new posts".
+- **Onboarding** prints the first edition itself, in the foreground, straight after its first sync, as before. It does not go through Print now and writes no record.
+- **Evening edition.** Due from its release time until the next morning reset, and treated the same: a placeholder ("This evening's edition has not been printed.") when it failed to build, nothing said when there was nothing new for it. The newest printed paper settles the day: with the evening edition on the stand, a morning edition missed earlier that day is not asked for (its posts wait for the next morning edition). With no evening edition because nothing was new, the question falls back to the morning one. When both failed, the placeholder asks for the morning edition, and printing it leaves nothing for the evening.
+- **Extra editions** are printed on request and are never due. One on the stand does not count as today's paper. While the placeholder is up the offer of an Extra edition is withheld: Print now fetches the new sources too.
+- **Time zones.** An edition dated after the latest local reset (after travelling west) counts as printed.
+- **Before today's reset** the edition that is due is yesterday's.
+- **A release time changed in Settings** never makes an edition due on the day it is changed, and never un-settles one: see [Changing a release time](#changing-a-release-time).
+
+**Print now** (`edition/EditionPrinter.kt`) runs in the foreground with its progress shown where the button was. It runs the early build's own stages (`EarlyBuild.run(BuildTarget.Current)`), not a copy of them:
+
+1. **Sync** every feed ("Fetching 42 feeds…", with the count). Four-minute limit.
+2. **Build** the edition that is due from stored posts ("Setting the pages…"): `ensureCurrentEdition()`, which builds the morning edition for the latest reset and, when it is switched on and its time has passed, the evening one. Unlike the background job it never builds the coming edition, however near its release is.
+3. **Fetch** the full text of every printed story ("Fetching the stories…", "12 of 40") and then the pictures the pages show. The edition is already stored at this point; the stand keeps the placeholder up until the run ends, so the cover appears with its stories fetched.
+4. Schedule the next background run, as the early build does.
+
+How a run ends:
+
+| Result | What the reader sees |
+| --- | --- |
+| Printed | The cover replaces the placeholder |
+| Printed, but no feed could be reached (no network) | The cover, and "Your sources could not be reached, so this edition was printed from the posts already stored." |
+| The feeds were reached and nothing was new | The placeholder goes; "Your sources had nothing new to print." and, for the morning edition, the "No new edition today" notice. The release is recorded as nothing new |
+| No feed could be reached and nothing stored was printable | The placeholder stays, with "Your sources could not be reached, and nothing new is stored to print. Try again when you are connected." and the button reading "Try again" |
+| The build threw | The placeholder stays, with "The edition could not be printed. Try again." and "Try again" |
+
+Each of these notices has a close button (an X: a 48 dp target with its own description, unanimated, so the same in E-ink mode). Closing one forgets the result, in the app-wide printer, so it does not come back on rotation or on returning to the stand; only a later run's result is said. Without it the notice goes at the next release time. The Extra edition's results ("Extra edition printed", "Extra edition reprinted", "Nothing recent from the new sources to print…") have the same button. Closing an error also turns "Try again" back into "Print now"; the placeholder itself stays.
+
+Not dismissible, on purpose: the "No new edition today" notice, which is the standing reason the cover is an old one and goes with the next edition; the offer of an Extra edition, whose "Not now" is its dismissal; and the placeholder. The Subscriptions desk notice is on the paper's back page, not the newsstand, and is unchanged.
+
+A fetch of text or pictures that fails does not undo the edition: it counts as printed, and a story without its text is fetched when it is opened.
+
+The run belongs to the app, not the screen: `EditionPrinter` is held by the app container and works in the app's scope, so it carries on through a rotation, another screen or the app going to the background, and the stand shows where it has got to when it comes back. It cannot be started twice; a second request while one is running does nothing. If the process is killed mid-run the edition, once stored, is on the stand at the next launch; before that the placeholder is back.
+
+The progress display is a line of words and one unanimated bar, redrawn only when a feed or a story finishes, so it is the same in E-ink mode. The placeholder takes the cover's place in all three window classes: above the shelf on a phone and a small tablet, in the left column on a tablet in landscape, with its words capped at 360 dp.
 
 ### When there are no new posts
 
 No edition is built unless at least one post first seen since the previous cutoff is printed. If there are no new posts, or they are all muted, too old or already read, nothing is stored. Held-over posts alone do not make a paper. The cutoff stays where it was, the previous edition stays current, and the posts are offered to the next build.
 
-The newsstand then says so: a "No new edition today" notice above the cover names the last paper, gives the time of the next edition and offers a link to check for new posts, and the cover is captioned "Latest edition" with its date instead of "Today's edition". The notice only appears once the on-open check has finished.
+The newsstand then says so: a "No new edition today" notice above the cover names the last paper, gives the time of the next edition and offers a link to check for new posts, and the cover is captioned "Latest edition" with its date instead of "Today's edition". The notice appears only when a run has recorded that there was nothing new for this reset (or there are no sources); otherwise the edition counts as failed to build and the placeholder shows instead. The link runs Print now, which prints today's edition if anything has arrived since.
 
 ### The Evening edition
 
@@ -529,7 +601,7 @@ Optional and off by default. Settings has the switch and, when it is on, the rel
 
 - **What it covers.** Posts of Firehose and Daily feeds first seen since the latest Morning or Evening cutoff. Weekly and Rare posts are not placed in it at all; they wait for the morning paper. It has no held-over posts.
 - **Structure.** A front page (1 lead + 4), In brief (8, 15 or 23 lines by edition length) and the back page with the index. No Top stories, sections, From the archive or While you were away.
-- **When it is built.** On open after its release time, as the morning edition is, or ahead of time by the early build. It is only built while it is current: between its release time and the next morning reset. A missed evening is not built the next day. If the reader first opens the app in the evening and no morning edition exists for the day, the morning edition is built first and takes everything.
+- **When it is built.** Ahead of time by the early build, or by Print now after its release time when that did not happen (see [When an edition failed to build](#when-an-edition-failed-to-build)). It is only built while it is current: between its release time and the next morning reset. A missed evening is not built the next day. If the reader first opens the app in the evening and no morning edition exists for the day, the morning edition is built first and takes everything.
 - **Nothing lost, nothing printed twice.** The next morning edition's window still starts at the previous *morning* cutoff. It takes everything first seen since then except the stories the evening edition printed. So the Weekly and Rare posts of the day are new in the morning, as are the fast posts the evening edition only listed in its index, and its printed stories do not return.
 - **Counters.** Building an evening edition supersedes the morning one, and the next morning edition supersedes the evening one. Each superseded edition's untouched printed stories get one more unopened run, once. With no fast posts to print, no evening edition is stored and nothing is superseded.
 - It has its own running number, the date of its release and the kind `EVENING`, and it appears on the newsstand and in back issues like any edition. The back page's "next edition" time is the next release of either kind. The newsstand's "No new edition today" notice still only knows the morning reset.
@@ -538,13 +610,20 @@ Optional and off by default. Settings has the switch and, when it is on, the rel
 
 `EditionPublisher.publishExtraEdition(feedIds)` (also on `EditionRepository`) prints an edition at once from chosen feeds, meant for sources the reader has just added. The caller syncs those feeds first.
 
-The newsstand makes the offer (`ui/newsstand/ExtraOffer.kt`). Sources added after the newest edition's cutoff bring up a notice with "Print an Extra edition" and "Not now". Printing syncs those sources and calls `publishExtraEdition`. "Not now" is remembered (`AppSettings.extraOfferDismissedAt`), so the same sources are not offered twice; they join the next scheduled edition as usual. Nothing is offered before the first edition, or on a date that already has an Extra edition. Covers and paper headers read "No. 12 · Extra".
+The newsstand makes the offer (`ui/newsstand/ExtraOffer.kt`). Sources added after the newest edition's cutoff bring up a notice with "Print an Extra edition" and "Not now". Printing syncs those sources and calls `publishExtraEdition`. "Not now" is remembered (`AppSettings.extraOfferDismissedAt`), so the same sources are not offered twice; they join the next scheduled edition as usual. Nothing is offered before the first edition. On a date that already has an Extra edition, sources added after it went to press are offered as a reprint of it (below). Covers and paper headers read "No. 12 · Extra".
 
 - **What it covers.** Those feeds' posts first seen in the last 3 days that no edition has printed. Each feed's 5 newest posts are exempt from the 30-day age limit and the freshness floor, so a quiet blog still shows what it has.
 - **Structure.** The same as a morning edition, without held-over posts or a pull-out. Kind `EXTRA`, the next running number, released immediately, dated today.
 - **It does not disturb the schedule.** No cutoff moves, today's edition is not changed, and nothing is superseded: today's stories do not count as ignored and the next release time is the same.
 - **Afterwards.** In the next morning edition, the stories the Extra printed are not new. A loved Weekly or Rare feed's untouched ones are held over under the usual rules. Posts the Extra only listed in its index are still new. The next scheduled build counts the Extra's unopened runs along with those of the scheduled edition it supersedes.
-- **Limits.** It returns null and stores nothing when the feeds have nothing printable. There is at most one Extra edition per calendar date, because the database allows one edition per date and kind; a second request on the same date returns null.
+- **Limits.** It returns null and stores nothing when the feeds have nothing printable. There is at most one Extra edition per calendar date, because the database allows one edition per date and kind.
+- **Reprinting.** When sources are added after the day's Extra was printed, the newsstand offers "Reprint the Extra with 3 new sources" (and "Not now"). A reprint is the one case in which a stored edition changes, and it is deliberate:
+  - **It replaces the first printing in place.** The paper is set again as a whole from the feeds it had plus the new ones, and stored under the same ID and edition number, with a new cutoff and release time, so it is the newest paper on the stand. It is not the old pages with stories added: the new feeds' stories compete for the front page like any others, and a story of the first printing can lose its place to them or drop to the index.
+  - **Reading state is kept.** What the reader did with a story (opened, read, saved, Liked) is stored with the story, not the edition, and is untouched. A story read to the end is not printed again. The edition keeps the time it was first opened and loses its "read" tick, since it has new stories.
+  - **Dropped stories.** A story the reprint no longer prints is in no printing any more: it gets no "ran unopened" count and does not count against its feed in learning. Stories the reprint does print are counted once, when the next scheduled edition supersedes it. (If a scheduled edition had already superseded the first printing, its untouched stories were counted then, and those still in the reprint are counted again when the reprint is superseded: once per printing.) A story that led both printings has led once.
+  - **The schedule is not disturbed**, exactly as for the first printing: no cutoff moves and nothing is superseded.
+  - If the new sources have nothing printable, the first printing is left exactly as it was.
+  - No schema change was needed: the old row and its items are deleted and the reprint inserted under the same ID in one transaction.
 
 ### Long gaps
 
@@ -612,7 +691,7 @@ Every change to the schema raises the database version and ships a migration (`d
 | 2 | Adds `stored_image` | Nothing to fill it from: version 1 kept no images, only what Coil's cache happened to hold. It starts empty. Back issues' pictures are shown from the network as before, and an article's pictures are stored when it is next opened. |
 | 2 | Adds `article.feedWordCount` | By the migration: a post whose stored body is the feed's own, or that has none, takes its `wordCount`. A post whose body was fetched from its page takes the word count of its summary, which is the feed's text cut to 400 characters; a longer feed text is undercounted. |
 
-Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, whether pictures are shown in greyscale, the storage budget (default 500 MB), and whether onboarding is done. The reader's text size is in its own preferences file.
+Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, whether pictures are shown in greyscale, the storage budget (default 500 MB), and whether onboarding is done. The same store holds two things that are not settings: when the offer of an Extra edition was last turned down, `nothingNewFor`, the last four release times for which a run found nothing new to print (see [When an edition failed to build](#when-an-edition-failed-to-build)), and `resetChange` and `eveningChange`, how the last change of each release time takes effect (see [Changing a release time](#changing-a-release-time)). The reader's text size is in its own preferences file.
 
 ### The image store
 
@@ -669,6 +748,8 @@ The five web-sized photographs, which are what feeds mostly carry, came to 10% o
 
 The budget (`data/storage/StorageRepository.kt`) governs stored article text (the bodies in `article_content` plus their copy in the search index, measured in characters) and the files of the image store, measured in bytes. Settings shows the two together against the budget and says how much is each. Coil's own disk cache is outside it and keeps to its fixed cap. The budget is the answer to "how long are back issues kept?": there is no fixed period.
 
+The budget is stored in megabytes and runs from 50 MB to 16 GB (16,000 MB). It is turned into bytes as a 64-bit number in one place (`RoomStorageRepository`), because anything from 2,048 MB up does not fit a 32-bit one.
+
 After every full sync, if the two together are over budget they are trimmed down to 90% of the budget:
 
 - **Images go before text.** An image can be fetched again for as long as its site keeps it, and an article reads without it. A post's text often cannot be had again once the post has left its feed, and without it there is nothing to read or search. So every image that may go has gone before the first body is dropped.
@@ -714,8 +795,9 @@ Newsstand ─┬─ Paper ── Reader
 - A cover is drawn, not a screenshot: masthead, date, lead headline, lead photo and stand-in text lines. It follows the theme and scales to any size. A read edition has a tick.
 - The rack is drawn from flat theme colours with shelf edges and soft shadows. There is no texture.
 - A plain labelled button bar: Search, Saved, Sources, Settings. Along the bottom on phones and small tablets, a rail down the side on tablets in landscape.
-- Pull to refresh, or the refresh button in the header, fetches posts for the next edition and reports how many were saved. It never changes today's edition.
-- With no edition yet, the stand shows a blank cover and offers to add sources or refresh.
+- There is no refresh button and no pull gesture. A sync from the stand could only fetch posts for the next edition, so it showed nothing but a notice; both were removed.
+- When the edition that is due failed to build, an unprinted placeholder cover stands in today's place with a Print now button (see [When an edition failed to build](#when-an-edition-failed-to-build)). The covers already printed are racked behind it as usual.
+- With no edition yet and no sources, the stand shows a blank cover and offers to add sources.
 
 ### Paper (`ui/paper/`)
 
@@ -772,7 +854,7 @@ A month calendar of every released edition, read ones ticked, with the month's e
 
 Reset time, edition length (Short, Standard, Long), the Evening edition (Off or On, with its release time when on), theme (System, Light, Dark), display mode (Auto, Standard, E-ink) and pictures (Colour, Greyscale).
 
-- **Storage**: the budget for stored text and pictures, moved one step at a time (50, 100, 250, 500 MB, 1, 2, 4 GB) with Less and More, a bar and "Using 132 MB of 500 MB" beneath, then "12 MB of text, 120 MB of pictures". Over budget it says so and offers "Trim now".
+- **Storage**: the budget for stored text and pictures, moved one step at a time (50, 100, 250, 500 MB, 1, 2, 4, 8, 16 GB) with Less and More, a bar and "Using 132 MB of 500 MB" beneath, then "12 MB of text, 120 MB of pictures". Over budget it says so and offers "Trim now".
 - **Archive**: Export, Export and free up space, and Import, through the system file picker (no storage permission). The job runs in the app's scope, so it carries on if the screen is left; progress and the result ("Imported 1,240 posts, skipped 310.") show under the buttons.
 
 Debug builds add buttons that load or clear invented sample data.
@@ -828,7 +910,8 @@ In E-ink mode:
 - **Motion**: none. No ripples, no transitions between screens, no animated scrolling.
 - **Movement is paged.** Dragging does nothing until the finger lifts; then the content jumps one screen in the direction of the swipe, snapped to a story row or text line with a one-line overlap. In the paper a sideways swipe turns a whole page. Volume keys, page keys, arrow keys and space step forward and back. Previous and Next buttons appear under the content; in the paper they step through a long page before turning it.
 - **Images** are greyscale with raised contrast, dithered to 16 greys (see [Greyscale pictures](#greyscale-pictures)). Small thumbnails are dropped in favour of text. A picture opened full screen is enlarged in steps and moved a screen at a time.
-- Pull to refresh is replaced by the header button, and the phone shelf wraps instead of scrolling sideways.
+- The phone shelf wraps instead of scrolling sideways.
+- Print now's progress is words and an unanimated bar, as everywhere.
 - **Code blocks** cannot scroll sideways, so they are set smaller, just far enough for the longest line to fit (down to 70% of the usual size). Only lines longer than that wrap.
 
 ## Architecture
@@ -848,9 +931,10 @@ net.tgnra.morningissue
   sync/      FeedFetcher, parsers, FeedDiscovery, FullTextFetcher, OPML, FeedSyncer, SyncWorker,
              FeedHealthChecker, FeedRepairer
   engine/    pure Kotlin, no Android imports: RankingConfig, Cadence, Scorer, Affinity,
-             WithinFeed, EditionBuilder, EditionClock, FeedHealthRules
+             WithinFeed, EditionBuilder, EditionClock, ReleaseSchedule, FeedHealthRules
   edition/   RoomEditionPublisher, EarlyBuild, EarlyBuildWorker, WorkManagerEditionScheduler,
-             TimeChangeReceiver
+             TimeChangeReceiver, DueEditions (pure: did the due edition fail to build?),
+             EditionPrinter (Print now), ReleaseTimes (changing a release time)
   ui/        theme, layout, navigation, components, newsstand, paper, reader, backissues,
              sources, saved, search, settings, onboarding
 ```
@@ -880,10 +964,10 @@ You need JDK 21 and the Android SDK (platform 37).
 ./gradlew assembleDebug          # debug build
 ./gradlew testDebugUnitTest      # unit tests (JVM and Robolectric)
 ./gradlew connectedAndroidTest   # on-device tests; needs a device or emulator
-./gradlew :macrobenchmark:connectedBenchmarkAndroidTest   # the on-open build benchmark; replaces the installed app and its data
+./gradlew :macrobenchmark:connectedBenchmarkAndroidTest   # the edition build benchmark; replaces the installed app and its data
 ```
 
-**Benchmark.** The `:macrobenchmark` module measures the budget "the on-open fallback build takes under 300 ms on a low-end phone". It runs against the app's `benchmark` build type: the release build made profileable and signed with the debug key, plus a seeding receiver (`app/src/benchmark`) that only the shell can call. Each iteration stores 1,000 unread posts from 40 feeds, with their traits and embeddings, and no edition or reading history, starts the app cold and measures the trace section `MorningIssue.onOpenEditionBuild`, which wraps the build in `RoomEditionPublisher.ensureCurrentEdition`. Results are written under `macrobenchmark/build/outputs/connected_android_test_additional_output/`. Numbers from an emulator are only indicative, and it has not yet been run on a phone. To run it without Gradle, install `app-benchmark.apk` and `macrobenchmark-benchmark.apk` and start `net.tgnra.morningissue.macrobenchmark/androidx.test.runner.AndroidJUnitRunner` with `am instrument -w` (add `-e androidx.benchmark.suppressErrors EMULATOR` on an emulator).
+**Benchmark.** The `:macrobenchmark` module measures the budget "building an edition from stored posts takes under 300 ms on a low-end phone". That build was the on-open fallback; it is now the middle stage of Print now and of a late background run, and the budget, the trace section and the class (`OnOpenEditionBuildBenchmark`) keep their names. It runs against the app's `benchmark` build type: the release build made profileable and signed with the debug key, plus a seeding receiver (`app/src/benchmark`) that only the shell can call. Each iteration stores 1,000 unread posts from 40 feeds, with their traits and embeddings, and no edition or reading history, and starts the app cold. Opening the app no longer builds anything, so the benchmark then sends the receiver a second broadcast (`--ez print true`) that calls `ensureCurrentEdition()` in the running app, and measures the trace section `MorningIssue.onOpenEditionBuild`, which wraps the build in `RoomEditionPublisher.ensureCurrentEdition`. It does not press Print now, because that would first sync the seeded feeds, which do not exist. The changed trigger compiles but has not been run. Results are written under `macrobenchmark/build/outputs/connected_android_test_additional_output/`. Numbers from an emulator are only indicative, and it has not yet been run on a phone. To run it without Gradle, install `app-benchmark.apk` and `macrobenchmark-benchmark.apk` and start `net.tgnra.morningissue.macrobenchmark/androidx.test.runner.AndroidJUnitRunner` with `am instrument -w` (add `-e androidx.benchmark.suppressErrors EMULATOR` on an emulator).
 
 Unit tests are in `app/src/test`: the engine (scoring, cadence, affinity, within-feed ranking, edition building, sections, carry-over, the clock), the publisher and early build against an in-memory database and `work-testing`, the sync layer against saved feed fixtures and a mock web server, the embedder against the real asset and reference vectors from the original model, the migrations against the exported schemas, the image store against a local web server and Robolectric's native graphics (real decoding and WebP encoding, on the desktop), the greyscale option through a real Coil loader, and the pure parts of the UI. The debug sample data has traits and embeddings (the upkeep runs after it is loaded) but no categories.
 

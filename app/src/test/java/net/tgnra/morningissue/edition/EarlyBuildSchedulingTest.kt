@@ -81,6 +81,8 @@ class EarlyBuildSchedulingTest {
         images = ImagePrefetcher { journal.add("images") },
         scheduleNext = { scheduler.reschedule() },
         clock = clock,
+        settings = settings,
+        zone = { zone },
     )
 
     @Before

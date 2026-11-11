@@ -226,7 +226,7 @@ private fun SourcesHeader(
     }
 }
 
-/** The heading above the feeds that have gone quiet. They are kept on purpose and checked less often. */
+/** The heading above the feeds that have gone quiet. They are kept on purpose and checked as often as any other feed. */
 @Composable
 private fun QuietHeading(count: Int) {
     Column(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

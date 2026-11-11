@@ -65,6 +65,7 @@ import java.time.ZoneId
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import net.tgnra.morningissue.R
+import net.tgnra.morningissue.engine.schedule
 import net.tgnra.morningissue.model.Edition
 import net.tgnra.morningissue.model.EditionPage
 import net.tgnra.morningissue.model.Feed
@@ -131,7 +132,7 @@ fun PaperScreen(
             }
             val links = BackPageLinks(
                 fallbackNextEditionAt = settings?.let {
-                    PaperFormat.nextReset(container.clock.instant(), it.resetTime, ZoneId.systemDefault())
+                    it.schedule.nextRelease(container.clock.instant(), ZoneId.systemDefault()).at
                 },
                 onOpenBackIssues = onOpenBackIssues,
                 onOpenSearch = onOpenSearch,

@@ -17,9 +17,13 @@ interface EditionPublisher {
     /**
      * Returns the ID of the edition for the most recent reset time, building it first if it is
      * missing: from stored posts only, with `cutoffAt = now` and `releaseAt` = that reset time
-     * (the on-open fallback; target under 300 ms). Never touches the network. Returns null when
+     * (target under 300 ms). Never touches the network. Returns null when
      * no edition exists and none can be built (no feeds or no posts). Safe to call concurrently
      * and repeatedly; at most one edition is created per date and kind.
+     *
+     * This used to run every time the newsstand opened (the on-open fallback). It no longer
+     * does: it is the build stage of Print now and of a background run that started after its
+     * reset (both through `EarlyBuild`), and onboarding's first edition.
      */
     suspend fun ensureCurrentEdition(): Long?
 
@@ -48,8 +52,12 @@ interface EditionPublisher {
      * nothing is superseded. Stories it prints are not new in the next morning edition; posts
      * it only lists in its index still are.
      *
-     * Returns null, storing nothing, when those feeds have nothing printable, or when an Extra
-     * edition already exists for today's date (one per calendar date).
+     * There is one Extra edition per calendar date. If today already has one, it is
+     * **reprinted** to include [feedIds]: set again from its own feeds and these, and stored
+     * in the first printing's place under the same ID and number, as the newest paper on the
+     * stand. This is the one case in which a stored edition changes.
+     *
+     * Returns null, storing and changing nothing, when those feeds have nothing printable.
      */
     suspend fun publishExtraEdition(feedIds: Set<Long>): Long? = null
 }

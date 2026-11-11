@@ -119,15 +119,8 @@ data class RankingConfig(
     val repairRetryDays: Long = 7,
     /** At most this many broken feeds are repaired in one health check. */
     val repairMaxPerRun: Int = 3,
-    /** Gone quiet: no posts in this many days. */
+    /** Gone quiet: no posts in this many days. A quiet feed is still fetched by every sync. */
     val quietAfterDays: Long = 90,
-    /** How often a quiet feed is checked, by how long it has been quiet. Ascending. */
-    val quietCheckSteps: List<QuietStep> = listOf(
-        QuietStep(quietDays = 90, checkEveryHours = 6),
-        QuietStep(quietDays = 180, checkEveryHours = 24),
-        QuietStep(quietDays = 365, checkEveryHours = 72),
-        QuietStep(quietDays = 730, checkEveryHours = 168),
-    ),
     /** Ignored: printed in at least [ignoredMinEditions] editions over this window with no opens. */
     val ignoredWindowDays: Long = 60,
     val ignoredMinEditions: Int = 10,

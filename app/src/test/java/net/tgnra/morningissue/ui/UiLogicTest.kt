@@ -8,17 +8,17 @@ import java.time.LocalTime
 import java.time.YearMonth
 import java.time.ZoneId
 import java.util.Locale
-import net.tgnra.morningissue.R
 import net.tgnra.morningissue.model.InlineSpan
 import net.tgnra.morningissue.model.InlineStyle
 import net.tgnra.morningissue.model.RichText
-import net.tgnra.morningissue.sync.SyncReport
+import net.tgnra.morningissue.edition.BuildStage
+import net.tgnra.morningissue.sync.SyncStatus
 import net.tgnra.morningissue.ui.components.ImageTreatment
 import net.tgnra.morningissue.ui.components.StepScroll
 import net.tgnra.morningissue.ui.format.PaperFormat
 import net.tgnra.morningissue.ui.format.PostRate
 import net.tgnra.morningissue.ui.layout.PaperLayoutSpec
-import net.tgnra.morningissue.ui.newsstand.refreshMessage
+import net.tgnra.morningissue.ui.newsstand.printProgress
 import net.tgnra.morningissue.ui.paper.frontGridColumns
 import net.tgnra.morningissue.ui.reader.ReadRule
 import net.tgnra.morningissue.ui.reader.ReaderTextSize
@@ -174,20 +174,27 @@ class UiLogicTest {
     }
 
     @Test
-    fun refreshMessageSaysWhatWasSavedForTomorrow() {
-        val plural: (Int, Int) -> String = { id, count ->
-            when (id) {
-                R.plurals.new_posts_saved -> "$count new posts saved for tomorrow"
-                else -> "$count sources couldn’t be reached"
-            }
-        }
-        assertEquals("12 new posts saved for tomorrow", refreshMessage(SyncReport(42, 0, 12), plural))
-        assertEquals(
-            "12 new posts saved for tomorrow · 3 sources couldn’t be reached",
-            refreshMessage(SyncReport(42, 3, 12), plural),
+    fun printNowProgressIsOneBarThatOnlyMovesForward() {
+        val idle = SyncStatus.Idle
+        val steps = listOf(
+            printProgress(BuildStage.Syncing, idle),
+            printProgress(BuildStage.Syncing, SyncStatus.Running(0, 40)),
+            printProgress(BuildStage.Syncing, SyncStatus.Running(10, 40)),
+            printProgress(BuildStage.Syncing, SyncStatus.Running(40, 40)),
+            printProgress(BuildStage.Building, idle),
+            printProgress(BuildStage.FetchingText(1, 0, 20), idle),
+            printProgress(BuildStage.FetchingText(1, 10, 20), idle),
+            printProgress(BuildStage.FetchingText(1, 20, 20), idle),
+            printProgress(BuildStage.FetchingImages(1, 12), idle),
         )
-        assertEquals("3 sources couldn’t be reached", refreshMessage(SyncReport(42, 3, 0), plural))
-        assertNull(refreshMessage(SyncReport(), plural))
+        assertEquals(steps.sorted(), steps)
+        assertEquals(0f, steps.first())
+        assertEquals(0.125f, steps[2])
+        assertEquals("the sync is the first half", 0.5f, steps[3])
+        assertTrue(steps.last() < 1f)
+        // No feeds and no stories do not divide by zero.
+        assertEquals(0f, printProgress(BuildStage.Syncing, SyncStatus.Running(0, 0)))
+        assertEquals(0.9f, printProgress(BuildStage.FetchingText(1, 0, 0), idle), 0.0001f)
     }
 
     // --- Layout and rendering helpers --------------------------------------------------------

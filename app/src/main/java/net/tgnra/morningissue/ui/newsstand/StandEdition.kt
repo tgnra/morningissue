@@ -17,8 +17,10 @@ enum class StandEdition {
     Current,
 
     /**
-     * A reset has passed without a new edition, because the feeds had nothing new: the engine
-     * never prints an empty or reprint-only paper. The newest edition is an earlier day's.
+     * A reset has passed without a new edition and the newest one is an earlier day's. Whether
+     * that is because the feeds had nothing new (the engine never prints an empty or
+     * reprint-only paper) or because the edition failed to build is `DueEditions`' call; the
+     * stand only says "No new edition today" for the first.
      */
     NoNewEdition,
 }
@@ -31,12 +33,20 @@ object StandEditions {
 
     /**
      * Where the stand stands, given the date of the newest released edition ([newestDate], null
-     * when there is none). Only meaningful once `ensureCurrentEdition` has had its chance to
-     * print the edition for the most recent reset.
+     * when there is none). It reads dates only; see `edition.DueEditions` for whether the
+     * edition for the most recent reset is missing for want of news or failed to build.
      */
-    fun of(newestDate: LocalDate?, now: Instant, resetTime: LocalTime, zone: ZoneId): StandEdition = when {
+    fun of(newestDate: LocalDate?, now: Instant, resetTime: LocalTime, zone: ZoneId): StandEdition =
+        of(newestDate, expectedDate(now, resetTime, zone))
+
+    /**
+     * The same, given the date of the edition that is due ([expected]). The stand passes the
+     * date of the due release from `DueEditions`, which follows the release schedule and so
+     * is not moved by a reset time changed earlier today.
+     */
+    fun of(newestDate: LocalDate?, expected: LocalDate): StandEdition = when {
         newestDate == null -> StandEdition.None
-        newestDate.isBefore(expectedDate(now, resetTime, zone)) -> StandEdition.NoNewEdition
+        newestDate.isBefore(expected) -> StandEdition.NoNewEdition
         else -> StandEdition.Current
     }
 

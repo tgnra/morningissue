@@ -25,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -35,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import java.time.LocalDate
 import net.tgnra.morningissue.R
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionSummary
@@ -156,6 +159,55 @@ fun BlankCover(message: String, modifier: Modifier = Modifier) {
             )
         }
         Box(Modifier.fillMaxWidth().height(hairline(unit)).background(colors.rule))
+    }
+}
+
+/**
+ * The cover of an edition that is due and has not been printed: the masthead and the dateline
+ * over a page with nothing set on it, only the dashed outlines where the lead photo and the
+ * two columns would go. It stands in today's place on the rack; the words and the Print now
+ * button are beneath it, not on it (see `UnprintedDisplay`), because the cover is a picture
+ * that scales with its width.
+ */
+@Composable
+fun UnprintedCover(date: LocalDate, modifier: Modifier = Modifier) {
+    val description = stringResource(R.string.cover_description_unprinted, PaperFormat.longDate(date))
+    CoverSheet(modifier.clearAndSetSemantics { contentDescription = description }) { unit ->
+        val colors = MorningIssueTheme.colors
+        val type = MorningIssueTheme.typography
+        CoverMasthead(unit)
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = unit * 1.4f),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            val dateline = type.sectionLabel.sized(unit * 2.7f).copy(letterSpacing = 0.08.em)
+            Text(PaperFormat.longDate(date).uppercase(), style = dateline, color = colors.inkSecondary, maxLines = 1)
+            Text(stringResource(R.string.cover_unprinted).uppercase(), style = dateline, color = colors.inkSecondary, maxLines = 1)
+        }
+        Box(Modifier.fillMaxWidth().height(hairline(unit)).background(colors.rule))
+        Spacer(Modifier.height(unit * 3.5f))
+        UnsetPage(unit, Modifier.fillMaxWidth().weight(1f))
+    }
+}
+
+/** The forme with no type in it: dashed outlines for the lead photo and the two columns. */
+@Composable
+private fun UnsetPage(unit: Dp, modifier: Modifier = Modifier) {
+    val colors = MorningIssueTheme.colors
+    val outline = if (colors.isEink) colors.ink else colors.inkSecondary.copy(alpha = 0.45f)
+    Canvas(modifier) {
+        val u = unit.toPx()
+        val stroke = Stroke(width = (u * 0.3f).coerceAtLeast(1f), pathEffect = PathEffect.dashPathEffect(floatArrayOf(u * 1.6f, u * 1.2f)))
+        val gutter = u * 5f
+        val columnWidth = (size.width - gutter) / 2f
+        val photoHeight = (size.width * 10f / 16f).coerceAtMost(size.height * 0.5f)
+        drawRect(outline, Offset.Zero, Size(size.width, photoHeight), style = stroke)
+        val top = photoHeight + u * 3f
+        if (size.height > top) {
+            for (column in 0..1) {
+                drawRect(outline, Offset(column * (columnWidth + gutter), top), Size(columnWidth, size.height - top), style = stroke)
+            }
+        }
     }
 }
 

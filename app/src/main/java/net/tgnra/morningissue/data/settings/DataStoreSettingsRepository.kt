@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.map
 import net.tgnra.morningissue.model.AppSettings
 import net.tgnra.morningissue.model.DisplayMode
 import net.tgnra.morningissue.model.EditionLength
+import net.tgnra.morningissue.model.ReleaseChange
 import net.tgnra.morningissue.model.ThemeMode
 
 /** The app's single settings store. */
@@ -35,7 +36,39 @@ class DataStoreSettingsRepository(
         .distinctUntilChanged()
 
     override suspend fun setResetTime(time: LocalTime) {
-        dataStore.edit { it[RESET_MINUTE_OF_DAY] = time.hour * 60 + time.minute }
+        dataStore.edit {
+            it[RESET_MINUTE_OF_DAY] = time.hour * 60 + time.minute
+            it.remove(RESET_CHANGE)
+        }
+    }
+
+    override suspend fun changeResetTime(time: LocalTime, change: ReleaseChange) {
+        dataStore.edit {
+            it[RESET_MINUTE_OF_DAY] = time.hour * 60 + time.minute
+            it[RESET_CHANGE] = encode(change)
+        }
+    }
+
+    override suspend fun changeEveningEdition(enabled: Boolean, time: LocalTime, change: ReleaseChange?) {
+        dataStore.edit {
+            it[EVENING_EDITION] = enabled
+            it[EVENING_MINUTE_OF_DAY] = time.hour * 60 + time.minute
+            if (change != null) it[EVENING_CHANGE] = encode(change) else it.remove(EVENING_CHANGE)
+        }
+    }
+
+    /** "settled;kept;from" in epoch milliseconds, the first two empty when there is none. */
+    private fun encode(change: ReleaseChange): String =
+        listOf(change.settled, change.kept, change.from).joinToString(";") { it?.toEpochMilli()?.toString().orEmpty() }
+
+    private fun decode(stored: String?): ReleaseChange? {
+        val parts = stored?.split(';')?.takeIf { it.size == 3 } ?: return null
+        val from = parts[2].toLongOrNull() ?: return null
+        return ReleaseChange(
+            settled = parts[0].toLongOrNull()?.let(Instant::ofEpochMilli),
+            kept = parts[1].toLongOrNull()?.let(Instant::ofEpochMilli),
+            from = Instant.ofEpochMilli(from),
+        )
     }
 
     override suspend fun setEditionLength(length: EditionLength) {
@@ -55,11 +88,17 @@ class DataStoreSettingsRepository(
     }
 
     override suspend fun setEveningEditionEnabled(enabled: Boolean) {
-        dataStore.edit { it[EVENING_EDITION] = enabled }
+        dataStore.edit {
+            it[EVENING_EDITION] = enabled
+            it.remove(EVENING_CHANGE)
+        }
     }
 
     override suspend fun setEveningEditionTime(time: LocalTime) {
-        dataStore.edit { it[EVENING_MINUTE_OF_DAY] = time.hour * 60 + time.minute }
+        dataStore.edit {
+            it[EVENING_MINUTE_OF_DAY] = time.hour * 60 + time.minute
+            it.remove(EVENING_CHANGE)
+        }
     }
 
     override suspend fun setStorageBudgetMb(megabytes: Int) {
@@ -75,6 +114,20 @@ class DataStoreSettingsRepository(
         dataStore.edit { it[EXTRA_OFFER_DISMISSED_AT] = at.toEpochMilli() }
     }
 
+    override suspend fun recordNothingNew(releaseAt: Instant) {
+        dataStore.edit { prefs ->
+            val kept = (listOf(releaseAt) + releaseTimes(prefs[NOTHING_NEW_FOR]))
+                .distinct()
+                .sortedDescending()
+                .take(AppSettings.NOTHING_NEW_KEPT)
+            prefs[NOTHING_NEW_FOR] = kept.joinToString(",") { it.toEpochMilli().toString() }
+        }
+    }
+
+    /** Epoch milliseconds separated by commas; anything unreadable is dropped. */
+    private fun releaseTimes(stored: String?): List<Instant> =
+        stored.orEmpty().split(',').mapNotNull { it.trim().toLongOrNull() }.map(Instant::ofEpochMilli)
+
     private fun toSettings(prefs: Preferences): AppSettings {
         val defaults = AppSettings()
         return AppSettings(
@@ -88,6 +141,9 @@ class DataStoreSettingsRepository(
             storageBudgetMb = prefs[STORAGE_BUDGET_MB] ?: defaults.storageBudgetMb,
             onboardingDone = prefs[ONBOARDING_DONE] ?: defaults.onboardingDone,
             extraOfferDismissedAt = prefs[EXTRA_OFFER_DISMISSED_AT]?.let(Instant::ofEpochMilli),
+            nothingNewFor = releaseTimes(prefs[NOTHING_NEW_FOR]),
+            resetChange = decode(prefs[RESET_CHANGE]),
+            eveningChange = decode(prefs[EVENING_CHANGE]),
         )
     }
 
@@ -108,5 +164,8 @@ class DataStoreSettingsRepository(
         val STORAGE_BUDGET_MB = intPreferencesKey("storage_budget_mb")
         val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
         val EXTRA_OFFER_DISMISSED_AT = longPreferencesKey("extra_offer_dismissed_at")
+        val NOTHING_NEW_FOR = stringPreferencesKey("nothing_new_for")
+        val RESET_CHANGE = stringPreferencesKey("reset_change")
+        val EVENING_CHANGE = stringPreferencesKey("evening_change")
     }
 }

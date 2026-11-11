@@ -7,9 +7,6 @@ import java.time.YearMonth
 import net.tgnra.morningissue.model.HealthFlag
 import net.tgnra.morningissue.model.SliderStep
 
-/** A feed quiet for at least [quietDays] is checked every [checkEveryHours]. */
-data class QuietStep(val quietDays: Long, val checkEveryHours: Long)
-
 /** What a feed's stories did in the editions of a window: input to Ignored and Loved. */
 data class FeedRunStats(
     /** Editions that printed at least one of the feed's stories. */
@@ -88,7 +85,13 @@ object FeedHealthRules {
         return Duration.between(input.lastRepairAt, now) >= Duration.ofDays(config.repairRetryDays)
     }
 
-    /** No posts in 90 days. A feed that has never been fetched is not quiet, it is unknown. */
+    /**
+     * No posts in 90 days. A feed that has never been fetched is not quiet, it is unknown.
+     *
+     * Quiet is a label only: it puts the feed in the Quiet group in Sources and raises the Gone
+     * quiet flag. It does not change how often the feed is fetched; every full sync checks
+     * every feed, so the post that ends the silence is found as soon as any other would be.
+     */
     fun isQuiet(
         lastPostAt: Instant?,
         addedAt: Instant,
@@ -102,28 +105,6 @@ object FeedHealthRules {
 
     private fun quietFor(lastPostAt: Instant?, addedAt: Instant, now: Instant): Duration =
         Duration.between(lastPostAt ?: addedAt, now)
-
-    /**
-     * How long to leave a feed between checks: zero (every sync) until it has been quiet for
-     * 90 days, then stepping down towards weekly. A new post ends the quiet and the wait.
-     */
-    fun checkInterval(quietFor: Duration, config: RankingConfig = RankingConfig.Default): Duration {
-        val step = config.quietCheckSteps.lastOrNull { quietFor >= Duration.ofDays(it.quietDays) } ?: return Duration.ZERO
-        return Duration.ofHours(step.checkEveryHours)
-    }
-
-    /** Whether a full sync should fetch the feed now. A feed never fetched is always due. */
-    fun dueForCheck(
-        lastSyncAt: Instant?,
-        lastPostAt: Instant?,
-        addedAt: Instant,
-        now: Instant,
-        config: RankingConfig = RankingConfig.Default,
-    ): Boolean {
-        if (lastSyncAt == null) return true
-        val interval = checkInterval(quietFor(lastPostAt, addedAt, now), config)
-        return Duration.between(lastSyncAt, now) >= interval
-    }
 
     /** Every rule the feed meets, whatever has been dismissed. */
     fun flags(input: FeedHealthInput, now: Instant, config: RankingConfig = RankingConfig.Default): Set<HealthFlag> = buildSet {

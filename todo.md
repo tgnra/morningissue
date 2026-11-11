@@ -8,7 +8,7 @@ What is built, what is being built and what is left. How the built parts work is
 - [x] **Sync.** RSS, Atom and JSON Feed parsing; conditional fetching; feed discovery from a site address; full-text extraction; periodic background sync; cadence and tiers.
 - [x] **OPML import and export** in Sources and onboarding; every ancestor folder becomes a tag.
 - [x] **Scoring**: A × F × S × P with all constants in `RankingConfig`.
-- [x] **Daily edition**: front page, Top stories, In brief, back-page index; early build with prefetch; on-open fallback; frozen once stored.
+- [x] **Daily edition**: front page, Top stories, In brief, back-page index; early build with prefetch; on-open fallback (since replaced by the unprinted placeholder and Print now, below); frozen once stored.
 - [x] **No empty or reprint-only editions**: with no new posts nothing is built and the previous edition stays current.
 - [x] **Newsstand** with drawn covers, rack and labelled button bar; **paper** pager with contents list; **reader** with Like, Save, text size and read tracking; **back issues** calendar; **source pages**; **Saved and Liked** lists; basic **search**; **Settings**; **onboarding** with first sync.
 - [x] **Tablet layouts** (Compact, Medium, Expanded) and **e-ink mode** (paged movement, no animation, greyscale images).
@@ -61,7 +61,7 @@ Built; see "Feed health" in `docs/how-it-works.md` for the rules as implemented.
 - [x] **Carried by the edition once a month**, as a notice on the back page of one edition per calendar month (not a page of its own), only while a feed needs attention.
 - [x] Dismissing a flag hides it for 6 months (`feed_health.flagDismissedUntil`).
 - [x] **Automatic repair** of a Broken feed before the reader is asked: retry, scheme and `www` variants, the site's own feed link, then `/feed`, `/rss`, `/atom.xml`, `/index.xml`. Tried again weekly.
-- [x] **Quiet feeds.** A feed with no posts in 90 days moves to a Quiet group at the bottom of Sources and is checked every 6 hours, then daily, every 3 days and weekly as the quiet lengthens.
+- [x] **Quiet feeds.** A feed with no posts in 90 days moves to a Quiet group at the bottom of Sources and carries the Gone quiet flag. It is checked by every sync like any other feed; the reduced cadence (6 hours down to weekly) was removed at the owner's request.
 - [x] **Welcome back, engine.** When a feed posts again after 90 quiet days, the story gets the reason line "Back after 2 years: …" and a comeback boost of 1.5 on top of scarcity, so it almost always makes the front page.
 - [ ] **Welcome back, label.** Show `EditionStory.comebackLabel` on the story block.
 - Differences from the original table: there is no "In brief only" setting for a feed, so Noisy offers Less; Loved offers Favourite only (notifications are out of scope).
@@ -70,7 +70,7 @@ Built; see "Feed health" in `docs/how-it-works.md` for the rules as implemented.
 
 Built; see "Storage budget" in `docs/how-it-works.md`. Not yet seen on a device.
 
-- [x] A storage budget control in Settings (discrete steps, 50 MB to 4 GB) showing current usage.
+- [x] A storage budget control in Settings (discrete steps, 50 MB to 16 GB) showing current usage.
 - [x] When the budget fills, the stored text of the oldest editions' articles is trimmed first, after a sync. Liked and saved posts are never trimmed; headlines, summaries and edition rows stay.
 - [x] The budget counts stored images as well as text, and Settings says how much is each. Images are trimmed before text, oldest editions first; Liked and saved posts keep both.
 - Content stays uncompressed (see Out of scope).
@@ -89,7 +89,7 @@ Open:
 
 - [ ] **Run it on a device.** Unseen: real WebP sizes and encoding time on a phone (the figures in the docs are from Robolectric's desktop build of Android's encoder), the encoder on Android 8 to 10 (the older `WEBP` format, exercised only under Robolectric at API 28), memory while a very large photograph is handled, the full-screen picture's gestures, the Settings option, and how the dither looks on a phone screen and on an e-ink panel.
 - [ ] **The grain at 16 levels may be too faint on a dense phone screen.** It was chosen from enlarged samples on a desktop. `Dither.LEVELS` at 8 is the stronger alternative.
-- [ ] **Editions built on open store no images** until their articles are opened, because that build never touches the network. Their pages' pictures come from the network and Coil's cache. A background pass that stores the current edition's pictures when a connection allows would close this.
+- [ ] **An edition printed offline stores no images** until its articles are opened. Print now with the sources unreachable prints from stored posts, and its picture downloads fail with the rest. A background pass that stores the current edition's pictures when a connection returns would close this.
 - [ ] **The early build's time limit is shared.** Full text and images together have four minutes. A long edition with many body images may not finish; what is missing is stored when the article is opened.
 - [ ] **A stored image belongs to one post.** A picture several posts share (a podcast's cover on every episode) is trimmed with the first post that stored it, whatever the others are, and fetched again.
 - [ ] **Opening an article can download a picture twice**: once by the screen and once by the store, when the store starts before Coil has finished. The store waits four seconds and takes what Coil has cached; a slow connection defeats that.
@@ -130,11 +130,30 @@ Built; see "Archive export and import" in `docs/how-it-works.md`. The file-picke
 - [x] Checked on the emulator in the light phone layout: the offer after an OPML import, printing (18 s for 15 sources), and the "No. 2 · Extra" label on the cover and in the paper. Not checked in dark, e-ink or tablet layouts, nor "Not now".
 - [ ] The Back issues calendar shows one edition per day, the morning one, so an Extra or Evening edition on the same date cannot be opened from it once it has left the rack.
 - [ ] If sources are added after tomorrow's edition was pre-built but before it is released, the Extra and the pre-built edition can both carry the same stories. Untested.
-- [ ] Only one Extra edition per calendar date can be stored, because `edition` has a unique `(date, kind)` index. Lifting this needs a schema change.
+- [x] The day's Extra edition can be reprinted to take in sources added after it was printed: in place, under the same ID and number, set again as a whole. The newsstand offers "Reprint the Extra with 3 new sources". Engine and offer rule unit-tested; the offer has not been seen on a device.
+- [ ] Still only one Extra edition per calendar date, because `edition` has a unique `(date, kind)` index. The reprint removes the practical cost (later sources no longer have to wait), but two separate Extras on one date would still need a schema change.
+- [ ] A reprint rewrites the paper while it may be open in the paper screen or reader. The screens observe the edition, so they should follow; not checked on a device.
+
+### Unprinted placeholder and Print now
+
+Built; see "When an edition failed to build" in `docs/how-it-works.md`. Not seen on a device or emulator at all: the logic is unit-tested, the screen is not.
+
+- [x] The newsstand's refresh button and pull-to-refresh gesture are removed.
+- [x] Opening the app no longer builds an edition. When the due edition failed to build (no edition, and no record that a run found nothing new) the stand shows an unprinted placeholder cover with Print now.
+- [x] Print now runs the early build's stages in the foreground from an app-scoped holder (`EditionPrinter`): sync, build, full text, pictures, with progress; it survives rotation and leaving the screen, cannot be started twice, prints from stored posts when offline and says so, and offers Try again on failure.
+- [x] `nothingNewFor` in the settings store records the releases a run found nothing new for, so "No new edition today" is not mistaken for a failure.
+- [ ] Look at the placeholder, the progress display and the result notices on a phone, a small tablet and a landscape tablet, in Light, Dark and E-ink.
+- [x] A changed reset time or Evening edition time applies from the next release, never retroactively (`ReleaseSchedule`, `ReleaseTimes`), so changing it no longer puts the placeholder up. An edition already built for the old time is released at the old time.
+- [ ] Settings does not say when a changed time takes effect ("from tomorrow's edition"). The schedule knows; the screen does not show it.
+- [ ] A release time changed while the early build is running is not handled specially.
+- [ ] Onboarding's first edition is still built by onboarding itself, without the full-text and picture prefetch and without recording "nothing new". If its sync found nothing recent, the stand shows the placeholder rather than the "nothing recent" empty state until Print now has been pressed once.
+- [x] Result notices on the newsstand (Print now's and the Extra edition's) have a close button; a closed notice stays closed until there is a new result.
+- [ ] Print now's result says only whether the sources could be reached at all, not how many failed.
 
 ### Benchmark
 
-- [x] A Macrobenchmark for the on-open fallback build (`:macrobenchmark`, `OnOpenEditionBuildBenchmark`): 1,000 unread posts from 40 feeds, cold start, measuring the trace section around the build. How to run it is in `docs/how-it-works.md`.
+- [x] A Macrobenchmark for the build from stored posts, formerly the on-open fallback build (`:macrobenchmark`, `OnOpenEditionBuildBenchmark`): 1,000 unread posts from 40 feeds, cold start, measuring the trace section around the build. Opening the app no longer builds, so the benchmark triggers the build with a broadcast to the seeding receiver. How to run it is in `docs/how-it-works.md`.
+- [ ] The broadcast trigger compiles but has not been run on a device or emulator.
 - [ ] Run it on a real low-end phone. The budget is under 300 ms there; an emulator's numbers are only indicative. On the software-rendered API 37 emulator, on a host short of memory, five cold starts gave 371 ms at best, 573 ms median and 1,061 ms at worst for the build, which is over budget there. If a real phone is over too, see "Scores kept current during sync" below.
 
 ## Smaller gaps against the original spec
@@ -234,7 +253,7 @@ Dropped when the design moved from a live ranked feed to a daily edition:
 ## Known rough edges and unverified areas
 
 - [ ] **The release workflow has never run.** GitHub has not registered `.github/workflows/release.yml` since the first push. The cause is unknown.
-- [ ] **The early build has only run under tests**, never overnight on a device. Whether WorkManager runs it in time under Doze is unknown.
+- [ ] **The early build has only run under tests**, never overnight on a device. Whether WorkManager runs it in time under Doze is unknown. This matters more now: when it does not run, the reader sees the unprinted placeholder and has to press Print now, where before the edition was built silently on open.
 - [ ] **Relearning affinity on every engagement change** (each open, read, Save or Like) is unmeasured for performance.
 - [ ] **OPML export on a device is untested.** The writer is unit-tested; the file-picker path is not.
 - [ ] **E-ink: a long page can end on a mostly blank screen**, because steps snap to anchors.

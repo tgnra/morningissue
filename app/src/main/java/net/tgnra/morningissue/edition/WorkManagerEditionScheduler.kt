@@ -22,6 +22,7 @@ import net.tgnra.morningissue.data.db.EditionDao
 import net.tgnra.morningissue.data.settings.SettingsRepository
 import net.tgnra.morningissue.engine.EditionClock
 import net.tgnra.morningissue.engine.RankingConfig
+import net.tgnra.morningissue.engine.schedule
 
 /**
  * Keeps one [EarlyBuildWorker] scheduled as unique one-off work, aimed at
@@ -71,13 +72,14 @@ class WorkManagerEditionScheduler(
         val workManager = workManager()
         val now = clock.instant()
         val settings = settings.settings.first()
-        val resetTime = settings.resetTime
-        val eveningTime = settings.eveningEditionTime.takeIf { settings.eveningEditionEnabled }
+        // The schedule, not the bare times: a time changed in Settings moves the coming release
+        // only as `ReleaseSchedule` allows, and this aims where the publisher will build.
+        val schedule = settings.schedule
         val zone = zone()
         val lead = Duration.ofMinutes(config.earlyBuildLeadMinutes)
-        val comingRelease = EditionClock.nextRelease(now, resetTime, eveningTime, zone)
+        val comingRelease = schedule.nextRelease(now, zone)
         val coming = comingRelease.at
-        val following = EditionClock.nextRelease(coming, resetTime, eveningTime, zone).at
+        val following = schedule.nextRelease(coming, zone).at
 
         val existing = workManager.getWorkInfosForUniqueWorkFlow(UNIQUE_WORK_NAME).first()
         val running = existing.any { it.state == WorkInfo.State.RUNNING }

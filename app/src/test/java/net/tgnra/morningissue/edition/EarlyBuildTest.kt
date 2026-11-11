@@ -3,6 +3,8 @@ package net.tgnra.morningissue.edition
 import java.io.IOException
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalTime
+import java.time.ZoneOffset
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
 import net.tgnra.morningissue.data.images.ImageStore
@@ -23,6 +25,12 @@ class EarlyBuildTest {
     private val journal = Journal()
     private val publisher = FakePublisher(journal, nextRelease = now.plus(Duration.ofMinutes(90)))
     private val prefetchedImages = mutableListOf<String>()
+    private val settings = FakeSettings()
+    private val editions = FakeEditions(mapOf(7L to sampleEdition(7), 3L to sampleEdition(3)))
+
+    /** The 06:30 reset of 11 November, which [now] is 90 minutes before, and the one before it. */
+    private val reset: Instant = Instant.parse("2026-11-11T06:30:00Z")
+    private val previousReset: Instant = Instant.parse("2026-11-10T06:30:00Z")
 
     private fun earlyBuild(
         syncer: FakeSyncer = FakeSyncer(journal),
@@ -30,7 +38,7 @@ class EarlyBuildTest {
     ) = EarlyBuild(
         feedSyncer = syncer,
         publisher = publisher,
-        editions = FakeEditions(mapOf(7L to sampleEdition(7), 3L to sampleEdition(3))),
+        editions = editions,
         fullTextFetcher = fullText,
         images = ImagePrefetcher { urls ->
             journal.add("images")
@@ -38,6 +46,8 @@ class EarlyBuildTest {
         },
         scheduleNext = { journal.add("schedule") },
         clock = clock,
+        settings = settings,
+        zone = { ZoneOffset.UTC },
     )
 
     @Test
@@ -77,6 +87,8 @@ class EarlyBuildTest {
             images = StoringImagePrefetcher(store),
             scheduleNext = { journal.add("schedule") },
             clock = clock,
+            settings = settings,
+            zone = { ZoneOffset.UTC },
         )
 
         val outcome = build.run()
@@ -158,10 +170,13 @@ class EarlyBuildTest {
         // Held back by Doze until after the 06:30 reset: the next one is 23 hours away.
         clock.now = Instant.parse("2026-11-11T07:30:00Z")
         publisher.nextRelease = Instant.parse("2026-11-12T06:30:00Z")
+        // Today's edition (dated 11 November) is on the stand once the publisher has made sure of it.
+        editions.released = listOf(3L)
 
         val outcome = earlyBuild(syncer = FakeSyncer(journal) { SyncReport() }).run()
 
         assertEquals(3L, outcome.editionId)
+        assertTrue("an edition was printed, so nothing is written down", settings.current.nothingNewFor.isEmpty())
         val steps = journal.all()
         assertTrue("ensureCurrent" in steps)
         assertFalse("buildNext" in steps)
@@ -173,5 +188,147 @@ class EarlyBuildTest {
         publisher.nextRelease = now.plus(Duration.ofMinutes(180))
         earlyBuild().run()
         assertTrue("buildNext" in journal.all())
+    }
+
+    // --- Nothing new, as opposed to failed -----------------------------------------------------
+
+    @Test
+    fun aRunThatReachedTheFeedsAndFoundNothingWritesTheReleaseDown() = runTest {
+        publisher.nextEditionId = null
+
+        earlyBuild().run()
+
+        assertEquals(listOf(reset), settings.current.nothingNewFor)
+    }
+
+    @Test
+    fun aPrintedEditionWritesNothingDown() = runTest {
+        earlyBuild().run()
+
+        assertTrue(settings.current.nothingNewFor.isEmpty())
+    }
+
+    @Test
+    fun aRunThatCouldNotSyncDoesNotClaimThereWasNothingNew() = runTest {
+        publisher.nextEditionId = null
+
+        val threw = earlyBuild(syncer = FakeSyncer(journal) { throw IOException("offline") }).run()
+        val timedOut = earlyBuild(syncer = FakeSyncer(journal) { awaitCancellation() }).run()
+        // The sync finished, but not one feed answered: the same as no network.
+        val allFailed = earlyBuild(syncer = FakeSyncer(journal) { SyncReport(feedsChecked = 12, feedsFailed = 12) }).run()
+
+        assertFalse(threw.synced)
+        assertFalse(timedOut.synced)
+        assertFalse(allFailed.synced)
+        assertTrue(settings.current.nothingNewFor.isEmpty())
+    }
+
+    @Test
+    fun someFeedsFailingIsStillASync() = runTest {
+        publisher.nextEditionId = null
+
+        val outcome = earlyBuild(syncer = FakeSyncer(journal) { SyncReport(feedsChecked = 12, feedsFailed = 11) }).run()
+
+        assertTrue(outcome.synced)
+        assertEquals(listOf(reset), settings.current.nothingNewFor)
+    }
+
+    @Test
+    fun aBuildThatThrewWritesNothingDown() = runTest {
+        publisher.buildFailure = IllegalStateException("disk full")
+
+        earlyBuild().run()
+
+        assertTrue(settings.current.nothingNewFor.isEmpty())
+    }
+
+    @Test
+    fun aLateRunThatFindsNothingNewWritesTheResetItMissedDown() = runTest {
+        clock.now = Instant.parse("2026-11-11T07:30:00Z")
+        publisher.nextRelease = Instant.parse("2026-11-12T06:30:00Z")
+        // The publisher answers with the newest paper on the stand, which is an older one.
+        publisher.currentEditionId = 3
+
+        val outcome = earlyBuild().run()
+
+        assertNull("the older paper is not the edition this run was for", outcome.editionId)
+        assertEquals(listOf(reset), settings.current.nothingNewFor)
+        assertFalse("no prefetch of a paper that was not printed now", journal.all().any { it.startsWith("text:") })
+    }
+
+    @Test
+    fun aLateRunWithTheEveningEditionOnAccountsForBothPapers() = runTest {
+        settings.setEveningEditionEnabled(true)
+        settings.setEveningEditionTime(LocalTime.of(18, 0))
+        clock.now = Instant.parse("2026-11-11T19:00:00Z")
+        publisher.nextRelease = Instant.parse("2026-11-12T06:30:00Z")
+        val evening = Instant.parse("2026-11-11T18:00:00Z")
+
+        // Neither paper exists afterwards: nothing new for either.
+        earlyBuild().run()
+        assertEquals(setOf(evening, reset), settings.current.nothingNewFor.toSet())
+    }
+
+    @Test
+    fun aLateRunWithTheMorningPaperPrintedOnlyWritesTheEveningDown() = runTest {
+        settings.setEveningEditionEnabled(true)
+        clock.now = Instant.parse("2026-11-11T19:00:00Z")
+        publisher.nextRelease = Instant.parse("2026-11-12T06:30:00Z")
+        editions.released = listOf(3L)
+
+        val outcome = earlyBuild().run()
+
+        assertEquals(3L, outcome.editionId)
+        assertEquals(listOf(Instant.parse("2026-11-11T18:00:00Z")), settings.current.nothingNewFor)
+    }
+
+    // --- Print now's use of the same stages ------------------------------------------------------
+
+    @Test
+    fun printNowBuildsTheDueEditionEvenWhenTheNextReleaseIsNear() = runTest {
+        // 05:00, ninety minutes before the reset: the background job would build tomorrow's paper.
+        // Yesterday's reset is the one that is due; edition 3 is dated on or after it.
+        editions.released = listOf(3L)
+
+        val outcome = earlyBuild().run(BuildTarget.Current)
+
+        assertEquals(3L, outcome.editionId)
+        val steps = journal.all()
+        assertTrue("ensureCurrent" in steps)
+        assertFalse("buildNext" in steps)
+        assertEquals("schedule", steps.last())
+    }
+
+    @Test
+    fun printNowThatFindsNothingWritesTheDueResetDown() = runTest {
+        val outcome = earlyBuild().run(BuildTarget.Current)
+
+        assertNull(outcome.editionId)
+        assertTrue(outcome.synced)
+        assertEquals(listOf(previousReset), settings.current.nothingNewFor)
+    }
+
+    @Test
+    fun theStagesAreReportedInOrder() = runTest {
+        val stages = mutableListOf<BuildStage>()
+
+        earlyBuild().run { stages += it }
+
+        assertEquals(BuildStage.Syncing, stages[0])
+        assertEquals(BuildStage.Building, stages[1])
+        assertEquals(BuildStage.FetchingText(7, 0, 5), stages[2])
+        val text = stages.filterIsInstance<BuildStage.FetchingText>()
+        assertEquals((0..5).toList(), text.map { it.done })
+        assertEquals(BuildStage.FetchingImages(7, 2), stages.last())
+    }
+
+    @Test
+    fun aRunThatPrintsNothingReportsNoFetchingStage() = runTest {
+        publisher.nextEditionId = null
+        val stages = mutableListOf<BuildStage>()
+
+        earlyBuild().run { stages += it }
+
+        assertEquals(listOf(BuildStage.Syncing, BuildStage.Building), stages)
     }
 }

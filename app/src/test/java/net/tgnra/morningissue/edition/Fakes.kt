@@ -23,6 +23,7 @@ import net.tgnra.morningissue.model.EditionStory
 import net.tgnra.morningissue.model.EditionSummary
 import net.tgnra.morningissue.model.IndexGroup
 import net.tgnra.morningissue.model.ItemKind
+import net.tgnra.morningissue.model.ReleaseChange
 import net.tgnra.morningissue.model.ThemeMode
 import net.tgnra.morningissue.sync.FeedSyncer
 import net.tgnra.morningissue.sync.FullTextFetcher
@@ -40,14 +41,24 @@ internal class FakeSettings(initial: AppSettings = AppSettings()) : SettingsRepo
     private val state = MutableStateFlow(initial)
     override val settings: Flow<AppSettings> = state
 
-    override suspend fun setResetTime(time: LocalTime) = state.update { it.copy(resetTime = time) }
+    override suspend fun setResetTime(time: LocalTime) = state.update { it.copy(resetTime = time, resetChange = null) }
+    override suspend fun changeResetTime(time: LocalTime, change: ReleaseChange) =
+        state.update { it.copy(resetTime = time, resetChange = change) }
+    override suspend fun changeEveningEdition(enabled: Boolean, time: LocalTime, change: ReleaseChange?) =
+        state.update { it.copy(eveningEditionEnabled = enabled, eveningEditionTime = time, eveningChange = change) }
     override suspend fun setEditionLength(length: EditionLength) = state.update { it.copy(editionLength = length) }
     override suspend fun setThemeMode(mode: ThemeMode) = state.update { it.copy(themeMode = mode) }
     override suspend fun setDisplayMode(mode: DisplayMode) = state.update { it.copy(displayMode = mode) }
-    override suspend fun setEveningEditionEnabled(enabled: Boolean) = state.update { it.copy(eveningEditionEnabled = enabled) }
-    override suspend fun setEveningEditionTime(time: LocalTime) = state.update { it.copy(eveningEditionTime = time) }
+    override suspend fun setEveningEditionEnabled(enabled: Boolean) =
+        state.update { it.copy(eveningEditionEnabled = enabled, eveningChange = null) }
+    override suspend fun setEveningEditionTime(time: LocalTime) =
+        state.update { it.copy(eveningEditionTime = time, eveningChange = null) }
     override suspend fun setStorageBudgetMb(megabytes: Int) = state.update { it.copy(storageBudgetMb = megabytes) }
     override suspend fun setOnboardingDone(done: Boolean) = state.update { it.copy(onboardingDone = done) }
+    override suspend fun recordNothingNew(releaseAt: Instant) =
+        state.update { it.copy(nothingNewFor = (listOf(releaseAt) + it.nothingNewFor).distinct().take(AppSettings.NOTHING_NEW_KEPT)) }
+
+    val current: AppSettings get() = state.value
 }
 
 /** Records the order of everything the early build does. */
@@ -98,8 +109,12 @@ internal class FakePublisher(
     override suspend fun nextReleaseAt(): Instant? = nextRelease
 }
 
-internal class FakeEditions(private val editions: Map<Long, Edition>) : EditionRepository {
-    override fun observeReleasedEditions(): Flow<List<EditionSummary>> = flowOf(emptyList())
+internal class FakeEditions(
+    private val editions: Map<Long, Edition>,
+    /** The stand: which editions count as released, as IDs into [editions]. */
+    var released: List<Long> = emptyList(),
+) : EditionRepository {
+    override fun observeReleasedEditions(): Flow<List<EditionSummary>> = flowOf(released.map { summary(editions.getValue(it)) })
     override fun observeEdition(editionId: Long): Flow<Edition?> = flowOf(editions[editionId])
     override suspend fun getEdition(editionId: Long): Edition? = editions[editionId]
     override suspend fun ensureCurrentEdition(): Long? = null
@@ -116,6 +131,21 @@ internal class FakeFullText(
         return result(articleId)
     }
 }
+
+internal fun summary(edition: Edition) = EditionSummary(
+    id = edition.id,
+    date = edition.date,
+    kind = edition.kind,
+    number = edition.number,
+    length = edition.length,
+    releaseAt = edition.releaseAt,
+    cutoffAt = edition.cutoffAt,
+    leadHeadline = null,
+    leadImageUrl = null,
+    leadSource = null,
+    storyCount = 5,
+    isRead = false,
+)
 
 internal fun story(articleId: Long, kind: ItemKind, imageUrl: String? = null, slot: Int = 0) = EditionStory(
     articleId = articleId,

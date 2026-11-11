@@ -23,17 +23,35 @@
     <string name="newsstand_latest">Latest edition</string>
     <string name="newsstand_recent">Recent editions</string>
     <string name="newsstand_older_issues">Older issues</string>
-    <string name="newsstand_refresh">Check for new posts</string>
+    <string name="newsstand_check">Check for new posts</string>
     <string name="newsstand_empty_title">No edition yet</string>
     <string name="newsstand_empty_no_sources">Add some sources and your first edition will be printed here.</string>
-    <string name="newsstand_empty_waiting">Your first edition will be printed once your sources have been fetched.</string>
+    <string name="newsstand_empty_waiting">Your sources have had nothing recent to print. Your first edition will be printed when they post.</string>
     <string name="newsstand_add_sources">Add sources</string>
     <string name="newsstand_no_edition_title">No new edition today</string>
     <string name="newsstand_no_edition_since_day">Your feeds had nothing new since %1$s’s paper.</string>
     <string name="newsstand_no_edition_since_date">Your feeds have had nothing new since the paper of %1$s.</string>
     <string name="newsstand_next_edition">Next edition at %1$s.</string>
-    <string name="refresh_no_new">No new posts since the last check</string>
-    <string name="refresh_no_sources">No sources were checked</string>
+    <string name="newsstand_unprinted_today">Today’s edition has not been printed.</string>
+    <string name="newsstand_unprinted_evening">This evening’s edition has not been printed.</string>
+    <string name="newsstand_unprinted_date">The edition of %1$s has not been printed.</string>
+    <string name="notice_dismiss">Close this notice</string>
+    <string name="print_now">Print now</string>
+    <string name="print_try_again">Try again</string>
+    <string name="print_stage_syncing">Fetching your sources…</string>
+    <string name="print_stage_building">Setting the pages…</string>
+    <string name="print_stage_text">Fetching the stories…</string>
+    <plurals name="print_stage_images">
+        <item quantity="one">Fetching %d picture…</item>
+        <item quantity="other">Fetching %d pictures…</item>
+    </plurals>
+    <string name="print_stay">Printing carries on if you leave this screen.</string>
+    <string name="print_from_stored">Your sources could not be reached, so this edition was printed from the posts already stored.</string>
+    <string name="print_nothing_new">Your sources had nothing new to print.</string>
+    <string name="print_unreachable">Your sources could not be reached, and nothing new is stored to print. Try again when you are connected.</string>
+    <string name="print_failed">The edition could not be printed. Try again.</string>
+    <string name="cover_description_unprinted">Edition of %1$s, not printed</string>
+    <string name="cover_unprinted">Not printed</string>
     <string name="cover_description">Edition No. %1$d, %2$s</string>
     <string name="edition_number_extra">No. %1$d · Extra</string>
     <string name="edition_number_evening">No. %1$d · Evening</string>
@@ -46,20 +64,19 @@
     <string name="extra_offer_detail">They join the next scheduled edition. Or print an Extra edition from them now.</string>
     <string name="extra_offer_print">Print an Extra edition</string>
     <string name="extra_offer_dismiss">Not now</string>
+    <string name="extra_reprint_detail">Today’s Extra edition went to press before they were added. It can be reprinted to include them: stories you have read drop out, and the rest are set again alongside the new ones.</string>
+    <plurals name="extra_reprint">
+        <item quantity="one">Reprint the Extra with %d new source</item>
+        <item quantity="other">Reprint the Extra with %d new sources</item>
+    </plurals>
+    <string name="extra_reprinting">Fetching the new sources and reprinting the Extra edition…</string>
+    <string name="extra_reprinted">Extra edition reprinted</string>
     <string name="extra_printing">Fetching the new sources and setting the Extra edition…</string>
     <string name="extra_printed">Extra edition printed</string>
     <string name="extra_nothing_to_print">Nothing recent from the new sources to print. Their next posts join the next edition.</string>
     <string name="cover_lead">Lead story: %1$s</string>
     <string name="cover_open">Open edition</string>
     <string name="fetching_progress">%1$d of %2$d</string>
-    <plurals name="new_posts_saved">
-        <item quantity="one">%d new post saved for tomorrow</item>
-        <item quantity="other">%d new posts saved for tomorrow</item>
-    </plurals>
-    <plurals name="sources_unreachable">
-        <item quantity="one">%d source couldn’t be reached</item>
-        <item quantity="other">%d sources couldn’t be reached</item>
-    </plurals>
     <plurals name="fetching_feeds">
         <item quantity="one">Fetching %d feed…</item>
         <item quantity="other">Fetching %d feeds…</item>
@@ -194,7 +211,7 @@
     <string name="desk_flag_loved">Read cover to cover</string>
     <string name="desk_about_broken">These could not be fetched for a week or more. The usual alternative addresses were tried as well and none of them answered with a feed.</string>
     <string name="desk_about_moved">These were found at a new address, which is now the one in use. There is nothing you need to do.</string>
-    <string name="desk_about_quiet">No posts in 90 days. That is not a problem: they are kept, checked less often, and return to the paper when they post again.</string>
+    <string name="desk_about_quiet">No posts in 90 days. That is not a problem: they are kept, checked as often as any source, and return to the paper when they post again.</string>
     <string name="desk_about_ignored">These have run in ten or more editions over the last two months without one of their stories being opened.</string>
     <string name="desk_about_noisy">Thirty or more posts a week, and almost none of them opened.</string>
     <string name="desk_about_loved">You read most of what these publish and Like it often. As a favourite, a feed is always given room.</string>
@@ -226,7 +243,7 @@
         <item quantity="other">%d feeds could do with a look</item>
     </plurals>
     <string name="sources_quiet_heading">Quiet · %1$d</string>
-    <string name="sources_quiet_detail">No posts in 90 days. Kept, and checked less often.</string>
+    <string name="sources_quiet_detail">No posts in 90 days. Kept, and still checked at every sync.</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>

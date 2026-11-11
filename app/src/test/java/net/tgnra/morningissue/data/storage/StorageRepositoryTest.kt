@@ -175,6 +175,20 @@ class StorageRepositoryTest {
     }
 
     @Test
+    fun theLargestBudgetsDoNotOverflowInBytes() = runBlocking<Unit> {
+        post("p1", 1)
+        for (megabytes in listOf(4000, 8000, AppSettings.MAX_STORAGE_BUDGET_MB)) {
+            settings.setStorageBudgetMb(megabytes)
+            val usage = storage.usage()
+            assertEquals(megabytes * 1024L * 1024L, usage.budgetBytes)
+            assertTrue("past what an Int holds", usage.budgetBytes > Int.MAX_VALUE)
+            assertTrue(!usage.overBudget)
+            assertEquals(TrimReport(), storage.trimToBudget())
+        }
+        assertEquals(16_777_216_000L, storage.usage().budgetBytes)
+    }
+
+    @Test
     fun loweringTheBudgetTrimsDownToIt() = runBlocking<Unit> {
         settings.setStorageBudgetMb(100)
         val ids = (1..60).map { post("p$it", it) }
