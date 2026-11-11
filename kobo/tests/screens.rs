@@ -157,11 +157,15 @@ struct Setup {
     /// How many suspend and prepare attempts the simulated kernel refuses.
     refuse_suspend: u32,
     refuse_prepare: u32,
+    /// The model has a mapped orientation sensor.
+    sensor: bool,
+    /// What `data/settings.json` holds at the start.
+    settings: Option<Value>,
 }
 
 impl Default for Setup {
     fn default() -> Setup {
-        Setup { editions: 3, saved: true, online: true, phone: None, sync_on_start: false, warmth: true, last_error: None, refuse_suspend: 0, refuse_prepare: 0 }
+        Setup { editions: 3, saved: true, online: true, phone: None, sync_on_start: false, warmth: true, last_error: None, refuse_suspend: 0, refuse_prepare: 0, sensor: true, settings: None }
     }
 }
 
@@ -186,8 +190,12 @@ fn setup(name: &str, now_ms: i64, s: &Setup) -> PathBuf {
         state.saved_version = Some("s1".into());
     }
     store.save_state(&state).unwrap();
+    let mut settings = s.settings.clone().unwrap_or_else(|| json!({}));
     if let Some(p) = &s.phone {
-        std::fs::write(store.settings_path(), serde_json::to_vec(&json!({"phoneAddress": p})).unwrap()).unwrap();
+        settings["phoneAddress"] = json!(p);
+    }
+    if settings != json!({}) {
+        std::fs::write(store.settings_path(), serde_json::to_vec(&settings).unwrap()).unwrap();
     }
     for (url, bytes) in pictures() {
         std::fs::write(store.images_dir().join(format!("{}.img", image_key(url))), bytes).unwrap();
@@ -249,8 +257,16 @@ fn run(dir: &str, size: &Size, s: &Setup, script: Vec<Step>) -> Outcome {
     let mut input = ScriptInput::new(script, (size.w, size.h), shared.clone());
     let (out2, shared2) = (out.clone(), shared.clone());
     input.on_mark = Some(Box::new(move |name| {
+        // "name@panel" also saves the panel as it physically shows, in its base orientation.
+        let (name, raw) = match name.strip_suffix("@panel") {
+            Some(n) => (n, true),
+            None => (name, false),
+        };
         let view = desktop::view(&panel.borrow(), shared2.rotation.get());
         desktop::save_png(&view, &out2.join(format!("{name}.png"))).unwrap();
+        if raw {
+            desktop::save_png(&panel.borrow(), &out2.join(format!("panel/{name}.png"))).unwrap();
+        }
     }));
     let writes = Rc::new(RefCell::new(Vec::new()));
     let light = FakeLight { warmth: s.warmth, level: (40, 30), original: (40, 30), writes: writes.clone() };
@@ -261,7 +277,7 @@ fn run(dir: &str, size: &Size, s: &Setup, script: Vec<Step>) -> Outcome {
     let shared3 = shared.clone();
     let opts = app::Options {
         rotation: size.rotation,
-        follow_sensor: true,
+        follow_sensor: s.sensor,
         light: Box::new(light),
         power: Box::new(DesktopPower(shared.clone())),
         network: Box::new(network),
@@ -542,35 +558,95 @@ fn what_a_sync_brings_shows_as_it_arrives() {
     assert_eq!(store.load_saved().order, vec![9038, 9001]);
 }
 
+/// The panel picture in `dir/panel/<name>.png` (as the panel physically shows it).
+fn panel_png(o: &Outcome, name: &str) -> image::GrayImage {
+    image::open(o.out.join("panel").join(format!("{name}.png"))).unwrap().to_luma8()
+}
+
+/// Portrait or landscape from Settings; within it the sensor turns the page upside down,
+/// once a reading has held (a brief tilt does nothing), always with a full refresh; a
+/// reading of the other orientation is ignored. Writes landscape and inverted landscape.
 #[test]
 fn orientation_from_settings_and_sensor() {
     let size = &SIZES[2];
+    let settle = 2000;
     let script = vec![
-        Step::Orientation(1),
-        mark("sensor-landscape"),
+        mark("01-portrait@panel"),
+        // A brief tilt: nothing.
+        Step::Orientation(2),
+        Step::Wait(500),
         Step::Orientation(0),
-        mark("sensor-portrait"),
-        tap_on("OpenSettings"),
-        tap_on("SetOrientation(Landscape)"),
-        mark("landscape"),
-        Step::Orientation(0), // ignored: the setting is fixed
-        mark("still-landscape"),
-        tap_on("SetOrientation(Portrait)"),
-        mark("portrait"),
-        tap_on("SetOrientation(Sensor)"),
+        Step::Wait(settle),
+        mark("02-brief-tilt@panel"),
+        // Held upside down: the page follows.
+        Step::Orientation(2),
+        Step::Wait(settle),
+        mark("03-portrait-inverted@panel"),
+        // Landscape while portrait is chosen: nothing.
         Step::Orientation(1),
-        mark("sensor-again"),
+        Step::Wait(settle),
+        mark("04-still-portrait-inverted"),
+        tap_on("OpenSettings"),
+        mark("05-settings"),
+        // Landscape, the way the sensor last said the Kobo is held.
+        tap_on("SetOrientation(Landscape)"),
+        mark("06-settings-landscape"),
+        Step::Key(Key::Home),
+        mark("07-landscape@panel"),
+        Step::Orientation(3),
+        Step::Wait(settle),
+        mark("08-landscape-inverted@panel"),
+        Step::Orientation(0),
+        Step::Wait(settle),
+        mark("09-still-landscape-inverted"),
+        // Turned back while asleep: it wakes up the way it is held.
+        Step::Key(Key::Power),
+        Step::Orientation(1),
+        Step::Wait(TO_SUSPEND_MS),
+        Step::Key(Key::Power),
+        Step::Wait(1000),
+        mark("10-woke-turned@panel"),
     ];
-    let o = run("rotation", size, &Setup::default(), script);
+    let o = run("rotation", size, &Setup { online: false, ..Default::default() }, script);
     let dims = |n: &str| image::image_dimensions(o.out.join(format!("{n}.png"))).unwrap();
-    assert_eq!(dims("sensor-landscape"), (1680, 1264));
-    assert_eq!(dims("sensor-portrait"), (1264, 1680));
-    assert_eq!(dims("landscape"), (1680, 1264));
-    assert_eq!(dims("still-landscape"), (1680, 1264));
-    assert_eq!(dims("portrait"), (1264, 1680));
-    assert_eq!(dims("sensor-again"), (1680, 1264));
+    let turned = |img: &image::GrayImage| image::imageops::rotate180(img);
+    assert_eq!(panel_png(&o, "02-brief-tilt"), panel_png(&o, "01-portrait"), "a brief tilt turns nothing");
+    assert_ne!(panel_png(&o, "03-portrait-inverted"), panel_png(&o, "01-portrait"));
+    assert_eq!(panel_png(&o, "03-portrait-inverted"), turned(&panel_png(&o, "01-portrait")), "upside down on the panel");
+    assert_eq!(dims("04-still-portrait-inverted"), (1264, 1680));
+    assert_eq!(dims("06-settings-landscape"), (1680, 1264));
+    assert_eq!(dims("07-landscape"), (1680, 1264));
+    assert_eq!(panel_png(&o, "08-landscape-inverted"), turned(&panel_png(&o, "07-landscape")), "inverted landscape is landscape turned over");
+    // To the reader, both landscapes look the same.
+    assert!(same_picture(&o.out.join("07-landscape.png"), &o.out.join("08-landscape-inverted.png")));
+    assert_eq!(dims("09-still-landscape-inverted"), (1680, 1264));
+    assert_eq!(panel_png(&o, "10-woke-turned"), panel_png(&o, "07-landscape"));
+    // Every change of orientation (and of screen) flashed.
+    assert!(o.refreshes.iter().all(|r| r.0 == Refresh::Full), "{:?}", o.refreshes);
     let settings: Value = serde_json::from_slice(&std::fs::read(Store::new(&o.home).settings_path()).unwrap()).unwrap();
-    assert_eq!(settings["orientation"], "sensor");
+    assert_eq!(settings["orientation"], "landscape");
+}
+
+/// On a model whose sensor is not mapped, the orientation is simply fixed.
+#[test]
+fn without_a_sensor_the_orientation_is_fixed() {
+    let size = &SIZES[2];
+    let script = vec![mark("01@panel"), Step::Orientation(2), Step::Wait(3000), mark("02@panel"), tap_on("OpenSettings"), mark("settings-no-sensor")];
+    let o = run("rotation-no-sensor", size, &Setup { sensor: false, ..Default::default() }, script);
+    assert_eq!(panel_png(&o, "01"), panel_png(&o, "02"));
+}
+
+/// 0.2.3's "sensor" setting starts the reader in the orientation the screen is in, and keeps
+/// the other settings.
+#[test]
+fn the_old_sensor_setting_is_migrated() {
+    for (size, want) in [(&SIZES[2], (1264, 1680)), (&SIZES[3], (1680, 1264))] {
+        let script = vec![mark("home"), tap_on("OpenSettings"), mark("settings")];
+        let o = run(&format!("{}/migrated", size.name), size, &Setup { settings: Some(json!({"orientation": "sensor", "invertButtons": true})), ..Default::default() }, script);
+        assert_eq!(image::image_dimensions(o.out.join("home.png")).unwrap(), (want.0 as u32, want.1 as u32));
+        let settings: Value = serde_json::from_slice(&std::fs::read(Store::new(&o.home).settings_path()).unwrap()).unwrap();
+        assert_eq!(settings["invertButtons"], true);
+    }
 }
 
 /// With the buttons inverted, Back turns forward.

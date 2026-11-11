@@ -38,6 +38,8 @@ use std::time::Duration;
 const CHROME_TIMEOUT_MS: u64 = 7_000;
 /// Pictures that arrive in a burst are drawn together at most this often.
 const BATCH_MS: u64 = 2_000;
+/// A sensor reading must hold this long before the page turns upside down to follow it.
+const SENSOR_SETTLE_MS: u64 = 1_500;
 
 // Sleep. The power button, closing the sleep cover, or `idleMinutes` without input put the
 // Kobo to sleep; the power button or opening the cover wakes it on the page it was showing.
@@ -138,7 +140,8 @@ enum SyncMsg {
 pub struct Options {
     /// The rotation Nickel left the screen in, as quarter turns from portrait.
     pub rotation: u8,
-    /// The model's orientation sensor is mapped.
+    /// The model's orientation sensor is mapped, so it turns the page upside down within the
+    /// chosen orientation.
     pub follow_sensor: bool,
     pub light: Box<dyn Light>,
     /// Puts the device to sleep.
@@ -166,6 +169,10 @@ pub struct App {
     nickel_rotation: u8,
     rotation: u8,
     follow_sensor: bool,
+    /// The sensor's last reading, as a rotation.
+    last_sensor: Option<u8>,
+    /// A sensor reading waiting to settle before the page turns to it: (rotation, since).
+    pending_flip: Option<(u8, u64)>,
     light: Box<dyn Light>,
     power: Box<dyn Power>,
     /// Set while the Kobo is going to sleep or asleep.
@@ -243,6 +250,8 @@ impl App {
             nickel_rotation: opts.rotation % 4,
             rotation: opts.rotation % 4,
             follow_sensor: opts.follow_sensor,
+            last_sensor: None,
+            pending_flip: None,
             light: opts.light,
             power: opts.power,
             sleep: None,
@@ -278,6 +287,10 @@ impl App {
             refreshes: Vec::new(),
             syncs_started: 0,
         };
+        // Not chosen yet (or 0.2.3's "follow the sensor"): the orientation the screen is in.
+        if app.settings.orientation.is_none() {
+            app.settings.orientation = Some(if app.nickel_rotation % 2 == 1 { Orientation::Landscape } else { Orientation::Portrait });
+        }
         app.rotation = app.wanted_rotation(app.nickel_rotation);
         // The light as last chosen here.
         if app.light.present() {
@@ -291,15 +304,37 @@ impl App {
         Ok(app)
     }
 
-    /// The rotation the Orientation setting asks for, given the current one.
+    fn orientation(&self) -> Orientation {
+        self.settings.orientation.unwrap_or(Orientation::Portrait)
+    }
+
+    /// The rotation the Orientation setting asks for, given the current one: the current one
+    /// if it already belongs to it; else the way the sensor last said the Kobo is held, if
+    /// that belongs to it; else the way Nickel left the screen, if that does; else upright.
     fn wanted_rotation(&self, current: u8) -> u8 {
-        match self.settings.orientation {
-            Orientation::Portrait => 0,
-            Orientation::Landscape if current % 2 == 1 => current,
-            Orientation::Landscape if self.nickel_rotation % 2 == 1 => self.nickel_rotation,
-            Orientation::Landscape => 1,
-            Orientation::Sensor => current,
+        let parity = self.orientation().parity();
+        let held = self.last_sensor.filter(|_| self.follow_sensor);
+        [Some(current), held, Some(self.nickel_rotation)].into_iter().flatten().find(|r| r % 2 == parity).unwrap_or(parity)
+    }
+
+    /// A reading from the orientation sensor. Within the chosen orientation it turns the page
+    /// upside down to match how the Kobo is held, once the reading has held for
+    /// SENSOR_SETTLE_MS (a brief tilt does nothing); the other orientation is ignored.
+    fn sensor(&mut self, r: u8) {
+        self.last_sensor = Some(r % 4);
+        let r = r % 4;
+        self.pending_flip = (self.follow_sensor && r % 2 == self.orientation().parity() && r != self.rotation).then(|| (r, self.clock.mono_ms()));
+    }
+
+    /// Turns the page once a sensor reading has settled; with a full refresh.
+    fn settle_flip(&mut self) -> io::Result<()> {
+        if let Some((r, since)) = self.pending_flip {
+            if self.clock.mono_ms().saturating_sub(since) >= SENSOR_SETTLE_MS {
+                self.pending_flip = None;
+                self.rotate_to(r)?;
+            }
         }
+        Ok(())
     }
 
     fn metrics(&self) -> Metrics {
@@ -457,7 +492,7 @@ impl App {
                     last_result: if self.sync.is_some() { self.status().0 } else { last },
                     last_is_error: err && self.sync.is_none(),
                     invert_buttons: self.settings.invert_buttons,
-                    orientation: self.settings.orientation,
+                    orientation: self.orientation(),
                     sensor: self.follow_sensor,
                 };
                 ui::draw_settings(&ctx, &mut canvas, &view)
@@ -833,9 +868,10 @@ impl App {
                 self.show(Show::Touch)?;
             }
             Action::SetOrientation(o) => {
-                if o != self.settings.orientation {
-                    self.settings.orientation = o;
+                if Some(o) != self.settings.orientation {
+                    self.settings.orientation = Some(o);
                     self.save_settings();
+                    self.pending_flip = None;
                     let r = self.wanted_rotation(self.rotation);
                     if r != self.rotation {
                         self.rotate_to(r)?;
@@ -1021,6 +1057,8 @@ impl App {
             Some(RawEvent::Key(Key::CoverClosed)) => self.cover_closed = true,
             Some(RawEvent::Key(Key::Power)) if self.cover_closed => eprintln!("sleep: power button with the cover closed; staying asleep"),
             Some(RawEvent::Key(Key::Power)) => return self.wake("power button"),
+            // Remembered, so the page wakes up the way the Kobo is held.
+            Some(RawEvent::Orientation(r)) => self.last_sensor = Some(r % 4),
             Some(_) | None => {}
         }
         if self.sleep.as_ref().is_some_and(|s| self.clock.mono_ms() >= s.at) {
@@ -1101,8 +1139,16 @@ impl App {
                 RawEvent::Quit => return Ok(true),
                 RawEvent::Key(Key::CoverClosed) => self.cover_closed = true,
                 RawEvent::Key(Key::CoverOpened) => self.cover_closed = false,
+                RawEvent::Orientation(r) => self.last_sensor = Some(r % 4),
                 _ => {}
             }
+        }
+        // Turned over while asleep: wake up the way it is held now.
+        self.pending_flip = None;
+        let r = self.wanted_rotation(self.last_sensor.filter(|_| self.follow_sensor).unwrap_or(self.rotation));
+        if r != self.rotation {
+            self.rotation = r;
+            self.relayout_all();
         }
         let now = self.clock.mono_ms();
         self.last_input = now;
@@ -1301,7 +1347,7 @@ impl App {
         loop {
             let wait = match &self.sleep {
                 Some(s) => Duration::from_millis(s.at.saturating_sub(self.clock.mono_ms()).clamp(1, 1000)),
-                None if self.sync.is_some() => Duration::from_millis(250),
+                None if self.sync.is_some() || self.pending_flip.is_some() => Duration::from_millis(250),
                 None => Duration::from_secs(1),
             };
             let ev = self.input.next(wait);
@@ -1349,9 +1395,7 @@ impl App {
                         }
                         RawEvent::Key(k) => self.key(k)?,
                         RawEvent::Orientation(r) => {
-                            if self.follow_sensor && self.settings.orientation == Orientation::Sensor {
-                                self.rotate_to(r)?;
-                            }
+                            self.sensor(r);
                             false
                         }
                     }
@@ -1360,6 +1404,7 @@ impl App {
             if exit {
                 return self.finish();
             }
+            self.settle_flip()?;
             self.poll_sync()?;
             let now = self.clock.mono_ms();
             if self.stale && now.saturating_sub(self.last_update) >= BATCH_MS {

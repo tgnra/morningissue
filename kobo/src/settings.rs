@@ -12,14 +12,37 @@ pub const DEFAULT_PORT: u16 = 47824;
 pub const TEXT_SIZES: [f32; 5] = [0.86, 0.93, 1.0, 1.12, 1.26];
 pub const DEFAULT_TEXT_SIZE: usize = 2;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Portrait or landscape. On a model whose orientation sensor is mapped, the sensor turns the
+/// page upside down within the chosen one to match how the Kobo is held; elsewhere it is fixed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Orientation {
-    /// Follow the orientation sensor, on models where it is mapped.
-    #[default]
-    Sensor,
     Portrait,
     Landscape,
+}
+
+impl Orientation {
+    /// The rotations (quarter turns from portrait) that belong to it: even for portrait, odd
+    /// for landscape.
+    pub fn parity(self) -> u8 {
+        match self {
+            Orientation::Portrait => 0,
+            Orientation::Landscape => 1,
+        }
+    }
+}
+
+/// Reads the orientation leniently. Up to 0.2.3 the choices were "sensor" (the default:
+/// follow the sensor freely), "portrait" and "landscape"; "sensor", and anything unknown,
+/// becomes None: the orientation the screen was in when the reader opened, which is what
+/// following the sensor showed at that moment.
+fn lenient_orientation<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Orientation>, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(match v.as_str() {
+        Some("portrait") => Some(Orientation::Portrait),
+        Some("landscape") => Some(Orientation::Landscape),
+        _ => None,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -29,7 +52,9 @@ pub struct Settings {
     pub phone_address: Option<String>,
     /// Swaps the two page-turn buttons.
     pub invert_buttons: bool,
-    pub orientation: Orientation,
+    /// None until chosen: the reader starts in the orientation it finds the screen in.
+    #[serde(deserialize_with = "lenient_orientation", skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<Orientation>,
     /// Index into [`TEXT_SIZES`].
     pub text_size: usize,
     /// Front light, in percent; None leaves it as Nickel set it.
@@ -40,7 +65,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { phone_address: None, invert_buttons: false, orientation: Orientation::Sensor, text_size: DEFAULT_TEXT_SIZE, brightness: None, warmth: None }
+        Settings { phone_address: None, invert_buttons: false, orientation: None, text_size: DEFAULT_TEXT_SIZE, brightness: None, warmth: None }
     }
 }
 
@@ -114,11 +139,30 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { phone_address: Some("1.2.3.4:5".into()), invert_buttons: true, orientation: Orientation::Landscape, text_size: 4, brightness: Some(40), warmth: Some(70) };
+        let s = Settings { phone_address: Some("1.2.3.4:5".into()), invert_buttons: true, orientation: Some(Orientation::Landscape), text_size: 4, brightness: Some(40), warmth: Some(70) };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         std::fs::write(&path, br#"{"textSize": 99, "future": 1, "orientation": "portrait"}"#).unwrap();
         let s = Settings::load(&path);
-        assert_eq!((s.text_size, s.orientation), (4, Orientation::Portrait));
+        assert_eq!((s.text_size, s.orientation), (4, Some(Orientation::Portrait)));
+    }
+
+    #[test]
+    fn the_old_sensor_choice_becomes_the_orientation_found_at_start() {
+        let dir = std::env::temp_dir().join(format!("mi-settings-old-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        // 0.2.3's default, with other settings that must survive it.
+        std::fs::write(&path, br#"{"orientation": "sensor", "textSize": 3, "invertButtons": true, "warmth": 20}"#).unwrap();
+        let s = Settings::load(&path);
+        assert_eq!((s.orientation, s.text_size, s.invert_buttons, s.warmth), (None, 3, true, Some(20)));
+        std::fs::write(&path, br#"{"orientation": "landscape"}"#).unwrap();
+        assert_eq!(Settings::load(&path).orientation, Some(Orientation::Landscape));
+        std::fs::write(&path, br#"{"orientation": 7, "textSize": 1}"#).unwrap();
+        assert_eq!((Settings::load(&path).orientation, Settings::load(&path).text_size), (None, 1));
+        // Not chosen yet: not written.
+        Settings { text_size: 1, ..Default::default() }.save(&path).unwrap();
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("orientation"));
     }
 }

@@ -61,7 +61,11 @@ change the screen mode.
   leaves the list at the next sync.
 - **Settings:** the Wi-Fi state, how to find the phone (automatically, or a typed address
   on a keypad; the port defaults to 47824), **Sync now**, inverting the page-turn buttons,
-  orientation (follow the sensor, portrait or landscape), and the last sync's result.
+  orientation (portrait or landscape), and the last sync's result. On a model with a
+  mapped orientation sensor, the sensor turns the page upside down within the chosen
+  orientation to match how you hold it, once the reading has held for 1.5 s, with a full
+  refresh. Until you choose, the reader keeps the orientation the screen was in when it
+  opened (this is also what 0.2.3's "follow the sensor" becomes).
   Settings, the text size and the light levels are kept in `data/settings.json`.
 - **Sleep:** the power button, closing the sleep cover, or 20 minutes without input put the
   Kobo to sleep. The screen goes blank with "Sleeping…" small in the lower right corner, the
@@ -126,8 +130,10 @@ sources and is unverified.
 
 Known gaps:
 
-- **Orientation:** the sensor is followed only on the Libra 2, where KOReader and Plato
-  agree on its mapping. Elsewhere, choose portrait or landscape in Settings.
+- **Orientation:** the sensor is followed only on the Libra 2. 0.2.3 took its mapping from
+  KOReader's names for the values and drew landscape upside down on the device; the two
+  landscape values are now the other way round (`profile::LIBRA2_SENSOR`), not yet checked
+  on the device. Elsewhere the chosen orientation is fixed.
 - **Touch:** each model's transform comes from KOReader and Plato and is untested. If taps
   land in the wrong place, set `touch` in `config.json`.
 - **Waiting for refreshes:** the Mark 7 "wait for update complete" ioctl is unreliable on
@@ -210,7 +216,8 @@ cd kobo && cargo test
   that refuses to suspend; home with one, two and three editions, offline, syncing and after an error;
   Settings and the keypad; Saved; the reader with its chrome hidden and shown; the Aa
   popover, with and without warmth; a background sync against the fake phone (a new
-  edition and pictures arriving while reading); no sync attempt offline; orientation; and
+  edition and pictures arriving while reading); no sync attempt offline; orientation (portrait
+  and landscape, each upside down, a brief tilt ignored, no sensor, the old setting); and
   inverted buttons. It writes every screen, plus a `contact.png` sheet, to
   `kobo/target/screens/<size>/<run>/`.
 - `tests/launch.rs` runs `launch/launch.sh` against a fake root with busybox-like stubs:

@@ -469,7 +469,7 @@ pub struct EvdevInput {
     touch: TouchState,
     quirk: TouchQuirk,
     base: (i32, i32),
-    follow_sensor: bool,
+    sensor: Option<crate::profile::SensorMap>,
     queue: VecDeque<RawEvent>,
     last_pos: (i32, i32),
 }
@@ -544,7 +544,7 @@ impl EvdevInput {
             touch: TouchState { slot: 0, raw: (0, 0), down: false, frame_down: None, frame_pos: false, max, mt },
             quirk,
             base,
-            follow_sensor: profile.follow_sensor,
+            sensor: profile.sensor,
             queue: VecDeque::new(),
             last_pos: (0, 0),
         })
@@ -609,15 +609,9 @@ impl EvdevInput {
                     self.queue.push_back(RawEvent::Key(k));
                 }
             }
-            EV_MSC if code == MSC_RAW && self.follow_sensor => {
-                let r = match value {
-                    0x18 => Some(0), // portrait up
-                    0x19 => Some(1), // landscape right
-                    0x17 => Some(2), // portrait down
-                    0x1a => Some(3), // landscape left
-                    _ => None,
-                };
-                if let Some(r) = r {
+            EV_MSC if code == MSC_RAW => {
+                // The model's own mapping; see `Profile::sensor`.
+                if let Some(r) = self.sensor.as_ref().and_then(|m| crate::profile::sensor_rotation(m, value)) {
                     self.queue.push_back(RawEvent::Orientation(r));
                 }
             }
@@ -773,7 +767,7 @@ mod tests {
             touch: TouchState { slot: 0, raw: (0, 0), down: false, frame_down: None, frame_pos: false, max, mt: true },
             quirk,
             base,
-            follow_sensor: true,
+            sensor: Some(crate::profile::LIBRA2_SENSOR),
             queue: VecDeque::new(),
             last_pos: (0, 0),
         }
@@ -797,7 +791,17 @@ mod tests {
         i.handle(false, EV_KEY, KEY_F24, 0);
         i.handle(false, EV_MSC, MSC_RAW, 0x19);
         assert_eq!(i.queue.pop_front(), Some(RawEvent::Key(Key::Forward)));
+        assert_eq!(i.queue.pop_front(), Some(RawEvent::Orientation(3)), "turned clockwise: the top of the page along the panel's left edge");
+        i.handle(false, EV_MSC, MSC_RAW, 0x1a);
+        i.handle(false, EV_MSC, MSC_RAW, 0x1c); // face down: ignored
         assert_eq!(i.queue.pop_front(), Some(RawEvent::Orientation(1)));
+        assert!(i.queue.is_empty());
+        // The sleep cover's hall sensor is KEY_F1 (59): pressed when it closes, released when
+        // it opens; a repeat (value 2) is chatter. The power button acts on its press only.
+        for (c, v) in [(KEY_F1, 1), (KEY_F1, 2), (KEY_F1, 0), (KEY_POWER, 1), (KEY_POWER, 0)] {
+            i.handle(false, EV_KEY, c, v);
+        }
+        assert_eq!(i.queue.drain(..).collect::<Vec<_>>(), [RawEvent::Key(Key::CoverClosed), RawEvent::Key(Key::CoverOpened), RawEvent::Key(Key::Power)]);
     }
 
     #[test]

@@ -556,7 +556,7 @@ pub struct SettingsView<'s> {
     pub last_is_error: bool,
     pub invert_buttons: bool,
     pub orientation: Orientation,
-    /// The model's sensor is mapped, so "Follow the sensor" is offered.
+    /// The model's sensor is mapped, so it turns the page upside down within the choice.
     pub sensor: bool,
 }
 
@@ -675,21 +675,21 @@ pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
     rule(ctx, canvas, x, &mut y, w);
 
     section(ctx, canvas, x, &mut y, w, "ORIENTATION");
-    let mut options = Vec::new();
-    if s.sensor {
-        options.push(("Follow the sensor", Orientation::Sensor));
-    }
-    options.push(("Portrait", Orientation::Portrait));
-    options.push(("Landscape", Orientation::Landscape));
-    let sel = if !s.sensor && s.orientation == Orientation::Sensor { Orientation::Portrait } else { s.orientation };
+    let options = [("Portrait", Orientation::Portrait), ("Landscape", Orientation::Landscape)];
     // A segmented row: one box per choice, the chosen one filled.
     let gap = m.pt(6.0) as i32;
     let n = options.len() as i32;
     let ow = (w - gap * (n - 1)) / n;
     for (i, (label, o)) in options.into_iter().enumerate() {
         let r = Rect::new(x + i as i32 * (ow + gap), y as i32, ow, bh);
-        button(ctx, canvas, r, label, o == sel, true);
+        button(ctx, canvas, r, label, o == s.orientation, true);
         hits.push((target(ctx, r), Action::SetOrientation(o)));
+    }
+    if s.sensor {
+        y += bh as f32 + m.pt(6.0);
+        let note = "The page turns upside down to match how you hold the Kobo.";
+        let n = ctx.para(&text::plain(note, ctx.ty.caption.color(MUTED)), w as f32, Align::Left, 1.35, None);
+        n.draw(ctx.fonts, canvas, x as f32, y);
     }
     hits
 }
