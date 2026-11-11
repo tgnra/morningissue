@@ -174,6 +174,12 @@
     <string name="settings_reset_time">New edition at</string>
     <string name="settings_reset_detail">Each day’s paper is released at this time. Nothing changes in between.</string>
     <string name="settings_set_time">Set time</string>
+    <string name="settings_evening">Evening edition</string>
+    <string name="settings_evening_detail">A second, shorter paper from the feeds that post every day. Weekly and rarer feeds wait for the morning.</string>
+    <string name="settings_evening_off">Off</string>
+    <string name="settings_evening_on">On</string>
+    <string name="settings_evening_time">Evening edition at</string>
+    <string name="settings_evening_at">Released at %1$s</string>
     <string name="settings_length">Edition length</string>
     <string name="settings_length_detail">Standard is about 25 stories. Applies from the next edition.</string>
     <string name="length_short">Short</string>

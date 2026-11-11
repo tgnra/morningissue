@@ -24,18 +24,34 @@ interface EditionPublisher {
     suspend fun ensureCurrentEdition(): Long?
 
     /**
-     * Builds the edition for the *next* reset ahead of time (`cutoffAt = now`, `releaseAt` =
-     * next reset) and stores it unreleased. Does not sync or prefetch; the caller does that
+     * Builds the edition for the *next* release ahead of time (`cutoffAt = now`, `releaseAt` =
+     * the next reset, or the evening edition's time when that is switched on and comes first)
+     * and stores it unreleased. Does not sync or prefetch; the caller does that
      * around this call. Returns the edition's ID, the existing one if it was already built, or
      * null when there is nothing to build from.
      */
     suspend fun buildNextEdition(): Long?
 
     /**
-     * When the next edition will be released, from the reset time setting and the current time
-     * zone; shown on the back page. Null if it cannot be determined.
+     * When the next edition will be released, from the reset time (and, when it is switched
+     * on, the evening edition's time) and the current time zone; shown on the back page. Null
+     * if it cannot be determined.
      */
     suspend fun nextReleaseAt(): Instant?
+
+    /**
+     * Prints an Extra edition at once from the stored posts of [feedIds] (sync them first):
+     * their posts first seen in the last few days that no edition has printed yet, each feed's
+     * newest five whatever their age. Released immediately and returned by ID.
+     *
+     * It does not disturb the schedule: no cutoff moves, today's edition is untouched, and
+     * nothing is superseded. Stories it prints are not new in the next morning edition; posts
+     * it only lists in its index still are.
+     *
+     * Returns null, storing nothing, when those feeds have nothing printable, or when an Extra
+     * edition already exists for today's date (one per calendar date).
+     */
+    suspend fun publishExtraEdition(feedIds: Set<Long>): Long? = null
 }
 
 /**

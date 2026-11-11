@@ -70,6 +70,20 @@ abstract class ArticleDao {
     )
     abstract suspend fun heldOverForFeed(feedId: Long, upTo: Instant, limit: Int): List<ArticleRow>
 
+    /**
+     * When [feedId] last posted, going by the posts the app had seen by [seenUpTo]; null when
+     * it knew of none. Welcome back measures a feed's silence from here.
+     */
+    @Query("SELECT publishedAt FROM article WHERE feedId = :feedId AND firstSeenAt <= :seenUpTo ORDER BY publishedAt DESC LIMIT 1")
+    abstract suspend fun lastKnownPostAt(feedId: Long, seenUpTo: Instant): Instant?
+
+    /** Feeds with a post the reader Liked or saved at or after [since]. */
+    @Query(
+        "SELECT DISTINCT a.feedId FROM engagement g JOIN article a ON a.id = g.articleId " +
+            "WHERE g.likedAt >= :since OR g.savedAt >= :since",
+    )
+    abstract suspend fun feedsLikedOrSavedSince(since: Instant): List<Long>
+
     @Query("$ROW_SELECT WHERE a.feedId = :feedId ORDER BY a.publishedAt DESC LIMIT :limit")
     abstract fun observeForFeed(feedId: Long, limit: Int): Flow<List<ArticleRow>>
 

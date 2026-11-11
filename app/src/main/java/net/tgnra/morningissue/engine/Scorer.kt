@@ -35,14 +35,21 @@ data class Score(
     val halfLifeHours: Double,
     /** The median interval used, in hours (the tier's typical one when cadence is unknown). */
     val intervalHours: Double,
+    /** C, the comeback boost: 1 unless this post ends a long silence of its feed. */
+    val c: Double = 1.0,
+    /** How long the feed had been quiet, in days, when this post is a comeback; null otherwise. */
+    val quietDays: Long? = null,
 ) {
-    val value: Double = a * f * s * p
+    val value: Double = a * f * s * p * c
+
+    val isComeback: Boolean get() = quietDays != null
 }
 
 /**
- * `score = A × F × S × P` from "v1 Live feed" with v2's changes: age is measured at the
- * edition's release time, and P counts editions a post ran in unopened. Every constant comes
- * from [config]; with `halfLifeFloorHours = 4` this reproduces v1's worked examples.
+ * `score = A × F × S × P × C`, as described under "Scoring" in `docs/how-it-works.md`: age is
+ * measured at the edition's release time, P counts editions a post ran in unopened, and C is
+ * the comeback boost. Every constant comes from [config]; with `halfLifeFloorHours = 4` this
+ * reproduces the original live-feed design's worked examples.
  */
 class Scorer(
     private val config: RankingConfig = RankingConfig.Default,
@@ -56,6 +63,7 @@ class Scorer(
         val interval = intervalHours(feed)
         // A post dated after the release moment (an edition built on open) is simply brand new.
         val ageHours = (Duration.between(candidate.publishedAt, at).toMillis() / MILLIS_PER_HOUR).coerceAtLeast(0.0)
+        val quietDays = quietDays(candidate)
         return Score(
             affinity = affinity,
             a = affinityWeight(affinity),
@@ -65,7 +73,21 @@ class Scorer(
             ageHours = ageHours,
             halfLifeHours = halfLifeHours(interval),
             intervalHours = interval,
+            // The reader turned the feed down: its return is labelled but not pushed forward.
+            c = if (quietDays != null && feed.sliderStep >= SliderStep.AUTO) config.comebackBoost else 1.0,
+            quietDays = quietDays,
         )
+    }
+
+    /**
+     * Welcome back: how many days the feed had been silent before [candidate], when that is
+     * at least `comebackQuietDays`; null otherwise. Only a new post can be a comeback, so a
+     * held-over reprint does not keep the boost.
+     */
+    fun quietDays(candidate: Candidate): Long? {
+        val previous = candidate.previousPostAt ?: return null
+        if (candidate.isHeldOver) return null
+        return Duration.between(previous, candidate.publishedAt).toDays().takeIf { it >= config.comebackQuietDays }
     }
 
     /** The slider applied to learned affinity; `Affinity.effective` is the one implementation. */
@@ -113,6 +135,10 @@ class Scorer(
         if (kind == ItemKind.ARCHIVE) {
             return "From the archive: you have not read this one from ${feed.title} yet"
         }
+        if (kind == ItemKind.AWAY) {
+            return "While you were away: ${feed.title} ran this in an edition you missed"
+        }
+        score.quietDays?.let { return "${comebackLabel(it)}: ${feed.title} has posted again" }
         if (candidate.isHeldOver) {
             return "Held over: still unread from ${feed.title}, ${lovedBecause(feed)}"
         }
@@ -150,13 +176,32 @@ class Scorer(
         }
     }
 
+    /** "Back after 2 years", "Back after 5 months": the label of a comeback post. */
+    fun comebackLabel(quietDays: Long): String {
+        val years = quietDays / 365
+        return when {
+            years >= 2 -> "$COMEBACK_PREFIX $years years"
+            years == 1L -> "$COMEBACK_PREFIX a year"
+            else -> "$COMEBACK_PREFIX ${(quietDays / 30).coerceIn(2, 11)} months"
+        }
+    }
+
     private fun log2(x: Double): Double = ln(x) / LN_2
 
-    private companion object {
-        const val MILLIS_PER_HOUR = 3_600_000.0
-        val LN_2 = ln(2.0)
+    companion object {
+        private const val MILLIS_PER_HOUR = 3_600_000.0
+        private val LN_2 = ln(2.0)
 
         /** Scarcity counts as the reason from roughly a post every three days or slower. */
-        const val RARE_PULL = 0.35
+        private const val RARE_PULL = 0.35
+
+        private const val COMEBACK_PREFIX = "Back after"
+
+        /**
+         * The comeback label carried by a stored reason line ("Back after 2 years"), or null
+         * when the story is not a comeback. The label is stored nowhere else.
+         */
+        fun comebackLabelOf(reason: String?): String? =
+            reason?.takeIf { it.startsWith("$COMEBACK_PREFIX ") && ':' in it }?.substringBefore(':')
     }
 }

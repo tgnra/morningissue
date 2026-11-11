@@ -22,14 +22,14 @@ import net.tgnra.morningissue.data.db.EditionDao
 import net.tgnra.morningissue.data.settings.SettingsRepository
 import net.tgnra.morningissue.engine.EditionClock
 import net.tgnra.morningissue.engine.RankingConfig
-import net.tgnra.morningissue.model.EditionKind
 
 /**
  * Keeps one [EarlyBuildWorker] scheduled as unique one-off work, aimed at
  * `reset − earlyBuildLead` (`RankingConfig.earlyBuildLeadMinutes`, 90 minutes) and requiring a
  * network connection.
  *
- * Which reset it aims for:
+ * A release is the morning reset or, when the Evening edition is switched on, its release
+ * time; "reset" below means either. Which one it aims for:
  * - normally the coming one. If its build moment has already passed, the work runs as soon as
  *   it can rather than skipping the day;
  * - the one after, once the coming reset has been dealt with: its edition is stored, or a run
@@ -70,11 +70,14 @@ class WorkManagerEditionScheduler(
     suspend fun reschedule(): Unit = mutex.withLock {
         val workManager = workManager()
         val now = clock.instant()
-        val resetTime = settings.settings.first().resetTime
+        val settings = settings.settings.first()
+        val resetTime = settings.resetTime
+        val eveningTime = settings.eveningEditionTime.takeIf { settings.eveningEditionEnabled }
         val zone = zone()
         val lead = Duration.ofMinutes(config.earlyBuildLeadMinutes)
-        val coming = EditionClock.nextReset(now, resetTime, zone)
-        val following = EditionClock.nextReset(coming, resetTime, zone)
+        val comingRelease = EditionClock.nextRelease(now, resetTime, eveningTime, zone)
+        val coming = comingRelease.at
+        val following = EditionClock.nextRelease(coming, resetTime, eveningTime, zone).at
 
         val existing = workManager.getWorkInfosForUniqueWorkFlow(UNIQUE_WORK_NAME).first()
         val running = existing.any { it.state == WorkInfo.State.RUNNING }
@@ -86,7 +89,7 @@ class WorkManagerEditionScheduler(
             target = if (now.isBefore(coming.minus(lead))) coming else following
             policy = ExistingWorkPolicy.APPEND_OR_REPLACE
         } else {
-            val dealtWith = editionDao.getByDate(EditionClock.editionDate(coming, zone), EditionKind.MORNING) != null ||
+            val dealtWith = editionDao.getByDate(EditionClock.editionDate(coming, zone), comingRelease.kind) != null ||
                 existing.any { it.state == WorkInfo.State.SUCCEEDED && resetTag(coming) in it.tags }
             target = if (dealtWith) following else coming
             // Already waiting for exactly that reset: leave it (and the record of the finished

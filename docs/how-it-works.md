@@ -120,10 +120,10 @@ Posts sharing a timestamp count once. A feed with fewer than 5 distinct timestam
 
 ## Scoring
 
-Every candidate post gets a score from four multiplied factors (`engine/Scorer.kt`). All constants live in `engine/RankingConfig.kt`.
+Every candidate post gets a score from multiplied factors (`engine/Scorer.kt`). All constants live in `engine/RankingConfig.kt`.
 
 ```
-score = A × F × S × P
+score = A × F × S × P × C
 ```
 
 Multiplying means any factor near zero sinks the post: affinity cannot rescue stale news, and a post the reader has finished never returns.
@@ -134,6 +134,7 @@ Multiplying means any factor near zero sinks the post: affinity cannot rescue st
 | F, freshness | `0.5 ^ (age / h)`, with `h = clamp(1.5 × medianInterval, 12 h, 240 h)` | `age` is measured at the edition's release time, not when the reader opens it. A post dated after release counts as brand new. |
 | S, scarcity | `min(1.8, 1 + 0.15 × log2(1 + medianInterval / 24 h))` | About 1.00 for a firehose, 1.15 for a daily feed, 1.45 for a weekly one, 1.74 for a monthly one. |
 | P, seen penalty | `0.5 ^ editionsRunUnopened`; 0 once the post is read | Halves for each edition the post was printed in without being opened. |
+| C, comeback boost | 1.5 for a feed's first post after 90 quiet days; otherwise 1 | See [Welcome back](#welcome-back). |
 
 The slider turns learned affinity into the value used in A:
 
@@ -166,9 +167,25 @@ Worked examples, all untouched posts scored at release time:
 
 The week-old post from the blog you love beats this morning's news.
 
-There is no freshness cut-off: `RankingConfig.minFreshness` (0.05) is defined but not applied. What keeps old posts out is the age limit in step 1 of assembly and the thresholds for In brief and held-over posts.
+**Freshness floor.** A new post whose F has dropped below 0.05 (`RankingConfig.minFreshness`) is not printed. That is about 52 hours for a firehose and six and a half days for a daily feed; Weekly and Rare feeds reach the 30-day age limit first. The post is still listed in the back-page index. Held-over posts are exempt, as are the newest posts of each feed in an Extra edition.
 
-Each printed story also stores a one-line reason (`Scorer.reason`), for example "You read most posts from Daring Fireball", "Rare post: this blog publishes about once a month" or "New from The Verge since the last edition". The line is stored in `edition_item.reason`; the menu that shows it is in progress.
+Each printed story also stores a one-line reason (`Scorer.reason`), for example "You read most posts from Daring Fireball", "Rare post: this blog publishes about once a month" or "New from The Verge since the last edition". The line is stored in `edition_item.reason` and shown by "Why is this here?" in the story menu.
+
+### Welcome back
+
+When a feed posts again after at least 90 days of silence (`comebackQuietDays`), that post is a comeback:
+
+- Its score is multiplied by 1.5 (`comebackBoost`), on top of scarcity. A comeback from a neutral weekly feed scores about 0.65 × 1.45 × 1.5 = 1.41. A brand-new post from a Favourite weekly feed scores 1.45 and little else comes near, so with five front-page slots the comeback nearly always makes the front page. It is not guaranteed the lead.
+- Its reason line reads "Back after 2 years: *feed* has posted again". The label ("Back after 5 months", "Back after a year", "Back after 2 years") is also on `EditionStory.comebackLabel`, read back from the reason line. No screen shows it as a badge yet.
+
+The silence is measured from the feed's newest post that the app had already seen before this edition's window opened, to the publish time of the feed's first new post after it. So:
+
+- only the first post back is a comeback; the feed's later posts are ordinary;
+- a newly added feed is never a comeback, whatever the gaps in its history;
+- a held-over reprint of the comeback post loses the boost and the label;
+- a feed with the slider below Auto gets the label but not the boost.
+
+The publisher looks the gap up from article timestamps (`ArticleDao.lastKnownPostAt`), one indexed query per feed with new posts. It does not use the `feed_health` table.
 
 ## Affinity learning
 
@@ -224,16 +241,16 @@ The slider is not part of learning. It is applied on top, in `Affinity.effective
 
 ## How an edition is assembled
 
-`edition/RoomEditionPublisher.kt` gathers the candidates and `engine/EditionBuilder.kt`, a pure function, lays them out. The whole build runs in one database transaction.
+`edition/RoomEditionPublisher.kt` gathers the candidates and `engine/EditionBuilder.kt`, a pure function, lays them out. The whole build runs in one database transaction. This section describes the morning edition; the [Evening](#the-evening-edition) and [Extra](#the-extra-edition) editions differ where their sections say.
 
-1. **Relearn affinity**, counting the edition being superseded.
+1. **Relearn affinity**, counting the editions being superseded.
 2. **Build the candidate pool.**
-   - New posts: everything first seen after the previous edition's cutoff, up to now. With no earlier edition, the last 3 days.
+   - New posts: everything first seen after the previous morning edition's cutoff, up to now, except stories that an Evening or Extra edition printed in between. With no earlier edition, the last 3 days.
    - Held-over posts: for each loved Weekly or Rare feed, its 5 newest untouched posts from before the previous cutoff.
    - Left out: posts of feeds muted at release time, and new posts published more than 30 days before release (a newly added feed's back catalogue). Held-over posts are exempt from the age limit.
 3. **Score** every candidate at the release time and rank them. Ties go to the newer post.
-4. **Deduplicate.** Not built: every post is its own story.
-5. **Apply carry-over.** See [Carry-over and From the archive](#carry-over-and-from-the-archive).
+4. **Deduplicate** stories syndicated across feeds. See [Cross-feed deduplication](#cross-feed-deduplication).
+5. **Apply carry-over and the freshness floor.** See [Carry-over and From the archive](#carry-over-and-from-the-archive) and [Scoring](#scoring).
 6. **Front page.** The best 5 stories, at most one per feed. The highest score leads, with or without an image.
 7. **Top stories.** The next best stories regardless of tag, on up to two pages. Each slot goes to the best remaining story after its score is multiplied by 0.7 for every story from the same feed already on that page, so one busy feed cannot fill a page while others have something to offer.
 8. **Section pages.** One page per tag, then General. The rules:
@@ -244,8 +261,40 @@ The slider is not part of learning. It is applied on top, in `Affinity.effective
    - A story appears at most once in an edition.
 9. **In brief.** Remaining Firehose and Daily posts scoring at least 0.1, best first, as headline-only lines.
 10. **From the archive.** One story; see below.
-11. **Index.** Everything else goes in "Also in your feeds" on the back page, grouped by source in alphabetical order.
-12. **Freeze and store.** The edition gets the next running number. Reading it never reshuffles it; Likes, reads and skips only shape later editions.
+11. **While you were away.** If the reader missed editions, a pull-out page goes in as page 2. See [While you were away](#while-you-were-away).
+12. **Index.** Everything else goes in "Also in your feeds" on the back page, grouped by source in alphabetical order.
+13. **Freeze and store.** The edition gets the next running number. Reading it never reshuffles it; Likes, reads and skips only shape later editions.
+
+### Cross-feed deduplication
+
+Two candidates are the same story when either of these holds (`EditionBuilder.dedupe`, `engine/StoryKeys.kt`):
+
+- **Same canonical URL.** The scheme, host case, a leading `www.`, a default port, the fragment, a trailing slash and tracking parameters (`utm_*`, `fbclid`, `gclid`, `mc_cid` and similar) are ignored. The path keeps its case and other query parameters count. A bare site address is not a story link. Within one feed the titles must match as well, so a status feed whose posts all link to one page is left alone.
+- **Same title, from different feeds.** Titles are compared after lower-casing and removing accents, punctuation and the feed's own name at either end ("… | The Verge"). They must be identical, at least 4 words and 20 characters long, and published within 72 hours of each other.
+
+The title rule is exact on purpose. "Security updates for Tuesday" and "Security updates for Wednesday", or two release announcements one version apart, are different stories, and short titles such as "Links" never match.
+
+Of the copies, the one from the feed with the higher affinity (after the slider) is kept; a tie goes to the better score. A copy the reader has already read wins outright, so the story counts as finished. The other copies are placed nowhere in the edition, not even in the index. They stay on their source pages and in search.
+
+The kept story's reason line ends "; also in 2 other feeds". `DraftItem.alsoInFeeds` carries the number in the engine; it is not stored in a column of its own.
+
+Dropped copies do not come back as new: a later edition only takes posts first seen after the cutoff. A copy of a story that an Evening or Extra edition already printed is dropped from the next morning edition too. One case is not covered: when a dropped copy belongs to a loved Weekly or Rare feed and the reader opens the kept copy, the dropped copy can return later as a held-over post, because nothing records that it was a duplicate.
+
+### While you were away
+
+An edition counts as **missed** when it has been released, the reader never opened it, and it was released after their last visit (the last time they opened any edition) and within the last 30 days. Posts first seen during a gap in which no edition was built need nothing special: they are new candidates for the next build.
+
+When the morning edition is built and there are missed editions, it carries one pull-out page (`ItemKind.AWAY`):
+
+- **Where.** Page 2, straight after the front page. The front page keeps the masthead and today's lead, and the cover and reader code that expect the front page first stay valid.
+- **From.** The untouched stories that were printed in the missed editions (not their indexes).
+- **Ranked** by the same score, with freshness measured from the reader's last visit instead of the release time. Anything published since that visit counts as brand new. The unopened runs in the missed editions do not count against a story here.
+- **Left out.** Firehose feeds, unless the reader Liked or saved one of their posts in the last 30 days. Feeds with the slider below Auto. Muted feeds. Stories already opened. Stories placed elsewhere in this edition (a held-over post keeps its regular place). Copies of the same story. Anything scoring under 0.1.
+- **Size.** The top 30 at Standard and Long, 15 at Short. The rest are dropped, not queued.
+
+A story appears in a pull-out that the reader could see at most once: once an edition with a pull-out has been opened, its pull-out stories are never offered again. A pull-out in an edition that was itself missed does not use its stories up. Missed editions cannot pile up, because the page is capped and every edition released before the reader's latest visit stops counting.
+
+A reader who has never opened an edition gets no pull-out. The Evening and Extra editions never carry one.
 
 ### Edition structure
 
@@ -256,6 +305,7 @@ The slider is not part of learning. It is applied on top, in `Affinity.effective
 | Section pages | One per tag with at least 2 stories, then General | 3 each | 6 each | 9 each |
 | In brief | Headlines from Firehose and Daily feeds | 8 lines | 15 lines | 23 lines |
 | From the archive | One held-over post | 1 | 1 | 1 |
+| While you were away (page 2, only after missed editions) | Best stories of the missed editions | up to 15 | up to 30 | up to 30 |
 | Back page | "Also in your feeds": everything not printed | All | All | All |
 
 The length is a setting. It applies to editions built from then on; a stored edition keeps the length it was built with. A page with nothing to put on it is left out, apart from the back page, which is always there.
@@ -273,10 +323,11 @@ Daylight saving: on the day the clocks go forward, a reset time inside the skipp
 Android will not reliably run a job at an exact time, so the edition is built ahead of time and released by a clock check.
 
 - `WorkManagerEditionScheduler` keeps one one-off `EarlyBuildWorker` queued, aimed at 90 minutes before the coming reset, and requiring a network connection. If that moment has already passed, the job runs as soon as it can.
+- With the Evening edition switched on, the job aims at whichever release comes next, the morning reset or the evening time, and builds that edition.
 - The job (`edition/EarlyBuild.kt`) does a final sync, builds the next edition with `cutoffAt` = now and `releaseAt` = the coming reset, and stores it unreleased. It then prefetches full text for every printed story (briefs included) and the images its pages show, so the edition reads offline. Last, it schedules the next run.
 - Each stage is isolated. A failed or slow sync (four-minute limit) does not stop the build, and a failed prefetch does not undo it.
 - If the job runs so late that the reset it aimed for has passed, or the next reset is more than 3 hours away, it makes sure the current edition exists instead of freezing tomorrow's paper a day early.
-- The schedule is renewed on process start, when the reset time setting changes, and when the device's clock or time zone changes (`TimeChangeReceiver`).
+- The schedule is renewed on process start, when the reset time or an Evening edition setting changes, and when the device's clock or time zone changes (`TimeChangeReceiver`).
 
 Anything fetched after the early build belongs to the following edition, because posts are assigned by first-seen time.
 
@@ -287,6 +338,8 @@ Release needs no job. Whenever the newsstand comes to the foreground it calls `E
 - If a released edition exists for the date of the latest reset, it is shown.
 - Otherwise the edition is built on the spot from stored posts, with `cutoffAt` = now and `releaseAt` = the latest reset. This never touches the network.
 
+With the Evening edition switched on, the same call then makes sure the evening edition exists once its release time has passed (see below). It returns the newest released edition of any kind.
+
 The newsstand also notices when a stored edition's release time passes while it is on screen.
 
 Opening the app before the reset time shows the current edition, whose back page gives the time of the next one.
@@ -296,6 +349,27 @@ Opening the app before the reset time shows the current edition, whose back page
 No edition is built unless at least one post first seen since the previous cutoff is printed. If there are no new posts, or they are all muted, too old or already read, nothing is stored. Held-over posts alone do not make a paper. The cutoff stays where it was, the previous edition stays current, and the posts are offered to the next build.
 
 The newsstand then says so: a "No new edition today" notice above the cover names the last paper, gives the time of the next edition and offers a link to check for new posts, and the cover is captioned "Latest edition" with its date instead of "Today's edition". The notice only appears once the on-open check has finished.
+
+### The Evening edition
+
+Optional and off by default. Settings has the switch and, when it is on, the release time (18:00 by default).
+
+- **What it covers.** Posts of Firehose and Daily feeds first seen since the latest Morning or Evening cutoff. Weekly and Rare posts are not placed in it at all; they wait for the morning paper. It has no held-over posts.
+- **Structure.** A front page (1 lead + 4), In brief (8, 15 or 23 lines by edition length) and the back page with the index. No Top stories, sections, From the archive or While you were away.
+- **When it is built.** On open after its release time, as the morning edition is, or ahead of time by the early build. It is only built while it is current: between its release time and the next morning reset. A missed evening is not built the next day. If the reader first opens the app in the evening and no morning edition exists for the day, the morning edition is built first and takes everything.
+- **Nothing lost, nothing printed twice.** The next morning edition's window still starts at the previous *morning* cutoff. It takes everything first seen since then except the stories the evening edition printed. So the Weekly and Rare posts of the day are new in the morning, as are the fast posts the evening edition only listed in its index, and its printed stories do not return.
+- **Counters.** Building an evening edition supersedes the morning one, and the next morning edition supersedes the evening one. Each superseded edition's untouched printed stories get one more unopened run, once. With no fast posts to print, no evening edition is stored and nothing is superseded.
+- It has its own running number, the date of its release and the kind `EVENING`, and it appears on the newsstand and in back issues like any edition. The back page's "next edition" time is the next release of either kind. The newsstand's "No new edition today" notice still only knows the morning reset.
+
+### The Extra edition
+
+`EditionPublisher.publishExtraEdition(feedIds)` (also on `EditionRepository`) prints an edition at once from chosen feeds, meant for sources the reader has just added. The caller syncs those feeds first. No screen calls it yet.
+
+- **What it covers.** Those feeds' posts first seen in the last 3 days that no edition has printed. Each feed's 5 newest posts are exempt from the 30-day age limit and the freshness floor, so a quiet blog still shows what it has.
+- **Structure.** The same as a morning edition, without held-over posts or a pull-out. Kind `EXTRA`, the next running number, released immediately, dated today.
+- **It does not disturb the schedule.** No cutoff moves, today's edition is not changed, and nothing is superseded: today's stories do not count as ignored and the next release time is the same.
+- **Afterwards.** In the next morning edition, the stories the Extra printed are not new. A loved Weekly or Rare feed's untouched ones are held over under the usual rules. Posts the Extra only listed in its index are still new. The next scheduled build counts the Extra's unopened runs along with those of the scheduled edition it supersedes.
+- **Limits.** It returns null and stores nothing when the feeds have nothing printable. There is at most one Extra edition per calendar date, because the database allows one edition per date and kind; a second request on the same date returns null.
 
 ### Long gaps
 
@@ -343,11 +417,11 @@ A single Room 3 database (`data/db/`, schema version 1, exported to `app/schemas
 | `feed_health` | Fetch record per feed | `feedId`, `lastPostAt`, `errorStreak`, `errorSince`, `lastHttpStatus`, `lastFlag`, `flagDismissedUntil` |
 | `article_fts` | Full-text index (FTS4) | `title`, `summary`, `author`, `body` |
 
-`edition_item.kind` is one of `LEAD`, `FRONT`, `TOP`, `SECTION`, `BRIEF`, `ARCHIVE`, `AWAY` or `INDEX`. All items on a page share a page type. `AWAY` is defined for the planned While you were away section and nothing produces it yet.
+`edition_item.kind` is one of `LEAD`, `FRONT`, `TOP`, `SECTION`, `BRIEF`, `ARCHIVE`, `AWAY` or `INDEX`. All items on a page share a page type. `edition.kind` is `MORNING`, `EVENING` or `EXTRA`.
 
 Removing a feed deletes its posts, their engagement and their placements in editions.
 
-Settings are in a Preferences DataStore: reset time, edition length, theme, display mode, and whether onboarding is done. An evening-edition flag and a storage budget (default 500 MB) are also stored, but nothing reads them yet. The reader's text size is in its own preferences file.
+Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, and whether onboarding is done. A storage budget (default 500 MB) is also stored, but nothing reads it yet. The reader's text size is in its own preferences file.
 
 Images are not in the database; they are in Coil's disk cache.
 
@@ -411,7 +485,7 @@ A month calendar of every released edition, read ones ticked, with the month's e
 
 ### Settings (`ui/settings/`)
 
-Reset time, edition length (Short, Standard, Long), theme (System, Light, Dark) and display mode (Auto, Standard, E-ink). Debug builds add buttons that load or clear invented sample data.
+Reset time, edition length (Short, Standard, Long), the Evening edition (Off or On, with its release time when on), theme (System, Light, Dark) and display mode (Auto, Standard, E-ink). Debug builds add buttons that load or clear invented sample data.
 
 ## Themes, tablets and e-ink
 
@@ -503,5 +577,6 @@ Signing is configured in `app/build.gradle.kts` only when `KEYSTORE_FILE`, `KEYS
 
 These are described in [`todo.md`](../todo.md) with the detail needed to build them.
 
-- **Planned:** While you were away, search filters, cross-feed deduplication, the feed health check and Subscriptions desk, the storage budget, archive export and import, the 3D page turn, the Evening edition, and a benchmark for the on-open build.
+- **Planned:** search filters, the feed health check and Subscriptions desk, the storage budget, archive export and import, the 3D page turn, and a benchmark for the on-open build.
+- **Engine built, screen missing:** the Extra edition has no button, the comeback label is not shown as a badge, and the While you were away page has no "12 posts from 7 feeds" summary line.
 - **Out of scope for now:** notifications, compression of stored content, and PDF export.

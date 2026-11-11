@@ -18,9 +18,9 @@ class MorningIssueApp : Application(), SingletonImageLoader.Factory {
         // Off the main thread: building the modules opens the database and settings.
         container.appScope.launch {
             container.syncScheduler.ensurePeriodicSync()
-            // Runs once now and again whenever the reset time changes.
+            // Runs once now and again whenever a release time changes.
             container.settings.settings
-                .map { it.resetTime }
+                .map { Triple(it.resetTime, it.eveningEditionEnabled, it.eveningEditionTime) }
                 .distinctUntilChanged()
                 .collect { container.editionScheduler.scheduleEarlyBuild() }
         }

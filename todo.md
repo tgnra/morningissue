@@ -32,18 +32,12 @@ Merged. Checked on a phone emulator with real feeds; see Known rough edges for w
 
 ## Milestone 3: polish
 
-Not started.
+In progress. The edition engine's part is built; how it works is in `docs/how-it-works.md`.
 
 ### While you were away
 
-- [ ] If the reader skips one or more days, the next edition opens with a pull-out section: the best stories from the missed editions.
-  - Ranked by the same score, with freshness measured from the reader's last visit instead of from the release time.
-  - Firehose feeds are left out unless the reader has Liked or saved one of their posts in the last 30 days.
-  - Only feeds with the slider at Auto or above appear.
-  - Stops after the top 30. A summary line such as "While you were away: 12 posts from 7 feeds".
-  - Missed editions must never pile up as a to-do list.
-- Already in place: `ItemKind.AWAY`, `EditionPage.WhileYouWereAway`, the page's rendering with dated bylines, `edition.openedAt` and `EditionDao.lastOpenedAt()`.
-- To settle first: see Open questions (what counts as "missed" when no edition was built during the gap).
+- [x] If the reader skips one or more days, the next morning edition carries a pull-out page (page 2) with the best stories from the missed editions: ranked from the last visit, Firehose feeds only after a recent Like or save, slider at Auto or above, top 30 (15 at Short), each story at most once.
+- [ ] A summary line on the page such as "While you were away: 12 posts from 7 feeds". The page model has the stories; the line is not drawn.
 
 ### Search with filters
 
@@ -52,10 +46,10 @@ Not started.
 
 ### Cross-feed deduplication
 
-- [ ] Collapse posts that share a canonical URL or have a near-identical title (the same story syndicated across feeds).
-  - Keep the copy from the higher-affinity feed.
-  - Show "also in 2 feeds" on the kept story.
-- Already in place: `article.contentHash` (a hash of the normalised title and text) and the empty `dedupe` step in `EditionBuilder`, between scoring and layout.
+- [x] Collapse posts that share a canonical URL or have an identical normalised title (the same story syndicated across feeds), keeping the copy from the higher-affinity feed. The kept story's reason line says "also in 2 other feeds".
+- [ ] Show "also in 2 feeds" on the story itself. The count is only in the reason line; a field on the story would need a column in `edition_item`.
+- [ ] A dropped copy from a loved Weekly or Rare feed can come back as a held-over post once the reader opens the kept copy. Fixing it needs somewhere to record that a post was dropped as a duplicate.
+- `article.contentHash` (a hash of the normalised title and text) is not used by the dedupe step.
 
 ### Feed health check and the Subscriptions desk
 
@@ -73,7 +67,8 @@ Not started.
 | Loved | High read and Like rate | Suggest Favourite. (The spec also suggested turning on notifications, which are out of scope.) |
 
 - [ ] **Quiet feeds.** A feed with no posts in 90 days moves to a Quiet group at the bottom of Sources and is checked less often, stepping down from hourly to weekly. Quiet feeds are kept on purpose.
-- [ ] **Welcome back.** When a quiet feed posts again, the story gets a label such as "Back after 2 years" and a comeback boost on top of the scarcity boost, so it almost always makes the front page.
+- [x] **Welcome back, engine.** When a feed posts again after 90 quiet days, the story gets the reason line "Back after 2 years: …" and a comeback boost of 1.5 on top of scarcity, so it almost always makes the front page.
+- [ ] **Welcome back, label.** Show `EditionStory.comebackLabel` on the story block.
 - Already in place: the `feed_health` table and `HealthFlag` enum; every fetch records success or failure (`errorStreak`, `errorSince`, `lastHttpStatus`, `lastPostAt`); a permanent redirect already updates the address and raises `MOVED` when the address really differs; feed discovery already probes the common paths.
 
 ### Storage budget and trimming
@@ -105,11 +100,15 @@ Not started.
 
 ### Evening edition
 
-- [ ] An optional Evening edition, off by default.
-  - Covers only Firehose and Daily feeds, since the morning cutoff.
-  - Weekly and Rare feeds never appear in it; their posts wait for the morning paper.
-- Already in place: `EditionKind.EVENING`, the unique `(date, kind)` index and the stored `eveningEditionEnabled` setting (no control yet).
-- To settle first: see Open questions (its release time, and how its cutoff interacts with the morning edition's).
+- [x] An optional Evening edition, off by default, released at a time set in Settings (18:00 by default): Firehose and Daily feeds only, on a front page and In brief; Weekly and Rare posts wait for the morning paper.
+- [ ] The Settings control has not been looked at on a device or emulator.
+- [ ] The newsstand's "No new edition today" notice and its "next edition" time only know the morning reset.
+
+### Extra edition
+
+- [x] Engine: `EditionPublisher.publishExtraEdition(feedIds)` prints an edition at once from chosen feeds without disturbing the schedule (`EditionKind.EXTRA`).
+- [ ] A way to ask for one after adding sources, and an "Extra" label on its cover.
+- [ ] Only one Extra edition per calendar date can be stored, because `edition` has a unique `(date, kind)` index. Lifting this needs a schema change.
 
 ### Benchmark
 
@@ -120,7 +119,6 @@ Not started.
 Specified but not built, and not assigned to a milestone.
 
 - [ ] **Scores kept current during sync.** The spec wanted scores updated at sync so a fallback build mostly reads a sorted list. Scores are computed at build time instead. Decide after the benchmark whether this is needed.
-- [ ] **Freshness floor.** The spec's candidate pool required F ≥ 0.05. `RankingConfig.minFreshness` exists but is not applied; only the 30-day age limit is.
 - [ ] **Burstiness** is computed and stored but unused. It was meant to detect feeds that post many items at once.
 - [ ] **Material You accent colour**, optional.
 - [ ] **Masthead drawn instantly** while stories load. Not verified; the paper shows a blank page until the edition has loaded.
@@ -220,7 +218,7 @@ Dropped when the design moved from a live ranked feed to a daily edition:
 | From the archive as one slot per session: the best unread post older than 3 days from a feed with affinity of at least 0.7 | From the archive as a page: the best held-over post not printed in the last 3 editions |
 | Bottom tabs (Feed, Saved, Sources) | The newsstand and its button bar |
 | Tag filter chips | Section pages |
-| Catch-up card and Catch-up mode | While you were away (planned) and back issues |
+| Catch-up card and Catch-up mode | While you were away and back issues |
 | "You're all caught up" and "Show older posts" | The back page and its index |
 | Relative time labels such as "new this week" | Reading time in bylines |
 | `feed_score_cache` table | `edition_item.score` and `reason` |
@@ -236,7 +234,7 @@ Dropped when the design moved from a live ranked feed to a daily edition:
 - [ ] **E-ink: code blocks wrap** instead of scrolling sideways, which can make code hard to read.
 - [ ] **`targetSdk` is 36 while `compileSdk` is 37.**
 - [ ] **E-ink has no tap zones.** Paging is by swipe, keys and the Previous and Next buttons.
-- [ ] **Source comments still cite the deleted plan files** by name ("v1 Live feed", "v2 Daily edition") in `engine/RankingConfig.kt`, `Scorer.kt`, `Cadence.kt`, `EditionBuilder.kt` and `Affinity.kt`. Point them at `docs/how-it-works.md` when those files are next touched.
+- [ ] **Source comments still cite the deleted plan files** by name ("v1 Live feed", "v2 Daily edition") in `engine/RankingConfig.kt`, `Cadence.kt` and `Affinity.kt`. Point them at `docs/how-it-works.md` when those files are next touched.
 
 - [ ] In two-column story cells the byline truncates because the "⋯" menu button takes room.
 - [ ] Undo on the Saved and Liked shelves puts the story back at the top, because re-saving stamps a new time. Exposing `savedAt` / `likedAt` on `ArticleSummary` would fix it.
@@ -247,10 +245,10 @@ Dropped when the design moved from a live ranked feed to a daily edition:
 
 ## Open questions
 
-- [ ] **While you were away:** editions are only built by the early job or on open. After a long gap there may be no "missed editions", only one large edition. Is the pull-out drawn from stored editions that were never opened, from the posts of the gap, or both?
-- [ ] **Evening edition:** when is it released, and is that a setting? The next morning edition must still pick up Weekly and Rare posts first seen before the evening cutoff, which the current "posts since the latest cutoff" rule would miss.
-- [ ] **Welcome back:** how large is the comeback boost, and how long must a feed have been quiet to earn it?
+- [x] **While you were away:** drawn from stored editions that were released and never opened. Posts of a gap with no edition are ordinary new candidates.
+- [x] **Evening edition:** released at its own setting, 18:00 by default. The morning edition's window runs from the previous morning cutoff and leaves out what the evening edition printed.
+- [x] **Welcome back:** a boost of 1.5 after 90 quiet days.
 - [ ] **Health flags:** what read and Like rates count as "Loved"?
 - [ ] **Storage budget:** does it count Coil's image cache, which the app does not manage directly, or only stored text?
-- [ ] **Freshness floor:** apply `minFreshness` to the candidate pool, or remove the constant?
+- [x] **Freshness floor:** applied. A new post under the floor is listed in the index and not printed; held-over posts are exempt.
 - [ ] **`targetSdk`:** raise to 37 to match `compileSdk`?

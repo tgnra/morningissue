@@ -18,23 +18,40 @@ import net.tgnra.morningissue.data.repository.AffinityLearner
 import net.tgnra.morningissue.data.settings.SettingsRepository
 import net.tgnra.morningissue.engine.Affinity
 import net.tgnra.morningissue.engine.LearnedAffinities
+import net.tgnra.morningissue.engine.AwayPool
 import net.tgnra.morningissue.engine.Candidate
 import net.tgnra.morningissue.engine.EditionBuilder
 import net.tgnra.morningissue.engine.EditionClock
 import net.tgnra.morningissue.engine.EditionDraft
 import net.tgnra.morningissue.engine.FeedProfile
 import net.tgnra.morningissue.engine.RankingConfig
+import net.tgnra.morningissue.model.AppSettings
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
 
 /**
- * Builds morning editions from stored posts with the pure `EditionBuilder` and freezes them in
- * Room. It never touches the network.
+ * Builds editions from stored posts with the pure `EditionBuilder` and freezes them in Room. It
+ * never touches the network.
  *
- * **Which posts an edition covers.** Posts first seen after the previous edition's cutoff (the
- * edition with the latest cutoff, released or not) and up to now, which becomes the new
- * cutoff. With no earlier edition, the first one covers posts first seen in the last
- * `firstEditionWindowDays` days: right after onboarding's first sync that is everything.
+ * **Which posts a morning edition covers.** Posts first seen after the previous *morning*
+ * edition's cutoff (released or not) and up to now, which becomes the new cutoff, minus the
+ * stories an Evening or Extra edition printed in between. With no earlier edition, the first
+ * one covers posts first seen in the last `firstEditionWindowDays` days: right after
+ * onboarding's first sync that is everything.
+ *
+ * **Evening edition** (optional). Covers Firehose and Daily feeds' posts first seen since the
+ * latest Morning or Evening cutoff. Weekly and Rare posts are not placed in it at all, and a
+ * post it only listed in its index was not printed, so the next morning edition, whose window
+ * runs from the previous morning cutoff, still offers both. What it printed is not new again.
+ *
+ * **Extra edition** (on request). Printed at once from the chosen feeds' posts first seen in
+ * the last `firstEditionWindowDays` days and not printed before. It moves no cutoff and
+ * supersedes nothing. What it printed is not new in the next scheduled edition (a loved slow
+ * feed's untouched posts are held over as usual); what it only indexed still is.
+ *
+ * **Superseding.** A Morning or Evening build supersedes every pending edition (the newest
+ * scheduled one and the Extras since): their untouched printed stories each count one more
+ * unopened run, and count against their feeds in learning.
  *
  * **Held-over posts.** Untouched posts of loved Weekly and Rare feeds (`Affinity.holdsPostsOver`,
  * judged on the affinity learned for this build) from before the previous cutoff join the pool,
@@ -86,90 +103,213 @@ class RoomEditionPublisher(
         val reset = EditionClock.latestReset(now, settings.resetTime, zone)
         val date = EditionClock.editionDate(reset, zone)
 
-        val released = editionDao.getLatestReleased(now)
-        if (released != null && released.date >= date) return@withLock released.id
-        build(date, releaseAt = reset, now = now, length = settings.editionLength)
-            // Built just now, or found stored for this date. A stored one whose own release
-            // time is still ahead (see "Time zones") is not shown yet.
-            ?.takeIf { !it.releaseAt.isAfter(now) }?.id
-            ?: released?.id
+        val released = editionDao.getLatestReleasedOf(EditionKind.MORNING, now)
+        // A newer morning edition than this reset's is already out (see "Time zones").
+        if (released == null || released.date < date) {
+            build(EditionKind.MORNING, date, releaseAt = reset, now = now, length = settings.editionLength)
+        }
+        if (settings.eveningEditionEnabled) {
+            EditionClock.currentEveningRelease(now, settings.resetTime, settings.eveningEditionTime, zone)?.let { evening ->
+                build(EditionKind.EVENING, EditionClock.editionDate(evening, zone), releaseAt = evening, now = now, length = settings.editionLength)
+            }
+        }
+        // Whatever is newest on the stand, of any kind. An edition whose own release time is
+        // still ahead (built early, or see "Time zones") is not shown yet.
+        editionDao.getLatestReleased(now)?.id
     }
 
     override suspend fun buildNextEdition(): Long? = mutex.withLock {
         val now = clock.instant()
         val settings = settings.settings.first()
         val zone = zone()
-        val reset = EditionClock.nextReset(now, settings.resetTime, zone)
-        build(EditionClock.editionDate(reset, zone), releaseAt = reset, now = now, length = settings.editionLength)?.id
+        val next = EditionClock.nextRelease(now, settings.resetTime, settings.eveningTimeIfEnabled, zone)
+        build(next.kind, EditionClock.editionDate(next.at, zone), releaseAt = next.at, now = now, length = settings.editionLength)?.id
     }
 
-    override suspend fun nextReleaseAt(): Instant? =
-        EditionClock.nextReset(clock.instant(), settings.settings.first().resetTime, zone())
+    override suspend fun nextReleaseAt(): Instant? {
+        val settings = settings.settings.first()
+        return EditionClock.nextRelease(clock.instant(), settings.resetTime, settings.eveningTimeIfEnabled, zone()).at
+    }
+
+    override suspend fun publishExtraEdition(feedIds: Set<Long>): Long? = mutex.withLock {
+        if (feedIds.isEmpty()) return@withLock null
+        val now = clock.instant()
+        val settings = settings.settings.first()
+        val date = now.atZone(zone()).toLocalDate()
+        build(EditionKind.EXTRA, date, releaseAt = now, now = now, length = settings.editionLength, extraFeedIds = feedIds)?.id
+    }
+
+    private val AppSettings.eveningTimeIfEnabled get() = eveningEditionTime.takeIf { eveningEditionEnabled }
 
     /**
-     * Returns the morning edition for [date], building and storing it first if it is missing;
+     * Returns the [kind] edition for [date], building and storing it first if it is missing;
      * null when it is missing and there is nothing to build. Reading the pool, the check for
      * an existing edition and every write share one transaction, so concurrent callers (even
-     * through different publisher instances) end up with a single edition per date.
+     * through different publisher instances) end up with a single edition per date and kind.
+     *
+     * A second Extra edition on a date that already has one is refused (null): the schema
+     * allows one edition per date and kind.
      */
-    private suspend fun build(date: LocalDate, releaseAt: Instant, now: Instant, length: EditionLength): EditionEntity? =
-        database.withWriteTransaction {
-            editionDao.getByDate(date, EditionKind.MORNING)?.let { return@withWriteTransaction it }
+    private suspend fun build(
+        kind: EditionKind,
+        date: LocalDate,
+        releaseAt: Instant,
+        now: Instant,
+        length: EditionLength,
+        extraFeedIds: Set<Long> = emptySet(),
+    ): EditionEntity? = database.withWriteTransaction {
+        editionDao.getByDate(date, kind)?.let { return@withWriteTransaction it.takeIf { kind != EditionKind.EXTRA } }
 
-            val previous = editionDao.getLatestByCutoff()
-            val after = previous?.cutoffAt ?: now.minus(Duration.ofDays(config.firstEditionWindowDays))
-            // The clock was set back past the last cutoff: nothing can be new yet.
-            if (!now.isAfter(after)) return@withWriteTransaction null
-
-            val rows = articleDao.firstSeenBetween(after, now)
-            if (rows.isEmpty()) return@withWriteTransaction null
-
-            // Building supersedes [previous], so its untouched stories now count as ignored.
-            val learned = learner.learn(now, pendingEditionId = null)
-            val details = feedDao.getAllWithDetails()
-            val tagAffinity = HashMap<String, Double>()
-            details.forEach { feed -> feed.tags.forEach { tagAffinity[it.name] = learned.tags[it.id] ?: it.affinity } }
-            val feeds = details.map { it.toProfile(learned, tagAffinity) }
-
-            // Step 1's held-over posts. Their stored unopened count does not include [previous]
-            // yet (it is only written once this build is known to succeed), so add it here.
-            val inPrevious = previous?.let { editionDao.printedArticleIds(listOf(it.id)).toSet() }.orEmpty()
-            val recent = editionDao.getRecent(config.archiveCooldownEditions).map { it.id }
-            val ranRecently = if (recent.isEmpty()) emptySet() else editionDao.printedArticleIds(recent).toSet()
-            val newIds = rows.mapTo(HashSet()) { it.article.id }
-            val heldOver = feeds
-                .filter { affinity.holdsPostsOver(it) && it.muteUntil?.isAfter(releaseAt) != true }
-                .flatMap { articleDao.heldOverForFeed(it.id, upTo = after, limit = config.heldOverPerFeed) }
-                .filter { it.article.id !in newIds }
-                .map { row ->
-                    val candidate = row.toCandidate()
-                    candidate.copy(
-                        isHeldOver = true,
-                        ranRecently = row.article.id in ranRecently,
-                        editionsRunUnopened = candidate.editionsRunUnopened + if (row.article.id in inPrevious) 1 else 0,
-                    )
-                }
-
-            val draft = builder.build(rows.map { it.toCandidate() } + heldOver, feeds, length, releaseAt, tagAffinity)
-            if (draft.printed.none { it.articleId in newIds }) return@withWriteTransaction null
-
-            // The previous edition is superseded: its untouched stories each count one more run.
-            if (previous != null) engagementDao.countUnopenedRun(previous.id)
-            learner.store(learned)
-
-            val edition = EditionEntity(
-                date = date,
-                kind = EditionKind.MORNING,
-                cutoffAt = now,
-                releaseAt = releaseAt,
-                builtAt = now,
-                length = length,
-                number = editionDao.maxNumber() + 1,
-            )
-            val id = editionDao.insertEditionWithItems(edition, draft.toEntities())
-            draft.lead?.let { engagementDao.incrementLeadCount(it.articleId) }
-            edition.copy(id = id)
+        // The window: posts first seen in (after, now].
+        val firstWindow = now.minus(Duration.ofDays(config.firstEditionWindowDays))
+        val after = when (kind) {
+            EditionKind.MORNING -> editionDao.getLatestByCutoffOf(listOf(EditionKind.MORNING))?.cutoffAt ?: firstWindow
+            // An evening paper follows a morning one; it is never the first edition.
+            EditionKind.EVENING -> editionDao.getLatestByCutoffOf(SCHEDULED)?.cutoffAt ?: return@withWriteTransaction null
+            EditionKind.EXTRA -> firstWindow
         }
+        // The clock was set back past the last cutoff: nothing can be new yet.
+        if (!now.isAfter(after)) return@withWriteTransaction null
+
+        // Stories an edition since [after] already printed (an Evening or Extra edition, or for
+        // an Extra any edition of the last few days) are not new again.
+        val printedSince = editionDao.printedArticleIdsSince(after).toSet()
+        val seen = articleDao.firstSeenBetween(after, now)
+        val rows = seen.filter { it.article.id !in printedSince && (kind != EditionKind.EXTRA || it.article.feedId in extraFeedIds) }
+        if (rows.isEmpty()) return@withWriteTransaction null
+
+        // A scheduled build supersedes the pending editions, so their untouched stories now
+        // count as ignored. An Extra edition supersedes nothing.
+        val pending = editionDao.getPending()
+        val supersedes = kind != EditionKind.EXTRA
+        val learned = learner.learn(now, if (supersedes) emptySet() else pending.mapTo(HashSet()) { it.id })
+        val details = feedDao.getAllWithDetails()
+        val tagAffinity = HashMap<String, Double>()
+        details.forEach { feed -> feed.tags.forEach { tagAffinity[it.name] = learned.tags[it.id] ?: it.affinity } }
+        val feeds = details.map { it.toProfile(learned, tagAffinity) }
+        val feedsById = feeds.associateBy { it.id }
+
+        val newIds = rows.mapTo(HashSet()) { it.article.id }
+        val fresh = withComebacks(rows, after).let { if (kind == EditionKind.EXTRA) exemptNewest(it) else it }
+        val alreadyRun = seen.filter { it.article.id in printedSince }
+        val heldOver = if (kind == EditionKind.MORNING) heldOver(feeds, alreadyRun, pending, after, releaseAt, newIds) else emptyList()
+        val heldOverIds = heldOver.mapTo(HashSet()) { it.articleId }
+        val away = if (kind == EditionKind.MORNING) awayPool(now) else null
+
+        val draft = builder.build(
+            candidates = fresh + heldOver,
+            feeds = feeds,
+            length = length,
+            releaseAt = releaseAt,
+            tagAffinity = tagAffinity,
+            kind = kind,
+            alreadyRun = alreadyRun.filter { it.article.id !in heldOverIds && it.article.feedId in feedsById }.map { it.toCandidate() },
+            away = away,
+        )
+        if (draft.printed.none { it.articleId in newIds }) return@withWriteTransaction null
+
+        if (supersedes) {
+            // Each untouched story of a superseded edition counts one more run.
+            pending.forEach { engagementDao.countUnopenedRun(it.id) }
+            learner.store(learned)
+        }
+
+        val edition = EditionEntity(
+            date = date,
+            kind = kind,
+            cutoffAt = now,
+            releaseAt = releaseAt,
+            builtAt = now,
+            length = length,
+            number = editionDao.maxNumber() + 1,
+        )
+        val id = editionDao.insertEditionWithItems(edition, draft.toEntities())
+        draft.lead?.let { engagementDao.incrementLeadCount(it.articleId) }
+        edition.copy(id = id)
+    }
+
+    /**
+     * Step 1's held-over posts: the untouched posts of loved slow feeds from before [after],
+     * and those among [alreadyRun] (printed since, in an Extra edition), which are no longer
+     * new but stay eligible like any other untouched post of such a feed. Their stored
+     * unopened count does not include the [pending] editions yet (it is only written once
+     * this build is known to succeed), so it is added here.
+     */
+    private suspend fun heldOver(
+        feeds: List<FeedProfile>,
+        alreadyRun: List<ArticleRow>,
+        pending: List<EditionEntity>,
+        after: Instant,
+        releaseAt: Instant,
+        newIds: Set<Long>,
+    ): List<Candidate> {
+        val pendingRuns = HashMap<Long, Int>()
+        if (pending.isNotEmpty()) editionDao.printedRuns(pending.map { it.id }).forEach { pendingRuns.merge(it, 1, Int::plus) }
+        val recent = editionDao.getRecent(config.archiveCooldownEditions).map { it.id }
+        val ranRecently = if (recent.isEmpty()) emptySet() else editionDao.printedArticleIds(recent).toSet()
+        val untouchedRuns = alreadyRun
+            .filter { it.openedAt == null && it.readAt == null && it.savedAt == null && it.likedAt == null }
+            .groupBy { it.article.feedId }
+        return feeds
+            .filter { affinity.holdsPostsOver(it) && it.muteUntil?.isAfter(releaseAt) != true }
+            .flatMap { feed ->
+                (untouchedRuns[feed.id].orEmpty() + articleDao.heldOverForFeed(feed.id, upTo = after, limit = config.heldOverPerFeed))
+                    .sortedWith(compareByDescending<ArticleRow> { it.article.publishedAt }.thenByDescending { it.article.id })
+                    .take(config.heldOverPerFeed)
+            }
+            .filter { it.article.id !in newIds }
+            .map { row ->
+                val candidate = row.toCandidate()
+                candidate.copy(
+                    isHeldOver = true,
+                    ranRecently = row.article.id in ranRecently,
+                    editionsRunUnopened = candidate.editionsRunUnopened + (pendingRuns[row.article.id] ?: 0),
+                )
+            }
+    }
+
+    /**
+     * Welcome back: marks each feed's first new post with when the feed last posted before
+     * it, as far as the app knew when this edition's window opened. The scorer decides
+     * whether the silence was long enough to count. One indexed lookup per feed with new posts.
+     */
+    private suspend fun withComebacks(rows: List<ArticleRow>, after: Instant): List<Candidate> {
+        val comebacks = HashMap<Long, Instant>()
+        for ((feedId, posts) in rows.groupBy { it.article.feedId }) {
+            val previous = articleDao.lastKnownPostAt(feedId, seenUpTo = after) ?: continue
+            val first = posts.filter { it.article.publishedAt.isAfter(previous) }.minByOrNull { it.article.publishedAt } ?: continue
+            comebacks[first.article.id] = previous
+        }
+        return rows.map { row -> row.toCandidate().copy(previousPostAt = comebacks[row.article.id]) }
+    }
+
+    /** An Extra edition shows what its feeds have, however old: each feed's newest posts are exempt from the age limits. */
+    private fun exemptNewest(candidates: List<Candidate>): List<Candidate> {
+        val exempt = candidates.groupBy { it.feedId }.values.flatMap { posts ->
+            posts.sortedByDescending { it.publishedAt }.take(config.extraNewestPerFeed).map { it.articleId }
+        }.toSet()
+        return candidates.map { if (it.articleId in exempt) it.copy(exemptFromAgeLimits = true) else it }
+    }
+
+    /**
+     * While you were away. An edition counts as missed when it has been released, the reader
+     * never opened it, and it came out after their last visit (the last time they opened any
+     * edition) and within `awayWindowDays`. Null when nothing was missed, and for a reader who
+     * has never opened an edition: there is no visit to have been away since.
+     */
+    private suspend fun awayPool(now: Instant): AwayPool? {
+        val lastVisit = editionDao.lastOpenedAt() ?: return null
+        val window = now.minus(Duration.ofDays(config.awayWindowDays))
+        val missed = editionDao.getUnopenedReleasedBetween(since = maxOf(lastVisit, window), now = now)
+        if (missed.isEmpty()) return null
+        val stories = editionDao.untouchedPrintedIn(missed.map { it.id })
+        if (stories.isEmpty()) return null
+        return AwayPool(
+            candidates = stories.map { it.toCandidate() },
+            lastVisitAt = lastVisit,
+            engagedFeedIds = articleDao.feedsLikedOrSavedSince(now.minus(Duration.ofDays(config.awayFirehoseEngagementDays))).toSet(),
+        )
+    }
 
     private fun EditionDraft.toEntities(): List<EditionItemEntity> = items.map {
         EditionItemEntity(
@@ -194,7 +334,13 @@ class RoomEditionPublisher(
         leadCount = leadCount ?: 0,
         isOpened = openedAt != null,
         isRead = readAt != null,
+        title = article.title,
+        url = article.url,
     )
+
+    private companion object {
+        val SCHEDULED = listOf(EditionKind.MORNING, EditionKind.EVENING)
+    }
 
     private fun FeedWithDetails.toProfile(learned: LearnedAffinities, tagAffinity: Map<String, Double>): FeedProfile {
         val blended = learned.feeds[feed.id] ?: feed.affinity

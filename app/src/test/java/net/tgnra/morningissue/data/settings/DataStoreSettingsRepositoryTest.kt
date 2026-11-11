@@ -42,6 +42,7 @@ class DataStoreSettingsRepositoryTest {
         assertEquals(ThemeMode.System, settings.themeMode)
         assertEquals(DisplayMode.Auto, settings.displayMode)
         assertFalse(settings.eveningEditionEnabled)
+        assertEquals(LocalTime.of(18, 0), settings.eveningEditionTime)
         assertEquals(500, settings.storageBudgetMb)
         assertFalse(settings.onboardingDone)
         assertEquals(AppSettings(), settings)
@@ -56,6 +57,7 @@ class DataStoreSettingsRepositoryTest {
         repository.setThemeMode(ThemeMode.Dark)
         repository.setDisplayMode(DisplayMode.Eink)
         repository.setEveningEditionEnabled(true)
+        repository.setEveningEditionTime(LocalTime.of(17, 45, 30))
         repository.setStorageBudgetMb(1_000_000)
         repository.setOnboardingDone(true)
 
@@ -66,6 +68,7 @@ class DataStoreSettingsRepositoryTest {
                 themeMode = ThemeMode.Dark,
                 displayMode = DisplayMode.Eink,
                 eveningEditionEnabled = true,
+                eveningEditionTime = LocalTime.of(17, 45),
                 storageBudgetMb = AppSettings.MAX_STORAGE_BUDGET_MB,
                 onboardingDone = true,
             ),

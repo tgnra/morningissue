@@ -34,6 +34,13 @@ interface EditionRepository {
      */
     suspend fun ensureCurrentEdition(): Long?
 
+    /**
+     * Prints an Extra edition from the stored posts of [feedIds] and returns its ID; see
+     * `EditionPublisher.publishExtraEdition`. Sync the feeds first. Null when nothing was
+     * printed (no posts, or today already has an Extra edition).
+     */
+    suspend fun publishExtraEdition(feedIds: Set<Long>): Long? = null
+
     /** Records that the reader opened the edition. Only the first call counts. */
     suspend fun markEditionOpened(editionId: Long)
 

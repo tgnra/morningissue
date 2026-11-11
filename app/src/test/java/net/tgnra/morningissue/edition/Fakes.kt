@@ -45,6 +45,7 @@ internal class FakeSettings(initial: AppSettings = AppSettings()) : SettingsRepo
     override suspend fun setThemeMode(mode: ThemeMode) = state.update { it.copy(themeMode = mode) }
     override suspend fun setDisplayMode(mode: DisplayMode) = state.update { it.copy(displayMode = mode) }
     override suspend fun setEveningEditionEnabled(enabled: Boolean) = state.update { it.copy(eveningEditionEnabled = enabled) }
+    override suspend fun setEveningEditionTime(time: LocalTime) = state.update { it.copy(eveningEditionTime = time) }
     override suspend fun setStorageBudgetMb(megabytes: Int) = state.update { it.copy(storageBudgetMb = megabytes) }
     override suspend fun setOnboardingDone(done: Boolean) = state.update { it.copy(onboardingDone = done) }
 }

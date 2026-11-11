@@ -44,6 +44,11 @@ data class EditionStory(
     val isRead: Boolean,
     val isLiked: Boolean,
     val isSaved: Boolean,
+    /**
+     * "Back after 2 years": set when the story is its feed's first post after a long silence
+     * (Welcome back); null otherwise.
+     */
+    val comebackLabel: String? = null,
 )
 
 /** Back-page index entries from one source. */

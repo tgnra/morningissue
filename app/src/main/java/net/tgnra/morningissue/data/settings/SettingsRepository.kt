@@ -24,6 +24,12 @@ interface SettingsRepository {
 
     suspend fun setEveningEditionEnabled(enabled: Boolean)
 
+    /**
+     * Sets the local time at which the Evening edition is released (seconds are dropped).
+     * Has a default body so that test doubles written before it existed still compile.
+     */
+    suspend fun setEveningEditionTime(time: LocalTime) = Unit
+
     /** Clamped to `AppSettings.MIN_STORAGE_BUDGET_MB..MAX_STORAGE_BUDGET_MB`. */
     suspend fun setStorageBudgetMb(megabytes: Int)
 
