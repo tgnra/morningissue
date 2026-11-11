@@ -192,6 +192,22 @@ Built on `discovery-app`; see "Discovery" in `docs/how-it-works.md`. Unit-tested
 - [ ] Feeds with no `icon_url` (12,329 of them) could fall back to the site's favicon.
 - [ ] The design report's rule that a feed with a discovered row is shown as a card again only once something from it is saved was simplified: only a verdict (pass, subscribe, unsubscribe) or a subscription keeps a feed off the cards, so a feed whose post was opened but not saved can be suggested again. Decide whether that is wanted.
 
+### Kobo sync, phone side
+
+The protocol is `docs/kobo-sync.md`; see "Sync with Kobo" in `docs/how-it-works.md`. Unit-tested against an in-memory database and a real socket. The Kobo side (`kobo/`) is built separately; the two have not yet talked to each other.
+
+- [x] Schema version 5: `sync_peer`, with `MIGRATION_4_5` and tests from versions 1 and 4. The install's `dbId` in the settings store.
+- [x] Manifest and edition bundles (`kobo/BundleExport.kt`), blocks embedded as stored; fixtures in `docs/kobo-sync-fixtures/` written by `KoboFixturesTest`.
+- [x] Event merge in one transaction with `ackedSeq`, affinity relearned as for the phone's own reader.
+- [x] Pairing with Allow and Deny, hashed tokens checked in constant time, Forget.
+- [x] HTTP server on 47824 and UDP beacon on 47823, only while the Sync screen is started; body, header and event caps.
+- [ ] **Run it against a real Kobo**, and look at the Sync screen on a phone, a tablet and in E-ink.
+- [ ] **Bundle size.** Back-page index stories carry their full stored text, like every other story, so an edition with a long index may make a bundle of several megabytes. Measure a real one; if it is too big, send index stories without `blocks` (the Kobo already falls back to the summary).
+- [ ] **The manifest encodes all three bundles** on every fetch to hash them. Cheap for three editions; cache by edition if it ever shows up.
+- [ ] **Android 17's local network protection.** Raising `targetSdk` to 37 may make serving to the LAN need a runtime permission. Check before raising it (see Open questions).
+- [ ] **Events after the next build** have already counted their stories as unopened for that build (the spec's known v1 limit). Merging could undo the run's count for a story the Kobo opened; not done.
+- [ ] **No encryption.** The token and the editions cross the Wi-Fi in clear, as the spec accepts for v1.
+
 ## Smaller gaps against the original spec
 
 Specified but not built, and not assigned to a milestone.

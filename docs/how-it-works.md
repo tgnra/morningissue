@@ -33,7 +33,7 @@ Two rules decide what gets space:
 
 Nothing is thrown away. A post that does not make the paper is still listed on the back page, and every edition and every fetched post stays on the phone, browsable from back issues, source pages and search.
 
-Everything runs on the device. There is no account and no server; the only network traffic is fetching feeds, article pages and images.
+Everything runs on the device. There is no account and no internet service; the only traffic to the internet is fetching feeds, article pages and images. The one exception to "nothing listens" is [Sync with Kobo](#sync-with-kobo-uisettings-kobo): while that screen is open, the phone serves its latest editions to a Kobo on the same Wi-Fi.
 
 ## What the reader sees
 
@@ -832,7 +832,7 @@ Both are in `todo.md`.
 
 ## What is stored
 
-A single Room 3 database (`data/db/`, schema version 4, exported to `app/schemas/`) on the platform's own SQLite.
+A single Room 3 database (`data/db/`, schema version 5, exported to `app/schemas/`) on the platform's own SQLite.
 
 | Table | Holds | Key columns |
 | --- | --- | --- |
@@ -853,6 +853,7 @@ A single Room 3 database (`data/db/`, schema version 4, exported to `app/schemas
 | `stored_image` | One image kept in the image store | `url` (the key), `articleId`, `fileName`, `byteSize`, `originalBytes`, `width`, `height`, `storedAt` |
 | `discovery_verdict` | A decision on a feed: passed, subscribed from discovery, or unsubscribed | `urlKey` (the key), `url`, `verdict`, `decidedAt`, `title`, `clusterId`, `centroid` |
 | `discovery_candidate` | A feed found on the device, for a crawler not built yet | `urlKey` (the key), `url`, `source`, `foundVia`, `foundViaTitle`, `title`, `siteUrl`, `host`, `description`, `mentions`, `foundAt`, `fetchedAt`, `tier`, `medianIntervalHrs`, `fullTextShare`, `lastPostAt`, `centroid` |
+| `sync_peer` | A paired Kobo (see [Sync with Kobo](#sync-with-kobo-uisettings-kobo)) | `deviceId` (the key), `name`, `tokenHash` (SHA-256 of its token; the token is not stored), `ackedSeq`, `pairedAt`, `lastSyncAt` |
 
 `edition_item.kind` is one of `LEAD`, `FRONT`, `TOP`, `SECTION`, `BRIEF`, `ARCHIVE`, `AWAY`, `READING_LIST` or `INDEX`. All items on a page share a page type. `edition.kind` is `MORNING`, `EVENING` or `EXTRA`.
 
@@ -871,8 +872,9 @@ Every change to the schema raises the database version and ships a migration (`d
 | 2 | Adds `article.feedWordCount` | By the migration: a post whose stored body is the feed's own, or that has none, takes its `wordCount`. A post whose body was fetched from its page takes the word count of its summary, which is the feed's text cut to 400 characters; a longer feed text is undercounted. |
 | 3 | Adds `feed.status` and `feed.discoveredAt`, and the tables `discovery_verdict` and `discovery_candidate` | By the migration: every existing feed becomes a subscription, since `status` defaults to `SUBSCRIBED`. The two tables start empty: no decision has been made yet, and the crawler that would fill the candidates is not built. Subscribed feeds need no verdict row, because discovery excludes them by their address. |
 | 4 | Adds `edition.pageViewsTracked` and the table `edition_page_view` | Nothing to fill the table from: version 3 recorded nothing about pages, so it starts empty. Instead every existing edition gets `pageViewsTracked` = 0, the cut-over: its stories count as seen, as they always did, so nothing learned before the upgrade changes (see [Affinity learning](#signals)). Every edition built afterwards, a reprinted Extra included, gets 1. |
+| 5 | Adds `sync_peer` | Nothing to fill it from: version 4 had no Kobo sync. It starts empty, and a Kobo pairs from the Sync screen. |
 
-Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, whether pictures are shown in greyscale, the storage budget (default 500 MB), and whether onboarding is done. The same store holds two things that are not settings: when the offer of an Extra edition was last turned down, `nothingNewFor`, the last four release times for which a run found nothing new to print (see [When an edition failed to build](#when-an-edition-failed-to-build)), and `resetChange` and `eveningChange`, how the last change of each release time takes effect (see [Changing a release time](#changing-a-release-time)). The reader's text size is in its own preferences file.
+Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, whether pictures are shown in greyscale, the storage budget (default 500 MB), and whether onboarding is done. The same store holds two things that are not settings: when the offer of an Extra edition was last turned down, `nothingNewFor`, the last four release times for which a run found nothing new to print (see [When an edition failed to build](#when-an-edition-failed-to-build)), `resetChange` and `eveningChange`, how the last change of each release time takes effect (see [Changing a release time](#changing-a-release-time)), and `db_id`, the install's random ID that a Kobo checks (see [Sync with Kobo](#sync-with-kobo-uisettings-kobo)). The reader's text size is in its own preferences file.
 
 ### The image store
 
@@ -972,7 +974,7 @@ Newsstand ─┬─ Paper ── Reader
            ├─ Search ── Reader
            ├─ Saved / Liked ── Reader
            ├─ Sources ── Source page, Subscriptions desk, Find sources ── Reader, Passed
-           └─ Settings
+           └─ Settings ── Sync with Kobo
 ```
 
 ### Newsstand (`ui/newsstand/`)
@@ -1045,7 +1047,21 @@ Reset time, edition length (Short, Standard, Long), the Evening edition (Off or 
 - **Storage**: the budget for stored text and pictures, moved one step at a time (50, 100, 250, 500 MB, 1, 2, 4, 8, 16 GB) with Less and More, a bar and "Using 132 MB of 500 MB" beneath, then "12 MB of text, 120 MB of pictures". Over budget it says so and offers "Trim now".
 - **Archive**: Export, Export and free up space, and Import, through the system file picker (no storage permission). The job runs in the app's scope, so it carries on if the screen is left; progress and the result ("Imported 1,240 posts, skipped 310.") show under the buttons.
 
+- **Kobo**: Sync with Kobo opens the screen below.
+
 Debug builds add buttons that load or clear invented sample data.
+
+### Sync with Kobo (`ui/settings/`, `kobo/`)
+
+A Kobo e-reader can carry the latest editions and read them in its own reader; the protocol is [`docs/kobo-sync.md`](kobo-sync.md) and the Kobo's side lives in `kobo/` at the top of the repository. The phone owns the database: the Kobo only downloads, then sends back what the reader did there.
+
+- **Only while the screen is open.** The screen starts an HTTP server on port 47824 and a UDP beacon to port 47823, broadcast once a second, when it starts and stops both when it stops (`KoboSync.run`, tied to the screen's lifecycle). Leave the screen and nothing listens.
+- **The screen** shows the phone's Wi-Fi address and port, a status line ("Waiting for a Kobo.", "Kobo Libra 2 synced at 07:02, with 12 changes from its reader.", or why it cannot serve: no Wi-Fi, or another app on the port), the paired Kobos with when each last synced and a Forget button, and, when a Kobo asks to pair, "Allow Kobo Libra 2 to sync?" with Allow and Deny. A request not answered within a minute fails on the Kobo.
+- **Pairing** gives the Kobo a random token. The phone keeps only its SHA-256 (`sync_peer`), checks it in constant time on every request, and forgets the device on Forget, after which the Kobo must pair again.
+- **What a Kobo gets**: the three newest editions already released (never one waiting for its release time), each as one JSON bundle with its pages, its stories' stored text as block JSON, and the phone's read, Liked and saved state; and the stored pictures from the image store. The phone fetches nothing from the internet for it.
+- **What comes back** is a list of events: opened, how far read, read, Liked or un-Liked, saved or unsaved, time a page was on screen, an edition opened or finished. They are merged in one transaction with a per-device sequence number, so a retried request changes nothing: first-open and read times keep the earlier, the read fraction keeps the larger, Likes and saves follow the Kobo's latest change, and page time adds to `edition_page_view`, so a page read on the Kobo counts as seen exactly as on the phone. When a request changes what affinity learns from (opened, read, saved, Liked), affinity is relearned in the same transaction, as for the phone's own reader. An event about a post or edition the phone no longer has is dropped.
+- **`dbId`** is a random ID made once per install and kept with the settings. A Kobo that sees a different one (the app was reinstalled, so its row IDs start again) wipes what it holds and starts over.
+- Events that arrive after the next edition is built have already counted their stories as unopened for that build.
 
 ## Themes, tablets and e-ink
 
@@ -1104,7 +1120,7 @@ In E-ink mode:
 
 ## Architecture
 
-Kotlin and Jetpack Compose in a single `:app` module with a single Activity. There is no server.
+Kotlin and Jetpack Compose in a single `:app` module with a single Activity. There is no internet service; the only thing that listens is the Kobo sync's local server, and only while its screen is open.
 
 ```
 net.tgnra.morningissue
@@ -1123,6 +1139,8 @@ net.tgnra.morningissue
   edition/   RoomEditionPublisher, EarlyBuild, EarlyBuildWorker, WorkManagerEditionScheduler,
              TimeChangeReceiver, DueEditions (pure: did the due edition fail to build?),
              EditionPrinter (Print now), ReleaseTimes (changing a release time)
+  kobo/      the Kobo sync: KoboProtocol (wire types), BundleExport, EventMerge, PeerTokens,
+             KoboRoutes, LanHttpServer, BeaconSender, KoboSync
   ui/        theme, layout, navigation, components, newsstand, paper, reader, backissues,
              sources, saved, search, settings, onboarding
 ```
@@ -1141,8 +1159,9 @@ net.tgnra.morningissue
 | Feed parsing | Own `XmlPullParser` parser for RSS and Atom; kotlinx.serialization for JSON Feed |
 | Full text | Readability4J and Jsoup, converted to the block model |
 | Images | Coil 3, reading the app's own image store first |
+| Kobo sync | A small HTTP/1.1 server of its own on `java.net.ServerSocket` (`kobo/LanHttp.kt`): four routes, one request per connection, `Content-Length` bodies only. Ktor's server would have added about 7 MB of libraries, kotlin-reflect among them, to an app that is not minified. |
 
-`minSdk` is 26, `targetSdk` 36 and `compileSdk` 37. The only permission is `INTERNET`.
+`minSdk` is 26, `targetSdk` 36 and `compileSdk` 37. The only permission is `INTERNET`. The Kobo sync needs nothing more: sending a broadcast and reading the interfaces' addresses take no other permission.
 
 ## Building, testing and releasing
 
@@ -1157,7 +1176,7 @@ You need JDK 21 and the Android SDK (platform 37).
 
 **Benchmark.** The `:macrobenchmark` module measures the budget "building an edition from stored posts takes under 300 ms on a low-end phone". That build was the on-open fallback; it is now the middle stage of Print now and of a late background run, and the budget, the trace section and the class (`OnOpenEditionBuildBenchmark`) keep their names. It runs against the app's `benchmark` build type: the release build made profileable and signed with the debug key, plus a seeding receiver (`app/src/benchmark`) that only the shell can call. Each iteration stores 1,000 unread posts from 40 feeds, with their traits and embeddings, and no edition or reading history, and starts the app cold. Opening the app no longer builds anything, so the benchmark then sends the receiver a second broadcast (`--ez print true`) that calls `ensureCurrentEdition()` in the running app, and measures the trace section `MorningIssue.onOpenEditionBuild`, which wraps the build in `RoomEditionPublisher.ensureCurrentEdition`. It does not press Print now, because that would first sync the seeded feeds, which do not exist. The changed trigger compiles but has not been run. Results are written under `macrobenchmark/build/outputs/connected_android_test_additional_output/`. Numbers from an emulator are only indicative, and it has not yet been run on a phone. To run it without Gradle, install `app-benchmark.apk` and `macrobenchmark-benchmark.apk` and start `net.tgnra.morningissue.macrobenchmark/androidx.test.runner.AndroidJUnitRunner` with `am instrument -w` (add `-e androidx.benchmark.suppressErrors EMULATOR` on an emulator).
 
-Unit tests are in `app/src/test`: the engine (scoring, cadence, affinity, within-feed ranking, edition building, sections, carry-over, the clock), the publisher and early build against an in-memory database and `work-testing`, the sync layer against saved feed fixtures and a mock web server, the embedder against the real asset and reference vectors from the original model, the migrations against the exported schemas, the image store against a local web server and Robolectric's native graphics (real decoding and WebP encoding, on the desktop), the greyscale option through a real Coil loader, and the pure parts of the UI. The debug sample data has traits and embeddings (the upkeep runs after it is loaded) but no categories.
+Unit tests are in `app/src/test`: the engine (scoring, cadence, affinity, within-feed ranking, edition building, sections, carry-over, the clock), the publisher and early build against an in-memory database and `work-testing`, the sync layer against saved feed fixtures and a mock web server, the embedder against the real asset and reference vectors from the original model, the migrations against the exported schemas, the image store against a local web server and Robolectric's native graphics (real decoding and WebP encoding, on the desktop), the greyscale option through a real Coil loader, the Kobo sync's bundles, merge rules, token check and routes against an in-memory database and a real socket, and the pure parts of the UI. `KoboFixturesTest` writes `docs/kobo-sync-fixtures/`, the sample manifest and bundle the Kobo side parses. The debug sample data has traits and embeddings (the upkeep runs after it is loaded) but no categories.
 
 **Ranking simulation.** `RankingSimulationTest` (`app/src/test/.../simulation/`) has simulated readers use the app for 180 days: 14 real feeds saved on 2026-11-11 (`app/src/test/resources/simulation/`, with a README) replayed by a seeded generator at their own cadences, synced by the production syncer through an OkHttp interceptor in place of the network, embedded with the real potion-base-8M asset, built by the production early build at 05:00 and released at 06:30, and read through the article and edition repositories, with missed days, a week's holiday, front-page-only visits, Likes, saves and a change of taste on day 120. Five personas (a Scotland reader, a hobbyist, a tech reader, a drifter and a lapsed reader) and a reader who opens stories at random are checked with thresholds and orderings measured after a 30-day warm-up; the run is deterministic. It takes 1.5 to 2 minutes, four personas at a time. `-PsimulationReport` writes a report per persona to `app/build/reports/simulation/`, showing how affinity, W and the front page moved. Simulated readers record page views like the paper: on a full visit every page is on screen for a couple of seconds plus a few per story, with one page in ten after the front flicked past; a front-page-only visit views the front page alone; a missed day views nothing. Three checks the simulation first found failing are now kept as tests, each with the measurements before and after its fix: a week away no longer lowers a loved feed's affinity (it lowered it by about a third while every unseen page counted as ignored), a slow feed read every time becomes loved (the prior outweighed its whole record), and a link blog's own articles come first on most days that also have link posts.
 
