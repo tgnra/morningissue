@@ -197,6 +197,18 @@ class KoboRoutesTest {
     }
 
     @Test
+    fun onlyImagesInOfferedArticlesAreServed() = runTest {
+        db.syncPeerDao().pair("b7e2", "Kobo", PeerTokens.hash("good"), RELEASE)
+        // Stored, so it would be served if the route did not check: a paired Kobo must not be
+        // able to make the phone fetch or serve an address that no bundle mentions.
+        for (url in listOf("https://garden.example/img/not-offered.jpg", "http://192.168.0.1/admin.png")) {
+            File(images, url.hashCode().toString()).writeBytes(TestImages.png(TestImages.drawing(300, 100)))
+            assertEquals(404, routes.handle(get("/v1/images", "good", mapOf("url" to url))).status)
+        }
+        assertTrue(widths.isEmpty())
+    }
+
+    @Test
     fun theSavedListHasEverySavedArticleNewestFirst() = runTest {
         db.syncPeerDao().pair("b7e2", "Kobo", PeerTokens.hash("good"), RELEASE)
         db.engagementDao().setSaved(ids.top, RELEASE.plusSeconds(60))

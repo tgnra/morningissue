@@ -3,6 +3,8 @@ package net.tgnra.morningissue.kobo
 import java.time.Clock
 import java.time.Instant
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerializationException
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.db.SyncPeerEntity
@@ -30,6 +32,26 @@ class KoboRoutes(
     private val merger = KoboEventMerger(database, clock)
     private val peers = database.syncPeerDao()
     private val json = KoboProtocol.json
+
+    /**
+     * The image URLs in what is offered now, so `/v1/images` only ever fetches a picture the
+     * phone itself put in a bundle: a paired Kobo cannot make the phone fetch any other
+     * address, on the internet or the local network. Kept for [OFFERED_URLS_TTL_MILLIS] and
+     * rebuilt once on a miss, so an article saved a moment ago is not refused.
+     */
+    private val offeredUrlsLock = Mutex()
+    private var offeredUrls: Set<String> = emptySet()
+    private var offeredUrlsAt: Long = Long.MIN_VALUE
+
+    private suspend fun isOffered(url: String): Boolean = offeredUrlsLock.withLock {
+        val now = clock.millis()
+        val fresh = offeredUrlsAt != Long.MIN_VALUE && now - offeredUrlsAt < OFFERED_URLS_TTL_MILLIS
+        if (fresh && url in offeredUrls) return true
+        val offered = exporter.offeredArticles()
+        offeredUrls = BundleExport.imageUrls(offered.editions + offered.saved).toHashSet()
+        offeredUrlsAt = now
+        url in offeredUrls
+    }
 
     suspend fun handle(request: HttpRequest): HttpResponse = try {
         route(request)
@@ -95,6 +117,7 @@ class KoboRoutes(
     private suspend fun image(peer: SyncPeerEntity, request: HttpRequest): HttpResponse {
         val url = request.query["url"]?.takeIf { it.isNotBlank() } ?: return HttpResponse.error(400, "no url")
         val width = KoboImagePlan.width(request.query["w"])
+        if (!isOffered(url)) return HttpResponse.error(404, "no image")
         onImageWidth(peer.deviceId, width)
         val image = images.prepare(url, width) ?: return HttpResponse.error(404, "no image")
         return HttpResponse(200, image.format.contentType, image.bytes)
@@ -106,5 +129,9 @@ class KoboRoutes(
         val result = merger.merge(peer.deviceId, batch.events) ?: return HttpResponse.error(401, "unauthorized")
         onActivity(SyncActivity(peer.deviceId, peer.name, clock.instant(), result.merged))
         return HttpResponse.json(200, json.encodeToString(EventsAck(result.ackedSeq)))
+    }
+
+    private companion object {
+        const val OFFERED_URLS_TTL_MILLIS = 60_000L
     }
 }
