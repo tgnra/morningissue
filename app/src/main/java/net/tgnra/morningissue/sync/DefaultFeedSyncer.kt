@@ -200,6 +200,7 @@ class DefaultFeedSyncer(
                     publishedAt = minOf(item.publishedAt, now),
                     firstSeenAt = now,
                     wordCount = content.wordCount,
+                    feedWordCount = content.wordCount,
                     contentHash = content.contentHash,
                 )
                 NewPost(item, article, content.blocks.takeIf { it.isNotEmpty() }?.let(ContentBlocks::encode))

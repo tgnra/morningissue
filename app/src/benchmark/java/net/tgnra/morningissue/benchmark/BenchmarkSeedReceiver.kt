@@ -112,6 +112,7 @@ class BenchmarkSeedReceiver : BroadcastReceiver() {
                         publishedAt = seenAt.minus(Duration.ofMinutes(random.nextLong(0, 90))),
                         firstSeenAt = seenAt,
                         wordCount = text.length / 6,
+                        feedWordCount = text.length / 6,
                     ),
                     blocksJson = null,
                     plainText = text,

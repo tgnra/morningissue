@@ -190,7 +190,7 @@ abstract class ArticleSignalDao {
 
     private fun attach(rows: List<ArticleSignalRow>, categories: List<ArticleCategoryEntity>): List<ArticleSignals> {
         val byArticle = categories.groupBy({ it.articleId }) { ArticleCategory(it.key, it.label) }
-        return rows.map { ArticleSignals(it.articleId, it.feedId, it.wordCount, byArticle[it.articleId].orEmpty(), it.traits, it.vector) }
+        return rows.map { ArticleSignals(it.articleId, it.feedId, it.feedWordCount, byArticle[it.articleId].orEmpty(), it.traits, it.vector) }
     }
 
     companion object {
@@ -211,7 +211,7 @@ abstract class ArticleSignalDao {
 
         /** Shared projection for [ArticleSignalRow]; append a WHERE clause. */
         private const val SIGNAL_SELECT =
-            "SELECT a.id AS articleId, a.feedId AS feedId, a.wordCount AS wordCount, " +
+            "SELECT a.id AS articleId, a.feedId AS feedId, a.feedWordCount AS feedWordCount, " +
                 "t.articleId AS t_articleId, t.traitsVersion AS t_traitsVersion, t.linkCount AS t_linkCount, " +
                 "t.imageCount AS t_imageCount, t.hasCode AS t_hasCode, t.enclosure AS t_enclosure, " +
                 "t.isLinkPost AS t_isLinkPost, t.titlePrefix AS t_titlePrefix, v.vector AS vector " +

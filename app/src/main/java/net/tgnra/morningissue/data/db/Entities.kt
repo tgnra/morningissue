@@ -89,7 +89,15 @@ data class ArticleEntity(
     val publishedAt: Instant,
     /** When the app first fetched this post. Decides which edition it belongs to. */
     val firstSeenAt: Instant,
+    /** Words in the stored body: the feed's text at first, the fetched page once full text is fetched. Reading time. */
     @ColumnInfo(defaultValue = "0") val wordCount: Int = 0,
+    /**
+     * Words in the text the feed itself gave for the post (`FeedWordCount`). Set when the post
+     * is stored and never changed by full-text fetching, so that it measures a post the reader
+     * opened and one they did not in the same way. Within-feed ranking builds its length key
+     * from this, not from [wordCount]. 0 when the feed gave no text.
+     */
+    @ColumnInfo(defaultValue = "0") val feedWordCount: Int = 0,
     val contentHash: String? = null,
 )
 

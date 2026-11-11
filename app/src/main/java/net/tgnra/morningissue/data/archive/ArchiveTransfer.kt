@@ -32,6 +32,7 @@ import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.model.ArticleCategories
 import net.tgnra.morningissue.model.ContentBlocks
 import net.tgnra.morningissue.model.ContentSource
+import net.tgnra.morningissue.model.FeedWordCount
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.EnclosureKind
@@ -192,6 +193,7 @@ class RoomArchiveTransfer(
     private fun ArticleEntity.toArchive(content: ArchiveContent?, engagement: ArchiveEngagement?) = ArchivePost(
         n = id, feed = feedId, guid = guid, url = url, title = title, summary = summary, imageUrl = imageUrl, author = author,
         publishedAt = publishedAt.toEpochMilli(), firstSeenAt = firstSeenAt.toEpochMilli(), wordCount = wordCount,
+        feedWordCount = feedWordCount,
         contentHash = contentHash, content = content, engagement = engagement,
     )
 
@@ -297,7 +299,9 @@ class RoomArchiveTransfer(
                 ArticleEntity(
                     feedId = feedId, guid = post.guid, url = post.url, title = post.title, summary = post.summary,
                     imageUrl = post.imageUrl, author = post.author, publishedAt = Instant.ofEpochMilli(post.publishedAt),
-                    firstSeenAt = Instant.ofEpochMilli(post.firstSeenAt), wordCount = post.wordCount, contentHash = post.contentHash,
+                    firstSeenAt = Instant.ofEpochMilli(post.firstSeenAt), wordCount = post.wordCount,
+                    feedWordCount = post.feedWordCount ?: FeedWordCount.estimate(post.wordCount, post.summary, content?.third),
+                    contentHash = post.contentHash,
                 ),
             ) ?: return report.copy(postsSkipped = report.postsSkipped + 1)
             if (content != null) storeContent(articleId, post.wordCount, content)

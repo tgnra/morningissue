@@ -83,7 +83,7 @@ class WithinFeedBuildCostTest {
                     summary = "A standfirst of ordinary length, as a feed would give.",
                     publishedAt = seenAt.minus(Duration.ofMinutes(random.nextInt(600).toLong())),
                     firstSeenAt = seenAt,
-                    wordCount = 50 + random.nextInt(2500),
+                    feedWordCount = 50 + random.nextInt(2500),
                 ),
             )!!
             signalDao.insertCategories(

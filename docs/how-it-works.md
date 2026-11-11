@@ -329,13 +329,13 @@ Each post carries keys built from its signals:
 | Key | From |
 | --- | --- |
 | Category | One per category of the post |
-| Length | Its word count: brief (up to 150 words), short (up to 500), medium (up to 1,500), long. No key when the post has no stored body |
+| Length | The word count of the feed's own text: brief (up to 150 words), short (up to 500), medium (up to 1,500), long. No key when the feed gave no text |
 | Attachment | Audio, video or other, when it has one |
 | Link post | When it is one |
 | Code | When the body has code |
 | Title prefix | When the title has one |
 
-A missing trait is no key. The image and link counts are stored but no key is built from them. The word count is that of the text stored when the post is scored: the feed's own text for a new post, the fetched page once full text has been fetched (see `todo.md` for what that does to the length key). For each feed and key:
+A missing trait is no key. The image and link counts are stored but no key is built from them. The length is `article.feedWordCount`, the number of words in the text the feed itself gave. It is set when the post is stored and fetching the full text never changes it, so a post the reader opened and one they did not are measured alike. (`article.wordCount`, which the reading time uses, becomes the fetched page's count. Read from that column, an excerpt-only feed's opened posts looked long and its new posts brief, and the new posts were marked down together.) For each feed and key:
 
 ```
 lift = Σ residual over the feed's posts carrying the key / (10 + Σ exposure of those posts)
@@ -584,7 +584,7 @@ A single Room 3 database (`data/db/`, schema version 2, exported to `app/schemas
 | `feed` | One subscription | `url` (unique), `siteUrl`, `title`, `iconUrl`, `medianIntervalHrs`, `burstiness`, `tier`, `affinity`, `sliderStep`, `muteUntil`, `lastSyncAt`, `etag`, `lastModified`, `addedAt`, `notify` (unused) |
 | `tag` | One tag | `name` (unique), `affinity` |
 | `feed_tag` | Which feeds carry which tags | `feedId`, `tagId` |
-| `article` | One post | `feedId`, `guid` (unique together), `url`, `title`, `summary`, `imageUrl`, `author`, `publishedAt`, `firstSeenAt`, `wordCount`, `contentHash` |
+| `article` | One post | `feedId`, `guid` (unique together), `url`, `title`, `summary`, `imageUrl`, `author`, `publishedAt`, `firstSeenAt`, `wordCount`, `feedWordCount`, `contentHash` |
 | `article_content` | A post's body as block-model JSON, uncompressed | `articleId`, `blocksJson`, `source` (`FEED` or `FETCHED`), `storedAt` |
 | `engagement` | What the reader did with a post; a row exists only once something happened | `articleId`, `openedAt`, `readFraction`, `readAt`, `savedAt`, `likedAt`, `editionsRunUnopened`, `leadCount` |
 | `edition` | One edition | `date` and `kind` (unique together), `cutoffAt`, `releaseAt`, `builtAt`, `length`, `number`, `openedAt`, `finishedAt` |
@@ -608,6 +608,7 @@ Every change to the schema raises the database version and ships a migration (`d
 | Version | Change | How older databases are filled |
 | --- | --- | --- |
 | 2 | Adds `article_category`, `article_traits` and `article_embedding` | Traits by `TraitsBackfill` and embeddings by `EmbeddingBackfill`, run by `SignalsUpkeep` after app start and after each sync. Categories exist only in the feeds, so the migration clears every feed's `ETag` and `Last-Modified`; the next sync fetches each feed in full and files the posts it already holds. Posts no longer in their feed stay without categories. |
+| 2 | Adds `article.feedWordCount` | By the migration: a post whose stored body is the feed's own, or that has none, takes its `wordCount`. A post whose body was fetched from its page takes the word count of its summary, which is the feed's text cut to 400 characters; a longer feed text is undercounted. |
 
 Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, the storage budget (default 500 MB), and whether onboarding is done. The reader's text size is in its own preferences file.
 
@@ -628,7 +629,7 @@ No post, edition or engagement is ever deleted automatically.
 
 ### Archive export and import
 
-`data/archive/` writes the whole library to one file and merges such a file back. The file is a zip of four entries (`ArchiveFormat`): `manifest.json` (format name, format version 1, export time, counts), then `feeds.jsonl`, `posts.jsonl` and `editions.jsonl` with one JSON object per line, so a library of any size is written and read a line at a time. It holds every feed with its tags and slider, every post with its stored body and engagement, and every released edition with its items. A post's line also carries the two signals only its feed could supply again: `categories` (key and label) and `enclosure` (the attachment kind). Both fields were added without raising the format version; a file written before them imports as posts without categories. Traits and embeddings are not in the file.
+`data/archive/` writes the whole library to one file and merges such a file back. The file is a zip of four entries (`ArchiveFormat`): `manifest.json` (format name, format version 1, export time, counts), then `feeds.jsonl`, `posts.jsonl` and `editions.jsonl` with one JSON object per line, so a library of any size is written and read a line at a time. It holds every feed with its tags and slider, every post with its stored body and engagement, and every released edition with its items. A post's line also carries the two signals only its feed could supply again: `categories` (key and label) and `enclosure` (the attachment kind). A post's line also has `feedWordCount`. All three fields were added without raising the format version; a file written before them imports as posts without categories, with `feedWordCount` estimated as the migration to version 2 does. Traits and embeddings are not in the file.
 
 Import merges:
 

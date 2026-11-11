@@ -144,7 +144,7 @@ data class EmbeddingInputRow(
 data class ArticleSignalRow(
     val articleId: Long,
     val feedId: Long,
-    val wordCount: Int,
+    val feedWordCount: Int,
     @Embedded(prefix = "t_") val traits: ArticleTraitsEntity?,
     val vector: ByteArray?,
 )
@@ -160,7 +160,8 @@ data class ArticleSignalRow(
 class ArticleSignals(
     val articleId: Long,
     val feedId: Long,
-    val wordCount: Int,
+    /** `article.feedWordCount`: the length of the feed's own text, whatever has been fetched since. */
+    val feedWordCount: Int,
     val categories: List<ArticleCategory>,
     val traits: ArticleTraitsEntity?,
     val embedding: ByteArray?,

@@ -76,6 +76,8 @@ data class ArchivePost(
     val publishedAt: Long,
     val firstSeenAt: Long,
     val wordCount: Int = 0,
+    /** `article.feedWordCount`; absent in files written before it existed, and then estimated (`FeedWordCount`). */
+    val feedWordCount: Int? = null,
     val contentHash: String? = null,
     val content: ArchiveContent? = null,
     val engagement: ArchiveEngagement? = null,

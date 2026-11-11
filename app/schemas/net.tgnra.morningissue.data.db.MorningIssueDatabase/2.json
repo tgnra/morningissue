@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 2,
-    "identityHash": "fe0f7139ed18d6d5574df9e82c9a1c54",
+    "identityHash": "0062a1572a49c8467b42301319dd2681",
     "entities": [
       {
         "tableName": "feed",
@@ -223,7 +223,7 @@
       },
       {
         "tableName": "article",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `feedId` INTEGER NOT NULL, `guid` TEXT NOT NULL, `url` TEXT, `title` TEXT NOT NULL, `summary` TEXT, `imageUrl` TEXT, `author` TEXT, `publishedAt` INTEGER NOT NULL, `firstSeenAt` INTEGER NOT NULL, `wordCount` INTEGER NOT NULL DEFAULT 0, `contentHash` TEXT, FOREIGN KEY(`feedId`) REFERENCES `feed`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `feedId` INTEGER NOT NULL, `guid` TEXT NOT NULL, `url` TEXT, `title` TEXT NOT NULL, `summary` TEXT, `imageUrl` TEXT, `author` TEXT, `publishedAt` INTEGER NOT NULL, `firstSeenAt` INTEGER NOT NULL, `wordCount` INTEGER NOT NULL DEFAULT 0, `feedWordCount` INTEGER NOT NULL DEFAULT 0, `contentHash` TEXT, FOREIGN KEY(`feedId`) REFERENCES `feed`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "id",
@@ -284,6 +284,13 @@
           {
             "fieldPath": "wordCount",
             "columnName": "wordCount",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "feedWordCount",
+            "columnName": "feedWordCount",
             "affinity": "INTEGER",
             "notNull": true,
             "defaultValue": "0"
@@ -952,7 +959,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'fe0f7139ed18d6d5574df9e82c9a1c54')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '0062a1572a49c8467b42301319dd2681')"
     ]
   }
 }

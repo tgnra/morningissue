@@ -144,6 +144,7 @@ class SampleDataSeeder(
                         publishedAt = publishedAt,
                         firstSeenAt = seenAt,
                         wordCount = if (feed.hasBody) ContentBlocks.wordCount(text) else 0,
+                        feedWordCount = if (feed.hasBody) ContentBlocks.wordCount(text) else 0,
                     ),
                     blocksJson = if (feed.hasBody) ContentBlocks.encode(blocks) else null,
                     plainText = text.ifEmpty { null },

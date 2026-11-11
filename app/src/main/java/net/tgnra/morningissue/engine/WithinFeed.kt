@@ -16,7 +16,12 @@ class PostTraits(
     val feedId: Long,
     /** Lowercased category keys from the feed's `<category>` elements; often empty. */
     val categories: Set<String> = emptySet(),
-    /** Words in the body; negative when not known, and the post then has no length key. */
+    /**
+     * Words in the text the feed gave for the post; negative when not known, and the post then
+     * has no length key. The caller must measure every post the same way: a count taken from a
+     * fetched page for some posts and from the feed's excerpt for others turns "the reader
+     * opened it" into "it is long".
+     */
     val wordCount: Int = UNKNOWN_WORD_COUNT,
     /** What the post carries besides its text, from the feed's `<enclosure>`. */
     val enclosure: EnclosureKind = EnclosureKind.NONE,

@@ -104,12 +104,22 @@ class MigrationTest {
 
     @Test
     fun version1To2KeepsEveryRowAddsTheEmptyTablesAndClearsTheValidators() = runBlocking<Unit> {
-        helper.createDatabase(1).use(::seedVersion1)
+        helper.createDatabase(1).use { v1 ->
+            seedVersion1(v1)
+            // Two posts the reader opened, so that their pages were fetched over the feed's excerpts.
+            v1.execSQL(
+                "INSERT INTO article (id, feedId, guid, url, title, summary, publishedAt, firstSeenAt, wordCount, contentHash) VALUES " +
+                    "(4, 2, 'd', 'https://news.example/d', 'Opened', 'An excerpt of just seven words here.', 950, 1000, 1200, 'h4'), " +
+                    "(5, 2, 'e', 'https://news.example/e', 'Opened, no summary', NULL, 950, 1000, 800, 'h5')",
+            )
+            v1.execSQL("INSERT INTO article_content (articleId, blocksJson, source, storedAt) VALUES (4, '[]', 'FETCHED', 1100), (5, '[]', 'FETCHED', 1100)")
+            v1.execSQL("INSERT INTO article_fts (rowid, title, summary, author, body) VALUES (4, 'Opened', '', '', ''), (5, 'Opened, no summary', '', '', '')")
+        }
 
         // Runs the step and compares the resulting tables with the exported version 2 schema.
         helper.runMigrationsAndValidate(2, listOf(Migrations.MIGRATION_1_2)).use { db ->
             for ((table, rows) in listOf(
-                "feed" to 2L, "tag" to 1L, "feed_tag" to 1L, "article" to 3L, "article_content" to 1L, "article_fts" to 3L,
+                "feed" to 2L, "tag" to 1L, "feed_tag" to 1L, "article" to 5L, "article_content" to 3L, "article_fts" to 5L,
                 "engagement" to 1L, "edition" to 1L, "edition_item" to 1L, "feed_health" to 1L,
             )) {
                 assertEquals(table, rows, db.long("SELECT COUNT(*) FROM $table"))
@@ -125,6 +135,18 @@ class MigrationTest {
             assertEquals("FAVOURITE", db.text("SELECT sliderStep FROM feed WHERE id = 1"))
             assertEquals(1000L, db.long("SELECT lastSyncAt FROM feed WHERE id = 1"))
             assertEquals(800L, db.long("SELECT CAST(affinity * 1000 AS INTEGER) FROM feed WHERE id = 1"))
+
+            // The feed's own word count: the stored count where the body is still the feed's or
+            // there is none, the summary's length where a fetched page has replaced it.
+            assertEquals(5L, db.long("SELECT feedWordCount FROM article WHERE id = 1"))
+            assertEquals(0L, db.long("SELECT feedWordCount FROM article WHERE id = 2"))
+            assertEquals(1L, db.long("SELECT feedWordCount FROM article WHERE id = 3"))
+            assertEquals(7L, db.long("SELECT feedWordCount FROM article WHERE id = 4"))
+            assertEquals(0L, db.long("SELECT feedWordCount FROM article WHERE id = 5"))
+            // The same rule in Kotlin, for archives written before the field existed.
+            assertEquals(7, net.tgnra.morningissue.model.FeedWordCount.estimate(1200, "An excerpt of just seven words here.", ContentSource.FETCHED))
+            assertEquals(5, net.tgnra.morningissue.model.FeedWordCount.estimate(5, "Read this piece.", ContentSource.FEED))
+            assertEquals(1200L, db.long("SELECT wordCount FROM article WHERE id = 4"))
 
             assertEquals("Links: something good", db.text("SELECT title FROM article WHERE id = 1"))
             assertEquals(body, db.text("SELECT blocksJson FROM article_content WHERE articleId = 1"))

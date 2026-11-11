@@ -68,7 +68,10 @@ class WithinFeedLearner(
          * What the engine reads of a post's stored signals.
          *
          * - Categories are matched by key.
-         * - A word count of 0 is "no body stored", not a very short post: the length is not known.
+         * - The length is that of the feed's own text (`article.feedWordCount`), never of a page
+         *   fetched later: labelled posts and candidates must be measured alike, and only the
+         *   posts the reader opened (or the early build printed) have a fetched page.
+         * - A word count of 0 is "the feed gave no text", not a very short post: the length is not known.
          * - A traits row that is missing, or behind the current rules (a row that only records
          *   an enclosure, written by an archive import), is trusted for its enclosure alone.
          * - A stored embedding that is a mark and not a vector (`StoredEmbedding`) is no vector.
@@ -79,7 +82,7 @@ class WithinFeedLearner(
             return PostTraits(
                 feedId = signals.feedId,
                 categories = signals.categories.mapTo(HashSet(signals.categories.size * 2)) { it.key },
-                wordCount = signals.wordCount.takeIf { it > 0 } ?: PostTraits.UNKNOWN_WORD_COUNT,
+                wordCount = signals.feedWordCount.takeIf { it > 0 } ?: PostTraits.UNKNOWN_WORD_COUNT,
                 enclosure = traits?.enclosure ?: EnclosureKind.NONE,
                 isLinkPost = current?.isLinkPost ?: false,
                 hasCode = current?.hasCode ?: false,

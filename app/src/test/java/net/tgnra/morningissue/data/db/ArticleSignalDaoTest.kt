@@ -42,7 +42,7 @@ class ArticleSignalDaoTest {
     private fun category(name: String) = ArticleCategories.of(name)!!
 
     private suspend fun post(feedId: Long, guid: String, body: String? = null, wordCount: Int = 0): Long =
-        db.articleDao().insertNew(article(feedId, guid, summary = "Summary $guid").copy(wordCount = wordCount), body?.let { "[]" }, body)!!
+        db.articleDao().insertNew(article(feedId, guid, summary = "Summary $guid").copy(wordCount = wordCount, feedWordCount = wordCount), body?.let { "[]" }, body)!!
 
     @Test
     fun categoriesAreKeptOncePerKeyAndAtMostTwelve() = runTest {
@@ -150,7 +150,7 @@ class ArticleSignalDaoTest {
 
         val a = signals.getValue(full)
         assertEquals(blog, a.feedId)
-        assertEquals(900, a.wordCount)
+        assertEquals(900, a.feedWordCount)
         assertEquals(listOf(ArticleCategory("essays", "Essays"), ArticleCategory("tech", "Tech")), a.categories)
         assertEquals(podcast, a.traits!!.toTraits())
         assertEquals(ArticleTraitRules.VERSION, a.traits!!.traitsVersion)
@@ -158,7 +158,7 @@ class ArticleSignalDaoTest {
 
         val b = signals.getValue(bare)
         assertEquals(news, b.feedId)
-        assertEquals(40, b.wordCount)
+        assertEquals(40, b.feedWordCount)
         assertTrue(b.categories.isEmpty())
         assertNull(b.traits)
         assertNull(b.embedding)

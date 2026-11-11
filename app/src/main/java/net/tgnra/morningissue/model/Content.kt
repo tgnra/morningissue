@@ -113,3 +113,21 @@ object ContentBlocks {
 
     private val WHITESPACE = Regex("\\s+")
 }
+
+/**
+ * The length of the text a feed gave for a post (`article.feedWordCount`), for posts stored
+ * before that was recorded: a database upgraded from version 1 (`Migrations.MIGRATION_1_2` does
+ * the same in SQL) or an archive written before the field existed.
+ */
+object FeedWordCount {
+    /**
+     * - A post whose stored body is the feed's own, or that has no body, takes [wordCount]: the
+     *   feed's text is all that was ever counted. (A body lost to trimming may have been a
+     *   fetched page; such posts are old and this is the best that is known.)
+     * - A post whose body was fetched from its page takes the length of its [summary], which is
+     *   the feed's text cut to 400 characters. A longer feed text is undercounted, but lands in
+     *   the bucket of the feed's other excerpts, which is what the length key compares.
+     */
+    fun estimate(wordCount: Int, summary: String?, source: ContentSource?): Int =
+        if (source == ContentSource.FETCHED) minOf(wordCount, ContentBlocks.wordCount(summary.orEmpty())) else wordCount
+}
