@@ -1,6 +1,7 @@
 package net.tgnra.morningissue.sync
 
 import net.tgnra.morningissue.CoreComponents
+import net.tgnra.morningissue.data.repository.FeedHealthRepository
 
 /** What the sync layer offers to the rest of the app. */
 class SyncComponents(
@@ -9,6 +10,7 @@ class SyncComponents(
     val feedDiscovery: FeedDiscovery,
     val fullTextFetcher: FullTextFetcher,
     val opmlTransfer: OpmlTransfer,
+    val feedHealth: FeedHealthRepository,
 )
 
 /**
@@ -18,12 +20,23 @@ class SyncComponents(
 object SyncModule {
     fun create(core: CoreComponents): SyncComponents {
         val fetcher = FeedFetcher(core.okHttpClient)
+        val discovery = DefaultFeedDiscovery(fetcher, core.clock)
+        val healthChecker = FeedHealthChecker(core.database, FeedRepairer(fetcher, discovery, core.clock), core.clock)
+        // Quiet feeds are fetched less often; after every full sync the health check runs,
+        // then stored text is trimmed to the storage budget.
+        val syncer = MaintainedFeedSyncer(
+            delegate = DefaultFeedSyncer(core.database, fetcher, core.clock, core.appScope, dueFeeds = healthChecker::dueFeeds),
+            afterSync = listOf({ healthChecker.run() }, { core.storage.trimToBudget() }),
+        )
         return SyncComponents(
-            feedSyncer = DefaultFeedSyncer(core.database, fetcher, core.clock, core.appScope),
+            feedSyncer = syncer,
             syncScheduler = WorkManagerSyncScheduler(core.appContext),
-            feedDiscovery = DefaultFeedDiscovery(fetcher, core.clock),
+            feedDiscovery = discovery,
             fullTextFetcher = DefaultFullTextFetcher(core.database, fetcher, core.clock),
             opmlTransfer = DefaultOpmlTransfer(core.feeds, core.clock),
+            feedHealth = DefaultFeedHealthRepository(
+                core.database, healthChecker, syncer, PrefsDeskNoticeStore(core.appContext), core.clock,
+            ),
         )
     }
 }

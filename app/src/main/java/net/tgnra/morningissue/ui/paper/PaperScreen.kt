@@ -41,6 +41,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -103,7 +104,7 @@ fun PaperScreen(
     onOpenSource: (feedId: Long) -> Unit,
     onOpenBackIssues: () -> Unit,
     onOpenSearch: () -> Unit,
-    @Suppress("UNUSED_PARAMETER") onOpenSubscriptionsDesk: () -> Unit,
+    onOpenSubscriptionsDesk: () -> Unit,
     onBack: () -> Unit,
 ) {
     val container = LocalAppContainer.current
@@ -123,6 +124,10 @@ fun PaperScreen(
             EmptyMessage(stringResource(R.string.paper_missing_title), stringResource(R.string.paper_missing_detail))
         }
         else -> {
+            // Once a month the edition carries the Subscriptions desk, as a notice on its back page.
+            val deskNotice by produceState<Int?>(null, edition.id) {
+                value = container.feedHealth.deskNotice(edition.id, edition.date)
+            }
             val links = BackPageLinks(
                 fallbackNextEditionAt = settings?.let {
                     PaperFormat.nextReset(container.clock.instant(), it.resetTime, ZoneId.systemDefault())
@@ -130,6 +135,8 @@ fun PaperScreen(
                 onOpenBackIssues = onOpenBackIssues,
                 onOpenSearch = onOpenSearch,
                 onBackToStand = onBack,
+                deskNoticeCount = deskNotice,
+                onOpenSubscriptionsDesk = onOpenSubscriptionsDesk,
             )
             val storyActions = remember(container, onOpenArticle, onOpenSource) {
                 StoryActions(

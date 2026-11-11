@@ -44,6 +44,8 @@ class DefaultFeedSyncer(
     private val config: RankingConfig = RankingConfig.Default,
     private val parallelism: Int = DEFAULT_PARALLELISM,
     private val parseDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** Which feeds a full sync fetches; quiet feeds are checked less often (`FeedHealthChecker.dueFeeds`). */
+    private val dueFeeds: suspend (List<FeedEntity>) -> List<FeedEntity> = { it },
 ) : FeedSyncer {
     private val feedDao = database.feedDao()
     private val articleDao = database.articleDao()
@@ -77,7 +79,7 @@ class DefaultFeedSyncer(
 
     private suspend fun runAll(): SyncReport {
         try {
-            val feeds = feedDao.getAll()
+            val feeds = dueFeeds(feedDao.getAll())
             _status.value = SyncStatus.Running(0, feeds.size)
             val done = AtomicInteger()
             val permits = Semaphore(parallelism)

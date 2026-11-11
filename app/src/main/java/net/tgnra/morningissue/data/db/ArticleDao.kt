@@ -126,6 +126,40 @@ abstract class ArticleDao {
     @Query("DELETE FROM article_content WHERE articleId IN (:articleIds)")
     abstract suspend fun deleteContent(articleIds: List<Long>)
 
+    /** Characters of body text held in the search index (a second copy of every stored body). */
+    @Query("SELECT COALESCE(SUM(LENGTH(body)), 0) FROM article_fts")
+    abstract suspend fun indexedBodySize(): Long
+
+    /**
+     * Stored bodies that may be trimmed, in trimming order: the oldest editions' posts first
+     * (a post belongs to an edition by its first-seen time). Liked and saved posts are never
+     * returned, nor are posts first seen at or after [protectFrom] or placed in [keepEditionIds].
+     * The size counts the body and its copy in the search index.
+     */
+    @Query(
+        "SELECT c.articleId AS articleId, LENGTH(c.blocksJson) + COALESCE(LENGTH(x.body), 0) AS size " +
+            "FROM article_content c JOIN article a ON a.id = c.articleId " +
+            "LEFT JOIN article_fts x ON x.rowid = c.articleId LEFT JOIN engagement g ON g.articleId = c.articleId " +
+            "WHERE g.savedAt IS NULL AND g.likedAt IS NULL AND a.firstSeenAt < :protectFrom " +
+            "AND c.articleId NOT IN (SELECT articleId FROM edition_item WHERE editionId IN (:keepEditionIds)) " +
+            "ORDER BY a.firstSeenAt, a.id LIMIT :limit",
+    )
+    abstract suspend fun trimCandidates(protectFrom: Instant, keepEditionIds: List<Long>, limit: Int): List<ContentSizeRow>
+
+    /**
+     * Drops the stored body of each article and its copy in the search index, in one
+     * transaction. The article row stays, and stays searchable by title, summary and author.
+     */
+    @Transaction
+    open suspend fun trimContent(articleIds: List<Long>) {
+        for (id in articleIds) {
+            val article = getById(id) ?: continue
+            deleteFts(id)
+            insertFts(ftsRow(article, null))
+        }
+        deleteContent(articleIds)
+    }
+
     // --- Full-text index -------------------------------------------------------------------
 
     @Query("DELETE FROM article_fts WHERE rowid = :articleId")

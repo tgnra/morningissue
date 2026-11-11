@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "9b2c00ab1b3a8def75afa1c8d0904e09",
+    "identityHash": "a131348e11d42b6710e8b1085e822e35",
     "entities": [
       {
         "tableName": "feed",
@@ -665,7 +665,7 @@
       },
       {
         "tableName": "feed_health",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`feedId` INTEGER NOT NULL, `lastPostAt` INTEGER, `errorStreak` INTEGER NOT NULL DEFAULT 0, `errorSince` INTEGER, `lastHttpStatus` INTEGER, `lastFlag` TEXT, `flagDismissedUntil` INTEGER, PRIMARY KEY(`feedId`), FOREIGN KEY(`feedId`) REFERENCES `feed`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`feedId` INTEGER NOT NULL, `lastPostAt` INTEGER, `errorStreak` INTEGER NOT NULL DEFAULT 0, `errorSince` INTEGER, `lastHttpStatus` INTEGER, `lastFlag` TEXT, `flagDismissedUntil` INTEGER, `lastRepairAt` INTEGER, PRIMARY KEY(`feedId`), FOREIGN KEY(`feedId`) REFERENCES `feed`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "feedId",
@@ -703,6 +703,11 @@
           {
             "fieldPath": "flagDismissedUntil",
             "columnName": "flagDismissedUntil",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastRepairAt",
+            "columnName": "lastRepairAt",
             "affinity": "INTEGER"
           }
         ],
@@ -777,7 +782,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '9b2c00ab1b3a8def75afa1c8d0904e09')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a131348e11d42b6710e8b1085e822e35')"
     ]
   }
 }

@@ -155,6 +155,7 @@ fun SettingsScreen(
                     )
                 }
             }
+            StorageSettingsSections(settings.storageBudgetMb)
             // Empty in release builds.
             DebugSettingsSection()
         }

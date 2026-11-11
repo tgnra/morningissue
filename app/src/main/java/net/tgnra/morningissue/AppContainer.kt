@@ -8,9 +8,12 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import net.tgnra.morningissue.data.archive.ArchiveController
+import net.tgnra.morningissue.data.archive.RoomArchiveTransfer
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.repository.ArticleRepository
 import net.tgnra.morningissue.data.repository.EditionRepository
+import net.tgnra.morningissue.data.repository.FeedHealthRepository
 import net.tgnra.morningissue.data.repository.FeedRepository
 import net.tgnra.morningissue.data.repository.RoomArticleRepository
 import net.tgnra.morningissue.data.repository.RoomEditionRepository
@@ -18,6 +21,8 @@ import net.tgnra.morningissue.data.repository.RoomFeedRepository
 import net.tgnra.morningissue.data.settings.DataStoreSettingsRepository
 import net.tgnra.morningissue.data.settings.SettingsRepository
 import net.tgnra.morningissue.data.settings.settingsDataStore
+import net.tgnra.morningissue.data.storage.RoomStorageRepository
+import net.tgnra.morningissue.data.storage.StorageRepository
 import net.tgnra.morningissue.edition.EditionModule
 import net.tgnra.morningissue.edition.EditionPublisher
 import net.tgnra.morningissue.edition.EditionScheduler
@@ -39,6 +44,15 @@ interface AppContainer {
     val feeds: FeedRepository
     val articles: ArticleRepository
     val editions: EditionRepository
+
+    /** The Subscriptions desk: flagged feeds and their fixes. */
+    val feedHealth: FeedHealthRepository
+
+    /** The storage budget: usage and trimming of stored article text. */
+    val storage: StorageRepository
+
+    /** Archive export and import to a file the reader picks. */
+    val archive: ArchiveController
 
     val feedSyncer: FeedSyncer
     val syncScheduler: SyncScheduler
@@ -72,6 +86,7 @@ class CoreComponents(
     val settings: SettingsRepository,
     val feeds: FeedRepository,
     val articles: ArticleRepository,
+    val storage: StorageRepository,
 )
 
 class DefaultAppContainer(context: Context) : AppContainer {
@@ -99,6 +114,10 @@ class DefaultAppContainer(context: Context) : AppContainer {
     override val settings: SettingsRepository by lazy { DataStoreSettingsRepository(appContext.settingsDataStore) }
     override val feeds: FeedRepository by lazy { RoomFeedRepository(database, clock) }
     override val articles: ArticleRepository by lazy { RoomArticleRepository(database, clock) }
+    override val storage: StorageRepository by lazy { RoomStorageRepository(database, settings, clock) }
+    override val archive: ArchiveController by lazy {
+        ArchiveController(appScope, appContext.contentResolver, RoomArchiveTransfer(database, clock), storage)
+    }
 
     val core: CoreComponents by lazy {
         CoreComponents(
@@ -111,6 +130,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
             settings = settings,
             feeds = feeds,
             articles = articles,
+            storage = storage,
         )
     }
 
@@ -122,6 +142,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
     override val feedDiscovery: FeedDiscovery get() = sync.feedDiscovery
     override val fullTextFetcher: FullTextFetcher get() = sync.fullTextFetcher
     override val opmlTransfer: OpmlTransfer get() = sync.opmlTransfer
+    override val feedHealth: FeedHealthRepository get() = sync.feedHealth
 
     override val editionPublisher: EditionPublisher get() = edition.publisher
     override val editionScheduler: EditionScheduler get() = edition.scheduler

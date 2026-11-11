@@ -179,8 +179,50 @@
         <item quantity="other">Exported %d sources</item>
     </plurals>
     <string name="desk_title">Subscriptions desk</string>
-    <string name="desk_placeholder_title">Not yet open</string>
-    <string name="desk_placeholder_detail">The feed health check, with its flags and one-tap fixes, arrives in a later version.</string>
+    <string name="desk_intro">Feeds the paper has noticed something about. Nothing here happens on its own, and a dismissed note stays away for six months.</string>
+    <string name="desk_healthy_title">All in order</string>
+    <string name="desk_healthy_detail">Every feed is being delivered and nothing needs your attention.</string>
+    <string name="desk_flag_broken">Not arriving</string>
+    <string name="desk_flag_moved">Changed address</string>
+    <string name="desk_flag_quiet">Gone quiet</string>
+    <string name="desk_flag_ignored">Never opened</string>
+    <string name="desk_flag_noisy">Posts a lot, read a little</string>
+    <string name="desk_flag_loved">Read cover to cover</string>
+    <string name="desk_about_broken">These could not be fetched for a week or more. The usual alternative addresses were tried as well and none of them answered with a feed.</string>
+    <string name="desk_about_moved">These were found at a new address, which is now the one in use. There is nothing you need to do.</string>
+    <string name="desk_about_quiet">No posts in 90 days. That is not a problem: they are kept, checked less often, and return to the paper when they post again.</string>
+    <string name="desk_about_ignored">These have run in ten or more editions over the last two months without one of their stories being opened.</string>
+    <string name="desk_about_noisy">Thirty or more posts a week, and almost none of them opened.</string>
+    <string name="desk_about_loved">You read most of what these publish and Like it often. As a favourite, a feed is always given room.</string>
+    <string name="desk_detail_gone">The site says this feed has been removed for good.</string>
+    <string name="desk_detail_failing_since">Not answering since %1$s.</string>
+    <string name="desk_detail_moved_to">Now at %1$s</string>
+    <string name="desk_detail_last_post">Last post on %1$s.</string>
+    <string name="desk_detail_no_posts">It has never posted.</string>
+    <string name="desk_action_retry">Try again</string>
+    <string name="desk_action_retrying">Trying…</string>
+    <string name="desk_action_accept">OK</string>
+    <string name="desk_action_less">Show less</string>
+    <string name="desk_action_favourite">Make it a favourite</string>
+    <string name="desk_action_unsubscribe">Unsubscribe</string>
+    <string name="desk_action_dismiss">Dismiss</string>
+    <string name="desk_retrying">Trying %1$s again…</string>
+    <string name="desk_retry_working">%1$s is arriving again.</string>
+    <string name="desk_retry_moved">%1$s was found at a new address and is arriving again.</string>
+    <string name="desk_retry_failed">%1$s still isn’t answering.</string>
+    <string name="desk_notice_label">Subscriptions desk</string>
+    <plurals name="desk_notice_headline">
+        <item quantity="one">%d of your feeds could do with a look</item>
+        <item quantity="other">%d of your feeds could do with a look</item>
+    </plurals>
+    <string name="desk_notice_detail">A monthly note. Nothing is changed unless you choose to.</string>
+    <string name="desk_notice_open">Open the Subscriptions desk</string>
+    <plurals name="sources_desk_link">
+        <item quantity="one">%d feed could do with a look</item>
+        <item quantity="other">%d feeds could do with a look</item>
+    </plurals>
+    <string name="sources_quiet_heading">Quiet · %1$d</string>
+    <string name="sources_quiet_detail">No posts in 90 days. Kept, and checked less often.</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
@@ -210,6 +252,61 @@
     <string name="display_auto">Auto</string>
     <string name="display_standard">Standard</string>
     <string name="display_eink">E-ink</string>
+    <string name="settings_storage">Storage</string>
+    <string name="storage_budget">Article text to keep</string>
+    <string name="storage_budget_detail">When this fills, the text of the oldest editions’ articles is dropped first. Liked and saved articles are always kept, and so is every headline and back issue: a trimmed article is fetched again when you open it. Pictures have their own fixed cache and are not counted.</string>
+    <string name="storage_less">Less</string>
+    <string name="storage_more">More</string>
+    <string name="storage_usage">Using %1$s of %2$s</string>
+    <string name="storage_under_one">under 1 MB</string>
+    <string name="storage_over_budget">Over the budget. The oldest articles’ text is trimmed after the next sync.</string>
+    <string name="storage_trim_now">Trim now</string>
+    <string name="storage_trimming">Trimming…</string>
+    <string name="settings_archive">Archive</string>
+    <string name="archive_export">Export</string>
+    <string name="archive_export_detail">Writes your feeds, every edition and every stored article, with your Likes and saves, to one file wherever you choose. “Export and free up space” then drops the stored text of older articles from this device; importing the file brings it back.</string>
+    <string name="archive_export_action">Export</string>
+    <string name="archive_export_free_action">Export and free up space</string>
+    <string name="archive_import">Import</string>
+    <string name="archive_import_detail">Merges an exported file into this library. Posts and editions already here are skipped, and nothing you have Liked, saved or read here is overwritten.</string>
+    <string name="archive_import_action">Import a file</string>
+    <string name="archive_exporting">Exporting…</string>
+    <string name="archive_importing">Importing…</string>
+    <string name="archive_exporting_progress">Exporting… %1$,d of %2$,d posts</string>
+    <string name="archive_importing_progress">Importing… %1$,d of %2$,d posts</string>
+    <plurals name="archive_exported_editions">
+        <item quantity="one">Exported %,d edition</item>
+        <item quantity="other">Exported %,d editions</item>
+    </plurals>
+    <plurals name="archive_exported_posts">
+        <item quantity="one">and %,d post.</item>
+        <item quantity="other">and %,d posts.</item>
+    </plurals>
+    <plurals name="archive_freed">
+        <item quantity="one">Freed %2$s by trimming %1$,d article.</item>
+        <item quantity="other">Freed %2$s by trimming %1$,d articles.</item>
+    </plurals>
+    <plurals name="archive_imported_posts">
+        <item quantity="one">Imported %,d post</item>
+        <item quantity="other">Imported %,d posts</item>
+    </plurals>
+    <string name="archive_imported_skipped">, skipped %1$,d.</string>
+    <plurals name="archive_imported_restored">
+        <item quantity="one">Put back the text of %,d post.</item>
+        <item quantity="other">Put back the text of %,d posts.</item>
+    </plurals>
+    <plurals name="archive_imported_editions">
+        <item quantity="one">Imported %,d edition</item>
+        <item quantity="other">Imported %,d editions</item>
+    </plurals>
+    <plurals name="archive_imported_feeds">
+        <item quantity="one">Subscribed again to %,d feed that was in the file.</item>
+        <item quantity="other">Subscribed again to %,d feeds that were in the file.</item>
+    </plurals>
+    <string name="archive_export_failed">The export couldn’t be written.</string>
+    <string name="archive_import_failed">The import stopped: the file couldn’t be read.</string>
+    <string name="archive_failed_not_archive">That file isn’t a Morning Issue archive.</string>
+    <string name="archive_failed_newer">That archive was made by a newer version of Morning Issue. Update the app to import it.</string>
 
     <!-- Onboarding -->
     <string name="onboarding_tagline">Your feeds, printed once a day.</string>

@@ -31,6 +31,7 @@ abstract class MorningIssueDatabase : RoomDatabase() {
     abstract fun engagementDao(): EngagementDao
     abstract fun editionDao(): EditionDao
     abstract fun feedHealthDao(): FeedHealthDao
+    abstract fun archiveDao(): ArchiveDao
 
     /**
      * Room 3 needs an explicit SQLite driver. This is the platform's own SQLite, the engine

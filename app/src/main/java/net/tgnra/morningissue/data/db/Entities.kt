@@ -200,6 +200,8 @@ data class FeedHealthEntity(
     val lastHttpStatus: Int? = null,
     val lastFlag: HealthFlag? = null,
     val flagDismissedUntil: Instant? = null,
+    /** When an automatic repair of a failing feed was last tried; limits how often it runs. */
+    val lastRepairAt: Instant? = null,
 )
 
 /**

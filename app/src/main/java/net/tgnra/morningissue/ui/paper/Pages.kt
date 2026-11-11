@@ -54,6 +54,7 @@ import net.tgnra.morningissue.ui.components.PaperIcons
 import net.tgnra.morningissue.ui.components.stepAnchor
 import net.tgnra.morningissue.ui.format.PaperFormat
 import net.tgnra.morningissue.ui.layout.LocalPaperLayoutSpec
+import net.tgnra.morningissue.ui.sources.DeskNotice
 import net.tgnra.morningissue.ui.layout.PaperLayoutSpec
 import net.tgnra.morningissue.ui.theme.MorningIssueTheme
 
@@ -76,6 +77,9 @@ class BackPageLinks(
     val onOpenBackIssues: () -> Unit,
     val onOpenSearch: () -> Unit,
     val onBackToStand: () -> Unit,
+    /** Feeds needing attention, when this edition carries the monthly Subscriptions desk notice. */
+    val deskNoticeCount: Int? = null,
+    val onOpenSubscriptionsDesk: () -> Unit = {},
 )
 
 /**
@@ -436,6 +440,10 @@ private fun BackPage(edition: Edition, page: EditionPage.Back, links: BackPageLi
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             PaperButton(stringResource(R.string.back_back_issues), links.onOpenBackIssues, icon = PaperIcons.Calendar)
             PaperButton(stringResource(R.string.back_search), links.onOpenSearch, icon = Icons.Filled.Search)
+        }
+        links.deskNoticeCount?.let { count ->
+            Spacer(Modifier.height(28.dp))
+            DeskNotice(count, links.onOpenSubscriptionsDesk, Modifier.widthIn(max = 440.dp))
         }
     }
 
