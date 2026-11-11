@@ -6,6 +6,7 @@ import java.util.Random
 import kotlin.math.sqrt
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import net.tgnra.morningissue.model.EnclosureKind
 
 /**
  * What a learning pass costs at the size it has to handle: 3,000 labelled posts with
@@ -41,7 +42,7 @@ class WithinFeedCostTest {
                     feedId = feedId,
                     categories = setOf("topic-${random.nextInt(12)}", "topic-${random.nextInt(12)}"),
                     wordCount = random.nextInt(3000),
-                    enclosure = if (random.nextInt(10) == 0) Enclosure.AUDIO else Enclosure.NONE,
+                    enclosure = if (random.nextInt(10) == 0) EnclosureKind.AUDIO else EnclosureKind.NONE,
                     isLinkPost = random.nextInt(6) == 0,
                     hasCode = random.nextInt(5) == 0,
                     titlePrefix = if (random.nextInt(10) == 0) "links" else null,

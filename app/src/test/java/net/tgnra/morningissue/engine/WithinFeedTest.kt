@@ -11,6 +11,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import net.tgnra.morningissue.model.EnclosureKind
 
 class WithinFeedTest {
     private val now: Instant = Instant.parse("2026-11-10T06:30:00Z")
@@ -155,8 +156,8 @@ class WithinFeedTest {
         check(WithinFeedSignalKind.CATEGORY, "space", about("space"), PostTraits(1))
         check(WithinFeedSignalKind.LENGTH, "long", PostTraits(1, wordCount = 1501), PostTraits(1, wordCount = 1500))
         check(WithinFeedSignalKind.LENGTH, "brief", PostTraits(1, wordCount = 0), PostTraits(1, wordCount = 151))
-        check(WithinFeedSignalKind.ENCLOSURE, "audio", PostTraits(1, enclosure = Enclosure.AUDIO), PostTraits(1))
-        check(WithinFeedSignalKind.ENCLOSURE, "video", PostTraits(1, enclosure = Enclosure.VIDEO), PostTraits(1, enclosure = Enclosure.OTHER))
+        check(WithinFeedSignalKind.ENCLOSURE, "audio", PostTraits(1, enclosure = EnclosureKind.AUDIO), PostTraits(1))
+        check(WithinFeedSignalKind.ENCLOSURE, "video", PostTraits(1, enclosure = EnclosureKind.VIDEO), PostTraits(1, enclosure = EnclosureKind.OTHER))
         check(WithinFeedSignalKind.LINK_POST, "", PostTraits(1, isLinkPost = true), PostTraits(1))
         check(WithinFeedSignalKind.CODE, "", PostTraits(1, hasCode = true), PostTraits(1))
         check(WithinFeedSignalKind.TITLE_PREFIX, "links", PostTraits(1, titlePrefix = "links"), PostTraits(1))
@@ -205,7 +206,7 @@ class WithinFeedTest {
     fun correlatedKeysCountOnce() {
         // The same twelve episodes, marked one way or three.
         val once = PostTraits(1, titlePrefix = "podcast")
-        val thrice = PostTraits(1, categories = setOf("podcast"), enclosure = Enclosure.AUDIO, titlePrefix = "podcast")
+        val thrice = PostTraits(1, categories = setOf("podcast"), enclosure = EnclosureKind.AUDIO, titlePrefix = "podcast")
         fun model(episode: PostTraits) = learner.learn(
             List(9) { labelled(episode, read = true) } + List(3) { labelled(episode, read = false) } + List(24) { labelled(PostTraits(1), read = false) },
             now,

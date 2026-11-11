@@ -3,9 +3,7 @@ package net.tgnra.morningissue.engine
 import java.time.Instant
 import kotlin.math.exp
 import kotlin.math.sqrt
-
-/** What a post carries besides its text, from the feed's `<enclosure>`. */
-enum class Enclosure { NONE, AUDIO, VIDEO, OTHER }
+import net.tgnra.morningissue.model.EnclosureKind
 
 /**
  * What within-feed ranking knows about one post, apart from what the reader did with it. The
@@ -20,7 +18,8 @@ class PostTraits(
     val categories: Set<String> = emptySet(),
     /** Words in the body; negative when not known, and the post then has no length key. */
     val wordCount: Int = UNKNOWN_WORD_COUNT,
-    val enclosure: Enclosure = Enclosure.NONE,
+    /** What the post carries besides its text, from the feed's `<enclosure>`. */
+    val enclosure: EnclosureKind = EnclosureKind.NONE,
     /** The post mainly points elsewhere. */
     val isLinkPost: Boolean = false,
     val hasCode: Boolean = false,
@@ -395,7 +394,7 @@ class WithinFeed(private val config: RankingConfig = RankingConfig.Default) {
         inline fun forEachKey(config: RankingConfig, traits: PostTraits, block: (TraitKey) -> Unit) {
             for (category in traits.categories) block(TraitKey(WithinFeedSignalKind.CATEGORY, category))
             lengthBucket(config, traits.wordCount)?.let { block(TraitKey(WithinFeedSignalKind.LENGTH, it)) }
-            if (traits.enclosure != Enclosure.NONE) {
+            if (traits.enclosure != EnclosureKind.NONE) {
                 block(TraitKey(WithinFeedSignalKind.ENCLOSURE, traits.enclosure.name.lowercase()))
             }
             if (traits.isLinkPost) block(TraitKey(WithinFeedSignalKind.LINK_POST))
