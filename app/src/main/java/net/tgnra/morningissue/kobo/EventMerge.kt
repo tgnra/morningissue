@@ -7,21 +7,32 @@ import java.time.OffsetDateTime
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
+import net.tgnra.morningissue.data.repository.AffinityLearner
 
 /** What one Kobo event asks the phone to change; see the merge table in `docs/kobo-sync.md`. */
 sealed interface KoboChange {
-    data class Opened(val articleId: Long, val at: Instant) : KoboChange
-    data class ReadFraction(val articleId: Long, val fraction: Float) : KoboChange
-    data class Read(val articleId: Long, val at: Instant) : KoboChange
+    /** A change to one article's `engagement` row. */
+    sealed interface ToArticle : KoboChange {
+        val articleId: Long
+    }
+
+    /** A change to one edition, or to its page views. */
+    sealed interface ToEdition : KoboChange {
+        val editionId: Long
+    }
+
+    data class Opened(override val articleId: Long, val at: Instant) : ToArticle
+    data class ReadFraction(override val articleId: Long, val fraction: Float) : ToArticle
+    data class Read(override val articleId: Long, val at: Instant) : ToArticle
 
     /** [at] null clears the Like. */
-    data class Liked(val articleId: Long, val at: Instant?) : KoboChange
+    data class Liked(override val articleId: Long, val at: Instant?) : ToArticle
 
     /** [at] null clears the save. */
-    data class Saved(val articleId: Long, val at: Instant?) : KoboChange
-    data class PageView(val editionId: Long, val page: Int, val millis: Long, val at: Instant) : KoboChange
-    data class EditionOpened(val editionId: Long, val at: Instant) : KoboChange
-    data class EditionFinished(val editionId: Long, val at: Instant) : KoboChange
+    data class Saved(override val articleId: Long, val at: Instant?) : ToArticle
+    data class PageView(override val editionId: Long, val page: Int, val millis: Long, val at: Instant) : ToEdition
+    data class EditionOpened(override val editionId: Long, val at: Instant) : ToEdition
+    data class EditionFinished(override val editionId: Long, val at: Instant) : ToEdition
 }
 
 object KoboEvents {
@@ -88,27 +99,51 @@ class KoboEventMerger(private val database: MorningIssueDatabase, private val cl
         val peer = peers.get(deviceId) ?: return@withWriteTransaction null
         var acked = peer.ackedSeq
         var merged = 0
+        var engaged = false
         // In seq order, so that a Like then an un-Like ends un-Liked whatever order they came in.
         for (event in events.sortedBy { it.seq }) {
             if (event.seq <= acked) continue
-            KoboEvents.changeOf(event)?.let { apply(it) }
+            when (val change = KoboEvents.changeOf(event)) {
+                is KoboChange.ToArticle -> if (applyToArticle(change)) engaged = true
+                is KoboChange.ToEdition -> applyToEdition(change)
+                null -> Unit
+            }
             acked = event.seq
             merged++
         }
+        // As the phone's own reader does (`RoomArticleRepository`): a change to what affinity
+        // learns from relearns it in the same transaction, here once per request.
+        if (engaged) learner.refresh(clock.instant())
         peers.setAcked(deviceId, acked, clock.instant())
         Result(acked, merged)
     }
 
-    private suspend fun apply(change: KoboChange) {
+    private val learner = AffinityLearner(database)
+
+    /**
+     * Applies [change] unless its article is gone. True when it altered what affinity learns
+     * from: the opened, read, saved or Liked state, not the read fraction alone.
+     */
+    private suspend fun applyToArticle(change: KoboChange.ToArticle): Boolean {
+        val id = change.articleId
+        if (!database.syncPeerDao().articleExists(id)) return false
         val engagement = database.engagementDao()
-        val editions = database.editionDao()
-        val articleExists: suspend (Long) -> Boolean = { database.syncPeerDao().articleExists(it) }
+        val before = engagement.get(id)
         when (change) {
-            is KoboChange.Opened -> if (articleExists(change.articleId)) engagement.mergeOpened(change.articleId, change.at)
-            is KoboChange.ReadFraction -> if (articleExists(change.articleId)) engagement.recordReadFraction(change.articleId, change.fraction)
-            is KoboChange.Read -> if (articleExists(change.articleId)) engagement.mergeRead(change.articleId, change.at)
-            is KoboChange.Liked -> if (articleExists(change.articleId)) engagement.setLiked(change.articleId, change.at)
-            is KoboChange.Saved -> if (articleExists(change.articleId)) engagement.setSaved(change.articleId, change.at)
+            is KoboChange.Opened -> engagement.mergeOpened(id, change.at)
+            is KoboChange.ReadFraction -> engagement.recordReadFraction(id, change.fraction)
+            is KoboChange.Read -> engagement.mergeRead(id, change.at)
+            is KoboChange.Liked -> engagement.setLiked(id, change.at)
+            is KoboChange.Saved -> engagement.setSaved(id, change.at)
+        }
+        val after = engagement.get(id)
+        return before?.openedAt != after?.openedAt || before?.readAt != after?.readAt ||
+            (before?.savedAt == null) != (after?.savedAt == null) || (before?.likedAt == null) != (after?.likedAt == null)
+    }
+
+    private suspend fun applyToEdition(change: KoboChange.ToEdition) {
+        val editions = database.editionDao()
+        when (change) {
             // Skips an edition that is gone on its own.
             is KoboChange.PageView -> editions.recordPageView(change.editionId, change.page, change.millis, change.at)
             // An UPDATE of a missing row changes nothing.

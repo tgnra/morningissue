@@ -9,6 +9,7 @@ import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -161,6 +162,21 @@ class EventMergeTest {
         assertNull(db.engagementDao().get(999_999))
         assertNull(db.engagementDao().get(ids.lead))
         assertEquals(8L, db.syncPeerDao().get(device)!!.ackedSeq)
+    }
+
+    @Test
+    fun aLikeOnTheKoboRelearnsAffinityAsOneOnThePhoneWould() = runTest {
+        val feedId = db.articleDao().getById(ids.lead)!!.feedId
+        assertEquals(0.5, db.feedDao().getById(feedId)!!.affinity, 1e-9)
+        merge(article(1, "liked", 1, JsonPrimitive(true)), article(2, "opened", 1))
+        val learned = db.feedDao().getById(feedId)!!.affinity
+        assertTrue("affinity $learned", learned > 0.5)
+        // The same state reached on the phone learns the same number.
+        net.tgnra.morningissue.data.repository.AffinityLearner(db).refresh(NOW)
+        assertEquals(learned, db.feedDao().getById(feedId)!!.affinity, 1e-9)
+        // The read fraction alone is not something affinity learns from.
+        merge(article(3, "readFraction", 2, JsonPrimitive(0.4)))
+        assertEquals(learned, db.feedDao().getById(feedId)!!.affinity, 1e-9)
     }
 
     @Test
