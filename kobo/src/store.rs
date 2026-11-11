@@ -4,7 +4,7 @@
 //! over the old file and the directory is fsynced, so a power cut leaves either the old or the
 //! new file, never half of one. Events are appended one line at a time and fsynced each time.
 
-use crate::model::Bundle;
+use crate::model::{Bundle, SavedList};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -28,6 +28,8 @@ pub struct State {
     pub editions: BTreeMap<String, String>,
     /// Newest first, as the manifest lists them.
     pub edition_order: Vec<i64>,
+    /// `saved.version` from the manifest that `saved.json` was fetched at.
+    pub saved_version: Option<String>,
     /// System-clock milliseconds of the last sync that finished.
     pub last_sync_at: Option<i64>,
     /// Why the last attempt failed; None when it succeeded.
@@ -81,6 +83,12 @@ impl Store {
     pub fn events_path(&self) -> PathBuf {
         self.data().join("events.jsonl")
     }
+    pub fn saved_path(&self) -> PathBuf {
+        self.data().join("saved.json")
+    }
+    pub fn settings_path(&self) -> PathBuf {
+        self.data().join("settings.json")
+    }
     pub fn edition_path(&self, id: i64) -> PathBuf {
         self.editions_dir().join(format!("{id}.json"))
     }
@@ -133,6 +141,11 @@ impl Store {
             }
         }
         ids.into_iter().filter(|id| state.editions.contains_key(&id.to_string())).filter_map(|id| self.load_bundle(id)).collect()
+    }
+
+    /// The saved articles from the last `GET /v1/saved`, or an empty list.
+    pub fn load_saved(&self) -> SavedList {
+        fs::read(self.saved_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
 
     pub fn has_image(&self, url: &str) -> bool {
@@ -218,17 +231,22 @@ impl Store {
             }
         }
         let _ = fs::remove_file(self.events_path());
+        let _ = fs::remove_file(self.saved_path());
         state.next_seq = next;
         state.editions.clear();
         state.edition_order.clear();
+        state.saved_version = None;
         self.ensure_dirs()?;
         self.save_state(state)
     }
 
-    /// Deletes edition files not in `keep` and images no kept edition refers to, and leftover
-    /// temporary files.
+    /// Deletes edition files not in `keep` and images no kept edition or saved article refers
+    /// to, and leftover temporary files.
     pub fn collect_garbage(&self, keep: &BTreeSet<i64>) -> io::Result<()> {
         let mut wanted = BTreeSet::new();
+        for u in self.load_saved().image_urls() {
+            wanted.insert(format!("{}.img", image_key(&u)));
+        }
         for id in keep {
             if let Some(b) = self.load_bundle(*id) {
                 for u in b.image_urls() {

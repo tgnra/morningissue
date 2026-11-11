@@ -29,6 +29,52 @@ pub struct Manifest {
     pub db_id: String,
     pub acked_seq: i64,
     pub editions: Vec<ManifestEdition>,
+    /// Left out by a phone that has no saved shelf to offer.
+    pub saved: Option<SavedInfo>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SavedInfo {
+    pub count: i64,
+    pub version: String,
+}
+
+/// `GET /v1/saved`, stored as `data/saved.json`.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SavedList {
+    pub version: String,
+    /// Newest saved first.
+    pub order: Vec<i64>,
+    pub articles: BTreeMap<String, Article>,
+}
+
+impl SavedList {
+    pub fn article(&self, id: i64) -> Option<&Article> {
+        self.articles.get(&id.to_string())
+    }
+
+    pub fn article_mut(&mut self, id: i64) -> Option<&mut Article> {
+        self.articles.get_mut(&id.to_string())
+    }
+
+    /// The listed articles in the phone's order; an ID with no article is skipped.
+    pub fn items(&self) -> Vec<(i64, &Article)> {
+        self.order.iter().filter_map(|id| Some((*id, self.article(*id)?))).collect()
+    }
+
+    pub fn image_urls(&self) -> Vec<String> {
+        let mut urls: Vec<String> = Vec::new();
+        for (_, a) in self.items() {
+            for u in a.image_urls() {
+                if !urls.contains(&u) {
+                    urls.push(u);
+                }
+            }
+        }
+        urls
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -94,6 +140,29 @@ pub struct Article {
     #[serde(deserialize_with = "blocks")]
     pub blocks: Vec<Block>,
     pub engagement: Engagement,
+}
+
+impl Article {
+    /// The lead picture and every `img` block, in that order.
+    pub fn image_urls(&self) -> Vec<String> {
+        let mut urls = Vec::new();
+        if let Some(u) = self.image_url.as_ref().filter(|u| !u.is_empty()) {
+            urls.push(u.clone());
+        }
+        for b in &self.blocks {
+            if let Block::Image { url, .. } = b {
+                if !url.is_empty() && !urls.contains(url) {
+                    urls.push(url.clone());
+                }
+            }
+        }
+        urls
+    }
+
+    /// True when the phone could not store the article's text, so only the summary is here.
+    pub fn summary_only(&self) -> bool {
+        self.blocks.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -322,24 +391,42 @@ impl Bundle {
 
     /// Every image URL the bundle refers to: lead images and `img` blocks.
     pub fn image_urls(&self) -> Vec<String> {
-        let mut urls = Vec::new();
-        for a in self.articles.values() {
-            if let Some(u) = &a.image_url {
-                if !u.is_empty() {
-                    urls.push(u.clone());
-                }
-            }
-            for b in &a.blocks {
-                if let Block::Image { url, .. } = b {
-                    if !url.is_empty() {
-                        urls.push(url.clone());
-                    }
-                }
-            }
-        }
+        let mut urls: Vec<String> = self.articles.values().flat_map(Article::image_urls).collect();
         urls.sort();
         urls.dedup();
         urls
+    }
+
+    /// The same URLs in the order a reader meets them: the front page's lead picture first
+    /// (it is on the cover), then page by page, each article's lead before its body.
+    pub fn image_urls_in_reading_order(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let mut push = |u: String| {
+            if !out.contains(&u) {
+                out.push(u);
+            }
+        };
+        let pages = self.edition_pages();
+        let ids: Vec<i64> = pages.iter().flat_map(|p| p.stories.iter().copied()).collect();
+        for id in &ids {
+            if let Some(u) = self.article(*id).and_then(|a| a.image_url.clone()).filter(|u| !u.is_empty()) {
+                push(u);
+            }
+        }
+        for id in &ids {
+            for u in self.article(*id).map(Article::image_urls).unwrap_or_default() {
+                push(u);
+            }
+        }
+        for u in self.image_urls() {
+            push(u);
+        }
+        out
+    }
+
+    /// Stories printed in the edition, the back page's index left out.
+    pub fn story_count(&self) -> usize {
+        self.pages.iter().flat_map(|p| &p.items).filter(|i| i.kind != "INDEX").count()
     }
 
     /// "Morning edition", "Evening edition", "Extra edition".

@@ -35,11 +35,12 @@ fn main() -> ExitCode {
             match sync::sync(&store, &sync::Options::from_config(&config)) {
                 Ok(r) => {
                     println!(
-                        "synced with {}: {} events sent, editions fetched {:?}, removed {:?}, {} images fetched, {} not on the phone{}{}",
+                        "synced with {}: {} events sent, editions fetched {:?}, removed {:?}, saved list {}, {} images fetched, {} not on the phone{}{}",
                         r.address,
                         r.events_sent,
                         r.editions_fetched,
                         r.editions_removed,
+                        if r.saved_fetched { "fetched" } else { "unchanged" },
                         r.images_fetched,
                         r.images_missing,
                         if r.paired { ", paired" } else { "" },

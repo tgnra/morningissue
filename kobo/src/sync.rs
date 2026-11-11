@@ -1,27 +1,31 @@
-//! `morningissue sync`: the order of a sync in `docs/kobo-sync.md`.
+//! A sync with the phone, in the order of `docs/kobo-sync.md`.
 //!
-//! 1. Find the phone: its beacon, then the last address that worked, then `config.json`.
+//! 1. Find the phone: the address typed in Settings, then its beacon, then the last address
+//!    that worked, then `config.json`.
 //! 2. Pair if there is no token, and again on any `401`.
 //! 3. Check the phone's `dbId` with `GET /v1/manifest` (wiping on a change), then
 //!    `POST /v1/events` with everything unsent.
 //! 4. `GET /v1/manifest` again, now that the phone has merged the events.
-//! 5. Fetch each edition whose `version` differs, then images not yet stored.
-//! 6. Rename the new editions into place, save the state, then delete editions that left the
-//!    manifest and images nothing refers to.
+//! 5. Fetch each edition whose `version` differs and the saved list if its version differs,
+//!    saving each as it arrives (the reader shows it at once), then the pictures not yet
+//!    stored, three at a time.
+//! 6. Save the state, then delete editions that left the manifest and pictures nothing
+//!    refers to.
 //!
-//! Nothing a reader would see changes until step 6, and every file write is atomic, so an
-//! interrupted sync leaves the last good state.
+//! Every file write is atomic, so an interrupted sync leaves whole files: the editions that
+//! arrived, and the earlier ones for the rest.
 
 use crate::config::Config;
 use crate::http::{self, Response};
-use crate::model::{Beacon, Bundle, EventsResponse, Manifest, PairResponse};
+use crate::model::{Beacon, Bundle, EventsResponse, Manifest, PairResponse, SavedList};
 use crate::store::{self, Event, State, Store};
 use crate::time;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::fmt;
 use std::io;
 use std::net::UdpSocket;
-use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
@@ -43,7 +47,11 @@ impl fmt::Display for SyncError {
             SyncError::Denied => write!(f, "The phone declined to pair with this Kobo."),
             SyncError::PairTimeout => write!(f, "Pairing was not answered on the phone in time."),
             SyncError::Unauthorized => write!(f, "The phone did not accept this Kobo's pairing."),
-            SyncError::Network(e) => write!(f, "The connection to the phone failed ({e})."),
+            SyncError::Network(e) if e.contains("refused") || e.contains("reset") || e.contains("closed") || e.contains("Broken pipe") => {
+                write!(f, "The phone stopped answering. Keep Sync with Kobo open on the phone.")
+            }
+            SyncError::Network(e) if e.contains("timed out") || e.contains("temporarily unavailable") => write!(f, "The phone took too long to answer."),
+            SyncError::Network(_) => write!(f, "The connection to the phone failed."),
             SyncError::Protocol(e) => write!(f, "The phone sent something unexpected ({e})."),
             SyncError::Storage(e) => write!(f, "Could not save to the Kobo ({e})."),
             SyncError::TimedOut => write!(f, "Sync took too long and stopped."),
@@ -65,9 +73,29 @@ pub struct SyncReport {
     pub events_sent: usize,
     pub editions_fetched: Vec<i64>,
     pub editions_removed: Vec<i64>,
+    pub saved_fetched: bool,
     pub images_fetched: usize,
     pub images_missing: usize,
 }
+
+/// What a running sync has got to, so the reader can show what arrived.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Progress {
+    /// Talking to the phone at this address.
+    Connected { address: String },
+    /// An edition was saved; the reader can show it.
+    Edition(i64),
+    /// The saved list changed on the Kobo.
+    Saved,
+    /// These pictures are about to be fetched.
+    ImagesQueued(Vec<String>),
+    /// A picture was stored.
+    Image(String),
+    /// The phone does not have this picture (404).
+    ImageMissing(String),
+}
+
+pub type ProgressFn = Arc<dyn Fn(Progress) + Send + Sync>;
 
 pub struct Options {
     pub beacon_wait: Duration,
@@ -78,7 +106,15 @@ pub struct Options {
     /// The whole sync gives up after this.
     pub deadline: Duration,
     pub configured_phone: Option<String>,
+    /// Typed in Settings; tried before the beacon is listened for.
+    pub manual_phone: Option<String>,
     pub device_name: String,
+    /// Sent as `w` with every picture request: the screen's short side in pixels.
+    pub image_width: u32,
+    /// Picture requests in flight at once.
+    pub image_workers: usize,
+    /// Told as each part arrives, on the sync's own threads.
+    pub progress: Option<ProgressFn>,
 }
 
 impl Options {
@@ -88,9 +124,13 @@ impl Options {
             beacon_port: c.beacon_port,
             request_timeout: Duration::from_secs(30),
             pair_timeout: Duration::from_secs(75),
-            deadline: Duration::from_secs(300),
+            deadline: Duration::from_secs(600),
             configured_phone: c.phone.clone(),
+            manual_phone: None,
             device_name: c.device_name(),
+            image_width: 1264,
+            image_workers: 3,
+            progress: None,
         }
     }
 }
@@ -155,6 +195,12 @@ impl From<SyncError> for CallError {
 }
 
 impl<'a> Session<'a> {
+    fn tell(&self, p: Progress) {
+        if let Some(f) = &self.opts.progress {
+            f(p);
+        }
+    }
+
     fn check_deadline(&self) -> Result<(), SyncError> {
         if self.started.elapsed() > self.opts.deadline {
             Err(SyncError::TimedOut)
@@ -228,6 +274,7 @@ impl<'a> Session<'a> {
             Some(saved) if saved != db_id => {
                 self.store.wipe(&mut self.state)?;
                 self.report.wiped = true;
+                self.tell(Progress::Saved);
             }
             _ => {}
         }
@@ -288,13 +335,14 @@ impl<'a> Session<'a> {
         // Step 3: the dbId check comes before sending events, so events from a previous phone
         // install are dropped, not attached to whatever now has those row IDs.
         let first = self.manifest()?;
+        self.tell(Progress::Connected { address: self.address.clone() });
         let had_events = !self.store.read_events().map_err(SyncError::from)?.is_empty();
         self.send_events(first.acked_seq)?;
         // Step 4.
         let manifest = if had_events { self.manifest()? } else { first };
 
-        // Step 5: editions into temporary files.
-        let mut staged: Vec<(i64, PathBuf, PathBuf)> = Vec::new();
+        // Step 5: each edition is saved as it arrives and listed in the state at once, so the
+        // reader can show it while the rest come.
         let mut bundles: Vec<Bundle> = Vec::new();
         for e in &manifest.editions {
             let key = e.id.to_string();
@@ -311,33 +359,56 @@ impl<'a> Session<'a> {
                 return Err(SyncError::Protocol(format!("edition {}: HTTP {}", e.id, r.status)).into());
             }
             let bundle: Bundle = serde_json::from_slice(&r.body).map_err(|err| SyncError::Protocol(format!("edition {}: {err}", e.id)))?;
-            let tmp = store::temp_path(&path);
             self.store.ensure_dirs().map_err(SyncError::from)?;
-            store::write_synced(&tmp, &r.body).map_err(SyncError::from)?;
-            staged.push((e.id, tmp, path));
+            store::atomic_write(&path, &r.body).map_err(SyncError::from)?;
+            self.state.editions.insert(key, e.version.clone());
+            // Manifest order first; editions about to leave stay at the end until step 6.
+            let mut order: Vec<i64> = manifest.editions.iter().map(|m| m.id).filter(|id| self.state.editions.contains_key(&id.to_string())).collect();
+            let leaving: Vec<i64> = self.state.edition_order.iter().copied().filter(|id| !order.contains(id)).collect();
+            order.extend(leaving);
+            self.state.edition_order = order;
+            self.store.save_state(&self.state).map_err(SyncError::from)?;
             self.report.editions_fetched.push(e.id);
+            self.tell(Progress::Edition(e.id));
             bundles.push(bundle);
         }
-        // Images, each written atomically under its final name. One that is not stored on the
-        // phone (404) is skipped; the reader leaves it out.
-        for url in bundles.iter().flat_map(|b| b.image_urls()).collect::<BTreeSet<_>>() {
-            if self.store.has_image(&url) {
-                continue;
-            }
-            let r = self.call("GET", &format!("/v1/images?url={}", http::url_encode(&url)), None)?;
-            match r.status {
-                200 if !r.body.is_empty() => {
-                    store::atomic_write(&self.store.image_path(&url), &r.body).map_err(SyncError::from)?;
-                    self.report.images_fetched += 1;
+        let mut saved = self.store.load_saved();
+        match &manifest.saved {
+            Some(info) if self.state.saved_version.as_deref() != Some(info.version.as_str()) || !self.store.saved_path().is_file() => {
+                let r = self.call("GET", "/v1/saved", None)?;
+                if r.status != 200 {
+                    return Err(SyncError::Protocol(format!("saved: HTTP {}", r.status)).into());
                 }
-                _ => self.report.images_missing += 1,
+                saved = serde_json::from_slice(&r.body).map_err(|err| SyncError::Protocol(format!("saved: {err}")))?;
+                store::atomic_write(&self.store.saved_path(), &r.body).map_err(SyncError::from)?;
+                self.state.saved_version = Some(info.version.clone());
+                self.store.save_state(&self.state).map_err(SyncError::from)?;
+                self.report.saved_fetched = true;
+                self.tell(Progress::Saved);
+            }
+            Some(_) => {}
+            None => {
+                // A phone with no saved shelf to offer: nothing is saved here either.
+                if self.store.saved_path().exists() {
+                    std::fs::remove_file(self.store.saved_path()).map_err(SyncError::from)?;
+                    saved = SavedList::default();
+                    self.tell(Progress::Saved);
+                }
+                self.state.saved_version = None;
             }
         }
 
-        // Step 6: commit.
-        for (_, tmp, path) in &staged {
-            store::commit(tmp, path).map_err(SyncError::from)?;
+        // Pictures: the newest edition first, in the order a reader meets them, then the
+        // saved articles.
+        let mut urls: Vec<String> = Vec::new();
+        for u in bundles.iter().flat_map(|b| b.image_urls_in_reading_order()).chain(saved.image_urls()) {
+            if !urls.contains(&u) && !self.store.has_image(&u) {
+                urls.push(u);
+            }
         }
+        self.fetch_images(urls)?;
+
+        // Step 6: commit.
         let keep: BTreeSet<i64> = manifest.editions.iter().map(|e| e.id).collect();
         self.report.editions_removed = self.state.editions.keys().filter_map(|k| k.parse().ok()).filter(|id| !keep.contains(id)).collect();
         self.state.editions = manifest.editions.iter().map(|e| (e.id.to_string(), e.version.clone())).collect();
@@ -349,29 +420,106 @@ impl<'a> Session<'a> {
         self.store.collect_garbage(&keep).map_err(SyncError::from)?;
         Ok(())
     }
+
+    /// Fetches pictures with up to `image_workers` requests at a time. One the phone cannot
+    /// get (404) is skipped and the reader leaves it out; a failed connection stops the lot.
+    fn fetch_images(&mut self, urls: Vec<String>) -> Result<(), CallError> {
+        if urls.is_empty() {
+            return Ok(());
+        }
+        self.tell(Progress::ImagesQueued(urls.clone()));
+        let queue = Mutex::new(urls.into_iter().collect::<VecDeque<_>>());
+        let fetched = AtomicUsize::new(0);
+        let missing = AtomicUsize::new(0);
+        let stop = AtomicBool::new(false);
+        let failure: Mutex<Option<SyncError>> = Mutex::new(None);
+        let token = self.state.token.clone();
+        let (address, store, opts, started) = (self.address.clone(), self.store, self.opts, self.started);
+        std::thread::scope(|scope| {
+            for _ in 0..opts.image_workers.clamp(1, 8) {
+                scope.spawn(|| loop {
+                    if stop.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let Some(url) = queue.lock().unwrap().pop_front() else { return };
+                    let fail = |e: SyncError| {
+                        stop.store(true, Ordering::Relaxed);
+                        failure.lock().unwrap().get_or_insert(e);
+                    };
+                    if started.elapsed() > opts.deadline {
+                        return fail(SyncError::TimedOut);
+                    }
+                    let path = format!("/v1/images?url={}&w={}", http::url_encode(&url), opts.image_width);
+                    match http::request(&address, "GET", &path, token.as_deref(), None, opts.request_timeout) {
+                        Ok(r) if r.status == 200 && !r.body.is_empty() => {
+                            if let Err(e) = store::atomic_write(&store.image_path(&url), &r.body) {
+                                return fail(e.into());
+                            }
+                            fetched.fetch_add(1, Ordering::Relaxed);
+                            if let Some(f) = &opts.progress {
+                                f(Progress::Image(url));
+                            }
+                        }
+                        Ok(r) if r.status == 401 => return fail(SyncError::Unauthorized),
+                        Ok(_) => {
+                            missing.fetch_add(1, Ordering::Relaxed);
+                            if let Some(f) = &opts.progress {
+                                f(Progress::ImageMissing(url));
+                            }
+                        }
+                        Err(e) => return fail(SyncError::Network(e.to_string())),
+                    }
+                });
+            }
+        });
+        self.report.images_fetched += fetched.into_inner();
+        self.report.images_missing += missing.into_inner();
+        match failure.into_inner().unwrap() {
+            // The phone forgot this Kobo mid-sync: the next sync pairs again.
+            Some(SyncError::Unauthorized) => {
+                self.state.token = None;
+                Err(SyncError::Unauthorized.into())
+            }
+            Some(e) => Err(e.into()),
+            None => Ok(()),
+        }
+    }
 }
 
-/// Runs a whole sync. The outcome (time or error) is saved in the state for the newsstand.
+/// Runs a whole sync. The outcome (time or error) is saved in the state for the home screen.
 pub fn sync(store: &Store, opts: &Options) -> Result<SyncReport, SyncError> {
     store.ensure_dirs()?;
     let started = Instant::now();
     let mut state = store.load_state()?;
 
-    let mut candidates: Vec<String> = Vec::new();
-    if let Some((addr, beacon)) = listen_for_beacon(opts.beacon_port, opts.beacon_wait) {
-        if !beacon.name.is_empty() {
-            state.phone_name = Some(beacon.name.clone());
-        }
-        candidates.push(addr);
-    }
-    for a in [state.last_address.clone(), opts.configured_phone.clone()].into_iter().flatten() {
-        if !candidates.contains(&a) {
-            candidates.push(a);
-        }
-    }
-
+    // The typed address is tried before the beacon is listened for.
+    let mut candidates: Vec<String> = opts.manual_phone.iter().cloned().collect();
+    let mut listened = false;
     let mut result = Err(SyncError::NoPhone);
-    for address in candidates {
+    let mut i = 0;
+    loop {
+        if i == candidates.len() {
+            if listened {
+                break;
+            }
+            listened = true;
+            if let Some((addr, beacon)) = listen_for_beacon(opts.beacon_port, opts.beacon_wait) {
+                if !beacon.name.is_empty() {
+                    state.phone_name = Some(beacon.name.clone());
+                }
+                if !candidates.contains(&addr) {
+                    candidates.push(addr);
+                }
+            }
+            for a in [state.last_address.clone(), opts.configured_phone.clone()].into_iter().flatten() {
+                if !candidates.contains(&a) {
+                    candidates.push(a);
+                }
+            }
+            continue;
+        }
+        let address = candidates[i].clone();
+        i += 1;
         let mut s = Session { store, state: state.clone(), address: address.clone(), opts, started, report: SyncReport { address, ..Default::default() }, first_contact: true };
         match s.run() {
             Ok(()) => {
@@ -392,13 +540,16 @@ pub fn sync(store: &Store, opts: &Options) -> Result<SyncReport, SyncError> {
         }
     }
     if let Err(e) = &result {
-        // Reload so a half-finished attempt never saves its in-memory edition list.
+        // Reload: the editions that arrived are already listed there, and a half-finished
+        // attempt never saves its in-memory edition list.
         let mut saved = store.load_state().unwrap_or(state.clone());
         saved.token = state.token.clone();
         saved.db_id = state.db_id.clone();
         saved.clock_offset_ms = state.clock_offset_ms;
         saved.last_error = Some(e.to_string());
         store.save_state(&saved)?;
+    } else {
+        store.save_state(&state)?;
     }
     result
 }

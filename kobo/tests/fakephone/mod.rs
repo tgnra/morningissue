@@ -25,6 +25,14 @@ pub struct PhoneState {
     /// (id, version, bundle JSON), newest first.
     pub editions: Vec<(i64, String, Value)>,
     pub images: BTreeMap<String, Vec<u8>>,
+    /// `GET /v1/saved`: (version, body). None leaves `saved` out of the manifest.
+    pub saved: Option<(String, Value)>,
+    /// Every image request's `w` parameter, in arrival order.
+    pub image_widths: Vec<Option<u32>>,
+    /// Picture requests are answered after this long, to see how many run at once.
+    pub image_delay_ms: u64,
+    pub images_in_flight: usize,
+    pub max_images_in_flight: usize,
     pub acked_seq: i64,
     /// Every event merged, in order, without duplicates.
     pub merged: Vec<Value>,
@@ -55,6 +63,11 @@ impl FakePhone {
             pair_requests: Vec::new(),
             editions: Vec::new(),
             images: BTreeMap::new(),
+            saved: None,
+            image_widths: Vec::new(),
+            image_delay_ms: 0,
+            images_in_flight: 0,
+            max_images_in_flight: 0,
             acked_seq: 0,
             merged: Vec::new(),
             event_posts: Vec::new(),
@@ -188,7 +201,10 @@ fn handle(mut conn: TcpStream, state: &Arc<Mutex<PhoneState>>) {
             .iter()
             .map(|(id, v, b)| json!({"id": id, "date": b["date"], "kind": b["kind"], "number": b["number"], "releaseAt": "2026-11-11T06:30:00Z", "version": v, "later": 1}))
             .collect();
-        let m = json!({"v": 1, "dbId": s.db_id, "ackedSeq": s.acked_seq, "editions": editions, "unknownTopLevel": []});
+        let mut m = json!({"v": 1, "dbId": s.db_id, "ackedSeq": s.acked_seq, "editions": editions, "unknownTopLevel": []});
+        if let Some((version, body)) = &s.saved {
+            m["saved"] = json!({"count": body["order"].as_array().map(|a| a.len()).unwrap_or(0), "version": version});
+        }
         drop(s);
         respond(&mut conn, 200, "application/json", m.to_string().as_bytes(), true);
     } else if method == "GET" && target.starts_with("/v1/editions/") {
@@ -199,10 +215,32 @@ fn handle(mut conn: TcpStream, state: &Arc<Mutex<PhoneState>>) {
             Some(b) => respond(&mut conn, 200, "application/json", b.as_bytes(), false),
             None => respond(&mut conn, 404, "text/plain", b"", false),
         }
-    } else if method == "GET" && target.starts_with("/v1/images?url=") {
-        let url = decode(&target["/v1/images?url=".len()..]);
-        let found = s.images.get(&url).cloned();
+    } else if method == "GET" && target == "/v1/saved" {
+        let found = s.saved.as_ref().map(|(_, b)| b.to_string());
         drop(s);
+        match found {
+            Some(b) => respond(&mut conn, 200, "application/json", b.as_bytes(), false),
+            None => respond(&mut conn, 404, "text/plain", b"", false),
+        }
+    } else if method == "GET" && target.starts_with("/v1/images?url=") {
+        let query = &target["/v1/images?".len()..];
+        let mut url = String::new();
+        let mut w = None;
+        for pair in query.split('&') {
+            match pair.split_once('=') {
+                Some(("url", v)) => url = decode(v),
+                Some(("w", v)) => w = v.parse().ok(),
+                _ => {}
+            }
+        }
+        s.image_widths.push(w);
+        let found = s.images.get(&url).cloned();
+        let delay = s.image_delay_ms;
+        s.images_in_flight += 1;
+        s.max_images_in_flight = s.max_images_in_flight.max(s.images_in_flight);
+        drop(s);
+        thread::sleep(Duration::from_millis(delay));
+        state.lock().unwrap().images_in_flight -= 1;
         match found {
             Some(b) => respond(&mut conn, 200, "image/png", &b, false),
             None => respond(&mut conn, 404, "text/plain", b"", false),
@@ -234,7 +272,7 @@ fn decode(s: &str) -> String {
     let mut out = Vec::new();
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
+        if b[i] == b'%' && i + 3 <= b.len() {
             out.push(u8::from_str_radix(&s[i + 1..i + 3], 16).unwrap());
             i += 3;
         } else {
