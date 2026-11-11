@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged into the benchmark build type only; the release build is unchanged. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Lets Macrobenchmark capture traces from this non-debuggable build. -->
+        <profileable android:shell="true" />
+
+        <!-- Seeds the database for :macrobenchmark. Only the shell (which holds DUMP) may send to it. -->
+        <receiver
+            android:name=".benchmark.BenchmarkSeedReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+    </application>
+
+</manifest>

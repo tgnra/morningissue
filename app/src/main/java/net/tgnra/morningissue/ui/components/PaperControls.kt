@@ -46,7 +46,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.MutableIntState
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -65,6 +70,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
@@ -426,14 +432,25 @@ fun PaperScreenFrame(
     overlay: @Composable BoxScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // How many [PaperDialog]s the overlay is showing. While there is one, the screen beneath it
+    // is not there for screen readers: the dialog is in the same window, so nothing else hides it.
+    val openDialogs = remember { mutableIntStateOf(0) }
     Box(modifier.fillMaxSize().background(MorningIssueTheme.colors.paper)) {
-        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .then(if (openDialogs.intValue > 0) Modifier.clearAndSetSemantics { } else Modifier),
+        ) {
             PaperTopBar(title, onBack, actions = actions)
             content()
         }
-        overlay()
+        CompositionLocalProvider(LocalOpenDialogs provides openDialogs) { overlay() }
     }
 }
+
+/** The enclosing [PaperScreenFrame]'s count of open dialogs; null outside one. */
+private val LocalOpenDialogs = compositionLocalOf<MutableIntState?> { null }
 
 /** Centres content and keeps it to a comfortable width on tablets. */
 fun Modifier.readableWidth(max: Dp = 680.dp): Modifier = fillMaxWidth().then(Modifier.widthIn(max = max))
@@ -463,6 +480,11 @@ fun PaperDialog(
     val colors = MorningIssueTheme.colors
     val eink = MorningIssueTheme.isEink
     BackHandler(onBack = onDismiss)
+    val openDialogs = LocalOpenDialogs.current
+    DisposableEffect(openDialogs) {
+        openDialogs?.let { it.intValue++ }
+        onDispose { openDialogs?.let { it.intValue-- } }
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()

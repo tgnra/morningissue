@@ -68,6 +68,10 @@
         <item quantity="one">%d story</item>
         <item quantity="other">%d stories</item>
     </plurals>
+    <plurals name="brief_count">
+        <item quantity="one">%d brief</item>
+        <item quantity="other">%d briefs</item>
+    </plurals>
 
     <!-- Paper -->
     <string name="page_front">Front page</string>
@@ -333,6 +337,26 @@
     <string name="search_prompt_detail">Every post your sources have published is here, whether or not it made the paper.</string>
     <string name="search_empty_title">Nothing found</string>
     <string name="search_empty_detail">Try fewer or different words.</string>
+    <string name="search_prompt_filtered">Type a word to search within these filters.</string>
+    <string name="search_empty_filtered">Nothing matches with these filters. Try different words, or clear the filters.</string>
+    <string name="search_result_filtered">%1$s · filtered</string>
+    <string name="search_filters">Filters</string>
+    <string name="search_filters_count">Filters · %1$d</string>
+    <string name="search_filter_remove">Remove filter</string>
+    <string name="search_clear_filters">Clear filters</string>
+    <string name="search_show_results">Show results</string>
+    <string name="search_when">When</string>
+    <string name="search_period_any">Any time</string>
+    <string name="search_period_week">Past week</string>
+    <string name="search_period_month">Past month</string>
+    <string name="search_period_year">Past year</string>
+    <string name="search_only">Only</string>
+    <string name="search_only_saved">Saved</string>
+    <string name="search_only_liked">Liked</string>
+    <string name="search_tag">Tag</string>
+    <string name="search_tag_any">Any tag</string>
+    <string name="search_source">Source</string>
+    <string name="search_source_any">Any source</string>
     <plurals name="search_result_count">
         <item quantity="one">%d post</item>
         <item quantity="other">%d posts</item>

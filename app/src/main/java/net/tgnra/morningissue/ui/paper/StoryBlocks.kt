@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -160,13 +162,17 @@ fun Byline(story: EditionStory, modifier: Modifier = Modifier, extra: String? = 
                 )
             }
         } else {
+            // The reading time is unbreakable: in a narrow cell, where the menu button takes room,
+            // it moves whole to a second line under the source's name.
+            val minutes = stringResource(R.string.minutes_read, story.readMinutes)
             Text(
-                text = stringResource(R.string.byline_source_minutes, story.feedTitle, story.readMinutes) +
+                text = stringResource(R.string.byline_source_minutes, story.feedTitle, story.readMinutes)
+                    .replace(minutes, minutes.replace(' ', ' ')) +
                     extra?.let { " · $it" }.orEmpty(),
                 style = type.byline,
                 color = colors.inkSecondary,
-                // A dated byline may run to a second line rather than lose its date.
-                maxLines = if (extra == null) 1 else 2,
+                // A byline runs to a second line rather than lose its reading time or date.
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
@@ -228,6 +234,9 @@ fun LeadStory(story: EditionStory, modifier: Modifier = Modifier, bylineExtra: S
     }
 }
 
+/** Whether a compact [PageLeadStory] has room for its photo; a [StoryGrid] says no in a crowded row. */
+val LocalSidePhotos = compositionLocalOf { true }
+
 /**
  * The first story of an inside page: a headline with its excerpt, and a small photo beside it
  * when there is one (dropped in E-ink). [compact] sets it a size down, for a story that closes
@@ -260,7 +269,7 @@ fun PageLeadStory(story: EditionStory, modifier: Modifier = Modifier, bylineExtr
             Spacer(Modifier.height(if (compact) 6.dp else 8.dp))
             Byline(story, extra = bylineExtra, sourceLink = !compact)
         }
-        if (story.imageUrl != null && ImageTreatment.showThumbnails) {
+        if (story.imageUrl != null && ImageTreatment.showThumbnails && (!compact || LocalSidePhotos.current)) {
             PaperImage(story.imageUrl, contentDescription = null, modifier = Modifier.width(if (compact) 88.dp else 112.dp).aspectRatio(1f))
         }
     }
@@ -307,7 +316,7 @@ internal fun gridRows(count: Int, columns: Int): List<Int> {
  * Stories set in [columns] newspaper columns: column rules between cells, a hairline between
  * rows, no boxes. A short last row is spread over the full width with its stories set by
  * [orphan] (headline, excerpt, small photo beside), so no column stands empty and no picture
- * grows to fill a double-width cell.
+ * grows to fill a wider cell. Three or more left over are set without the photo, for room.
  */
 @Composable
 fun StoryGrid(
@@ -327,21 +336,26 @@ fun StoryGrid(
             if (size == 1 && columns > 1) {
                 orphan(row.single())
             } else {
+                val spread = size < columns
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).stepAnchor()) {
                     for (column in 0 until size) {
                         if (column > 0) {
                             // A spread row's cells have padding of their own, so its rules need more room.
                             Box(
-                                Modifier.width(if (size < columns) gutter * 2 else gutter).fillMaxHeight().padding(vertical = 12.dp),
+                                Modifier.width(if (spread) gutter * 2 else gutter).fillMaxHeight().padding(vertical = 12.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 ColumnRule()
                             }
                         }
-                        if (size < columns) {
+                        if (spread) {
                             // Spread over wider cells, a grid cell's picture would swell into a
                             // second lead; the stories of a short row are set like the orphan.
-                            Box(Modifier.weight(1f).fillMaxHeight()) { orphan(row[column]) }
+                            // Three or more beside one another are too narrow for a photo at
+                            // the headline's side as well: they are set as text alone.
+                            CompositionLocalProvider(LocalSidePhotos provides (size <= 2)) {
+                                Box(Modifier.weight(1f).fillMaxHeight()) { orphan(row[column]) }
+                            }
                         } else {
                             cell(row[column], Modifier.weight(1f).fillMaxHeight())
                         }

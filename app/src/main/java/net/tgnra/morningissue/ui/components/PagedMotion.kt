@@ -1,5 +1,6 @@
 package net.tgnra.morningissue.ui.components
 
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -278,8 +279,15 @@ fun Modifier.pagedKeys(onForward: () -> Unit, onBackward: () -> Unit): Modifier 
         .focusable()
 }
 
-/** Goes to [page]: animated in standard mode, an instant jump when [animate] is false (E-ink). */
-suspend fun PagerState.turnToPage(page: Int, animate: Boolean) {
+/**
+ * Goes to [page]: animated in standard mode (with [animation] when given, else the pager's
+ * own), an instant jump when [animate] is false (E-ink).
+ */
+suspend fun PagerState.turnToPage(page: Int, animate: Boolean, animation: AnimationSpec<Float>? = null) {
     val target = page.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
-    if (animate) animateScrollToPage(target) else scrollToPage(target)
+    when {
+        !animate -> scrollToPage(target)
+        animation != null -> animateScrollToPage(target, animationSpec = animation)
+        else -> animateScrollToPage(target)
+    }
 }
