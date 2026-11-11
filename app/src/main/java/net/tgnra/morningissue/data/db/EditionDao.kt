@@ -196,6 +196,18 @@ abstract class EditionDao {
     @Query("UPDATE edition SET finishedAt = COALESCE(finishedAt, :at) WHERE id = :editionId")
     abstract suspend fun markFinished(editionId: Long, at: Instant)
 
+    /** Keeps the earlier of the stored first open and [at], for opens recorded on a Kobo (`kobo/`). */
+    @Query("UPDATE edition SET openedAt = MIN(COALESCE(openedAt, :at), :at) WHERE id = :editionId")
+    abstract suspend fun mergeOpened(editionId: Long, at: Instant)
+
+    /** Keeps the earlier of the stored back-page time and [at], for a Kobo's (`kobo/`). */
+    @Query("UPDATE edition SET finishedAt = MIN(COALESCE(finishedAt, :at), :at) WHERE id = :editionId")
+    abstract suspend fun mergeFinished(editionId: Long, at: Instant)
+
+    /** The newest [limit] editions already released at [now], newest first: what a Kobo is offered. */
+    @Query("SELECT * FROM edition WHERE releaseAt <= :now ORDER BY releaseAt DESC LIMIT :limit")
+    abstract suspend fun getRecentReleased(now: Instant, limit: Int): List<EditionEntity>
+
     /** When a From your reading list story was last printed, in an edition released by [now]; null if never. */
     @Query(
         "SELECT MAX(e.releaseAt) FROM edition_item i JOIN edition e ON e.id = i.editionId " +

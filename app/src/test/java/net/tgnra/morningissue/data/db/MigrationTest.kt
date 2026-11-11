@@ -377,12 +377,63 @@ class MigrationTest {
         assertEquals(0, db.engagementDao().get(2)!!.editionsRunUnopened)
     }
 
+    /** What version 5 must hold after an upgrade: everything version 4 held, and no paired Kobo. */
+    private fun assertVersion5(db: SQLiteConnection) {
+        assertEquals(0L, db.long("SELECT COUNT(*) FROM sync_peer"))
+        assertEquals(1L, db.long("SELECT COUNT(*) FROM edition WHERE pageViewsTracked = 0"))
+        assertEquals(1200L, db.long("SELECT likedAt FROM engagement WHERE articleId = 1"))
+        // A peer paired after the upgrade starts at ackedSeq 0, as the column's default says, and has not synced.
+        db.execSQL("INSERT INTO sync_peer (deviceId, name, tokenHash, pairedAt) VALUES ('b7e2', 'Kobo Libra 2', 'ab', 3000)")
+        assertEquals(0L, db.long("SELECT ackedSeq FROM sync_peer WHERE deviceId = 'b7e2'"))
+        assertEquals(1L, db.long("SELECT COUNT(*) FROM sync_peer WHERE lastSyncAt IS NULL"))
+    }
+
+    @Test
+    fun version4To5AddsAnEmptyPeerTable() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(4, listOf(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3, Migrations.MIGRATION_3_4)).close()
+        // Validated against 5.json.
+        helper.runMigrationsAndValidate(5, listOf(Migrations.MIGRATION_4_5)).use(::assertVersion5)
+    }
+
+    @Test
+    fun version1To5RunsEveryStep() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(5, Migrations.ALL.toList()).use { db ->
+            assertVersion5(db)
+            assertEquals(2L, db.long("SELECT COUNT(*) FROM feed WHERE status = 'SUBSCRIBED'"))
+        }
+    }
+
+    @Test
+    fun anUpgradedDatabaseCanPairAKobo() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(4, listOf(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3, Migrations.MIGRATION_3_4)).close()
+        val db = Room.databaseBuilder<MorningIssueDatabase>(context, file.absolutePath)
+            .setDriver(AndroidSQLiteDriver())
+            .addMigrations(*Migrations.ALL)
+            .build()
+        helper.closeWhenFinished(db)
+        val peers = db.syncPeerDao()
+        assertTrue(peers.all().isEmpty())
+        peers.pair("b7e2", "Kobo Libra 2", "ab", Instant.ofEpochMilli(3_000))
+        peers.setAcked("b7e2", 41, Instant.ofEpochMilli(4_000))
+        // Pairing again replaces the token and keeps the acknowledged events.
+        peers.pair("b7e2", "Kobo Libra 2", "cd", Instant.ofEpochMilli(5_000))
+        val peer = peers.get("b7e2")!!
+        assertEquals("cd", peer.tokenHash)
+        assertEquals(41L, peer.ackedSeq)
+        assertEquals(Instant.ofEpochMilli(5_000), peer.pairedAt)
+        assertTrue(peers.articleExists(1))
+    }
+
     @Test
     fun aFreshInstallIsCreatedAtTheCurrentVersion() = runBlocking<Unit> {
-        // Version 4 built directly must be what the migrations arrive at; validation compares both with 4.json.
-        helper.createDatabase(4).use { db ->
+        // Version 5 built directly must be what the migrations arrive at; validation compares both with 5.json.
+        helper.createDatabase(5).use { db ->
             assertEquals(0L, db.long("SELECT COUNT(*) FROM edition_page_view"))
+            assertEquals(0L, db.long("SELECT COUNT(*) FROM sync_peer"))
         }
-        helper.runMigrationsAndValidate(4, emptyList()).close()
+        helper.runMigrationsAndValidate(5, emptyList()).close()
     }
 }

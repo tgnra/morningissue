@@ -41,6 +41,12 @@ abstract class EngagementDao {
     @Query("UPDATE engagement SET readAt = COALESCE(readAt, :at) WHERE articleId = :articleId")
     protected abstract suspend fun setReadAt(articleId: Long, at: Instant)
 
+    @Query("UPDATE engagement SET openedAt = MIN(COALESCE(openedAt, :at), :at) WHERE articleId = :articleId")
+    protected abstract suspend fun lowerOpenedAt(articleId: Long, at: Instant)
+
+    @Query("UPDATE engagement SET readAt = MIN(COALESCE(readAt, :at), :at) WHERE articleId = :articleId")
+    protected abstract suspend fun lowerReadAt(articleId: Long, at: Instant)
+
     @Query("UPDATE engagement SET savedAt = :at WHERE articleId = :articleId")
     protected abstract suspend fun setSavedAt(articleId: Long, at: Instant?)
 
@@ -66,6 +72,23 @@ abstract class EngagementDao {
     open suspend fun markOpened(articleId: Long, at: Instant) {
         ensure(articleId)
         setOpenedAt(articleId, at)
+    }
+
+    /**
+     * Keeps the earlier of the stored first open and [at]. For opens recorded on another
+     * device (`kobo/`), which may arrive after a later open on the phone.
+     */
+    @Transaction
+    open suspend fun mergeOpened(articleId: Long, at: Instant) {
+        ensure(articleId)
+        lowerOpenedAt(articleId, at)
+    }
+
+    /** Keeps the earlier of the stored read time and [at]; see [mergeOpened]. */
+    @Transaction
+    open suspend fun mergeRead(articleId: Long, at: Instant) {
+        ensure(articleId)
+        lowerReadAt(articleId, at)
     }
 
     /** Raises the furthest-read fraction (never lowers it). */
