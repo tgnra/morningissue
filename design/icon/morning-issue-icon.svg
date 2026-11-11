@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Morning Issue launcher icon: a front page with the morning sun in its corner.
+
+  This file is the master. The canvas is Android's 108 dp adaptive-icon canvas, and all
+  the artwork lies inside the central 66 dp circle (radius 33 about 54,54), which no
+  launcher mask cuts. Only <path> elements with plain fills and strokes are used, so
+  tools/icon/svg_to_vector.py can turn it into the app's vector drawable one to one.
+  After editing, run:  python3 tools/icon/svg_to_vector.py
+
+  The printing on the page is cut out of the sheet as holes (even-odd), not painted in
+  black on top, so the artwork is a single-colour silhouette and also serves as the
+  themed (monochrome) icon.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <!-- The ground. In the app this is the colour ic_launcher_background, not a path. -->
+  <path id="ground" fill="#000000" d="M0 0H108V108H0Z"/>
+
+  <!-- The sheet, its upper right corner cleared for the sun; then, as holes:
+       the masthead, a headline rule, the picture, two lines of text beside it
+       and one rule across the foot. -->
+  <path id="page" fill="#FFFFFF" fill-rule="evenodd"
+        d="M34 30H54.38A15.5 15.5 0 0 0 74 52.83V80H34Z
+           M38 35H48V41H38Z
+           M38 45H48V48H38Z
+           M38 53H52V66H38Z
+           M56 55.5H70V58.5H56Z
+           M56 62H70V65H56Z
+           M38 71.5H70V74.5H38Z"/>
+
+  <!-- The sun: a disc and eight short rays that stand clear of it. -->
+  <path id="sun" fill="#FFFFFF" d="M61.5 39A5.5 5.5 0 1 0 72.5 39A5.5 5.5 0 1 0 61.5 39Z"/>
+  <path id="rays" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round"
+        d="M67 30.2V26.6
+           M73.22 32.78L75.77 30.23
+           M75.8 39H79.4
+           M73.22 45.22L75.77 47.77
+           M67 47.8V51.4
+           M60.78 45.22L58.23 47.77
+           M58.2 39H54.6
+           M60.78 32.78L58.23 30.23"/>
+</svg>
