@@ -7,7 +7,6 @@ import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +27,6 @@ import net.tgnra.morningissue.data.db.StoredImageFileRow
 import net.tgnra.morningissue.model.ContentBlock
 import net.tgnra.morningissue.model.ContentBlocks
 import okhttp3.OkHttpClient
-import okhttp3.Request
 
 /** What one call to [ImageStore.storeForArticles] did. */
 data class ImageStoreReport(
@@ -148,9 +146,7 @@ class FileImageStore(
     private val downloads = Semaphore(ImageStoreConfig.PARALLEL_DOWNLOADS)
     private val recompressions = Semaphore(ImageStoreConfig.PARALLEL_RECOMPRESSIONS)
 
-    private val imageClient: OkHttpClient by lazy {
-        client().newBuilder().callTimeout(ImageStoreConfig.DOWNLOAD_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS).build()
-    }
+    private val imageClient: OkHttpClient by lazy { ImageDownload.client(client()) }
 
     private enum class Outcome { RECOMPRESSED, UNCHANGED, SKIPPED }
 
@@ -179,19 +175,17 @@ class FileImageStore(
         val ids = articleIds.distinct()
         val sources = ids.chunked(ArticleSignalDao.MAX_IDS).flatMap { dao.imageSources(it) }.associateBy { it.articleId }
         val wanted = LinkedHashMap<String, Long>()
-        for (id in ids) sources[id]?.imageUrl?.takeIf(::isWebAddress)?.let { wanted.putIfAbsent(it, id) }
+        for (id in ids) sources[id]?.imageUrl?.takeIf(ImageDownload::isWebAddress)?.let { wanted.putIfAbsent(it, id) }
         for (id in ids) {
             val blocks = sources[id]?.blocksJson?.let(ContentBlocks::decode).orEmpty()
             blocks.asSequence().filterIsInstance<ContentBlock.Image>()
                 .filter { (it.width ?: ImageStoreConfig.MIN_BODY_IMAGE_WIDTH_PX) >= ImageStoreConfig.MIN_BODY_IMAGE_WIDTH_PX }
-                .map { it.url }.filter(::isWebAddress).distinct()
+                .map { it.url }.filter(ImageDownload::isWebAddress).distinct()
                 .take(ImageStoreConfig.MAX_BODY_IMAGES_PER_ARTICLE)
                 .forEach { wanted.putIfAbsent(it, id) }
         }
         return wanted
     }
-
-    private fun isWebAddress(url: String): Boolean = url.startsWith("https://", ignoreCase = true) || url.startsWith("http://", ignoreCase = true)
 
     private suspend fun storeOne(url: String, articleId: Long): Result {
         val original = files.newTemp()
@@ -212,7 +206,7 @@ class FileImageStore(
         val fromCache = originals.copyTo(url, original) && original.length() in 1..ImageStoreConfig.MAX_DOWNLOAD_BYTES
         // The clock starts once the download has its turn, not while it waits behind others.
         val fetched = fromCache || downloads.withPermit {
-            withTimeoutOrNull(ImageStoreConfig.DOWNLOAD_TIMEOUT_MILLIS) { runInterruptible { download(url, original) } } ?: false
+            withTimeoutOrNull(ImageStoreConfig.DOWNLOAD_TIMEOUT_MILLIS) { ImageDownload.toFile(imageClient, url, original) } ?: false
         }
         if (!fetched) return Result(Outcome.SKIPPED)
         val downloaded = original.length()
@@ -255,30 +249,6 @@ class FileImageStore(
         val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
         android.graphics.BitmapFactory.decodeFile(file.path, bounds)
         return bounds.outWidth.coerceAtLeast(0) to bounds.outHeight.coerceAtLeast(0)
-    }
-
-    /** Streams [url] to [target]; false for an error status, an empty body or one over the size limit. */
-    private fun download(url: String, target: File): Boolean {
-        // No Accept header: the bytes are the ones display would have been given.
-        val request = Request.Builder().url(url).build()
-        imageClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return false
-            val stated = response.body.contentLength()
-            if (stated > ImageStoreConfig.MAX_DOWNLOAD_BYTES) return false
-            var total = 0L
-            target.outputStream().use { out ->
-                val input = response.body.byteStream()
-                val buffer = ByteArray(16 * 1024)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    total += read
-                    if (total > ImageStoreConfig.MAX_DOWNLOAD_BYTES) return false
-                    out.write(buffer, 0, read)
-                }
-            }
-            return total > 0
-        }
     }
 
     private fun move(from: File, to: File) {

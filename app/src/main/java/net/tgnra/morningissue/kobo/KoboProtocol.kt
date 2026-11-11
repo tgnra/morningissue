@@ -67,6 +67,15 @@ data class Manifest(
     val dbId: String,
     val ackedSeq: Long,
     val editions: List<ManifestEdition>,
+    val saved: ManifestSaved,
+)
+
+/** The manifest's line for `GET /v1/saved`. */
+@Serializable
+data class ManifestSaved(
+    val count: Int,
+    /** Changes whenever the saved list would; a hash of its bytes, as for an edition. */
+    val version: String,
 )
 
 @Serializable
@@ -91,6 +100,14 @@ data class EditionBundle(
     val releaseAt: String,
     val finishedAt: String?,
     val pages: List<BundlePage>,
+    val articles: Map<String, BundleArticle>,
+)
+
+/** `GET /v1/saved`: every saved article, [order] newest saved first. [articles] is keyed as in an edition. */
+@Serializable
+data class SavedBundle(
+    val version: String,
+    val order: List<Long>,
     val articles: Map<String, BundleArticle>,
 )
 

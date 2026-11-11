@@ -1,14 +1,11 @@
 package net.tgnra.morningissue.kobo
 
-import java.io.File
 import java.time.Clock
 import java.time.Instant
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.SerializationException
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.db.SyncPeerEntity
-import net.tgnra.morningissue.data.images.ImageFormats
-import net.tgnra.morningissue.data.images.ImageKind
 
 /** Something a Kobo did, for the Sync screen's status line. [eventsMerged] is null for a manifest fetch. */
 data class SyncActivity(val deviceId: String, val deviceName: String, val at: Instant, val eventsMerged: Int? = null)
@@ -22,10 +19,11 @@ class KoboRoutes(
     private val database: MorningIssueDatabase,
     private val pairing: Pairing,
     private val dbId: suspend () -> String,
-    /** The image store's file for a source URL (`ImageFiles.fileFor`). */
-    private val imageFile: (String) -> File,
+    private val images: KoboImages,
     private val clock: Clock,
     private val onActivity: (SyncActivity) -> Unit = {},
+    /** Told the width each device asks images at, so the next pre-warm prepares that size. */
+    private val onImageWidth: suspend (deviceId: String, width: Int) -> Unit = { _, _ -> },
     private val pairWaitMillis: Long = KoboProtocol.PAIR_WAIT_MILLIS,
 ) {
     private val exporter = KoboExporter(database, clock)
@@ -47,7 +45,7 @@ class KoboRoutes(
         val path = request.path
         val method = when {
             path == "/v1/pair" || path == "/v1/events" -> "POST"
-            path == "/v1/manifest" || path == "/v1/images" || path.startsWith("/v1/editions/") -> "GET"
+            path == "/v1/manifest" || path == "/v1/saved" || path == "/v1/images" || path.startsWith("/v1/editions/") -> "GET"
             else -> return HttpResponse.error(404, "not found")
         }
         if (request.method != method) return HttpResponse.error(405, "method not allowed")
@@ -57,7 +55,8 @@ class KoboRoutes(
         return when {
             path == "/v1/manifest" -> manifest(peer)
             path == "/v1/events" -> events(peer, request)
-            path == "/v1/images" -> image(request)
+            path == "/v1/saved" -> HttpResponse.json(200, exporter.saved())
+            path == "/v1/images" -> image(peer, request)
             else -> edition(path.removePrefix("/v1/editions/"))
         }
     }
@@ -93,10 +92,12 @@ class KoboRoutes(
         return HttpResponse.json(200, bundle)
     }
 
-    private fun image(request: HttpRequest): HttpResponse {
+    private suspend fun image(peer: SyncPeerEntity, request: HttpRequest): HttpResponse {
         val url = request.query["url"]?.takeIf { it.isNotBlank() } ?: return HttpResponse.error(400, "no url")
-        val file = imageFile(url).takeIf { it.isFile } ?: return HttpResponse.error(404, "not stored")
-        return HttpResponse(200, contentTypeOf(file), file = file)
+        val width = KoboImagePlan.width(request.query["w"])
+        onImageWidth(peer.deviceId, width)
+        val image = images.prepare(url, width) ?: return HttpResponse.error(404, "no image")
+        return HttpResponse(200, image.format.contentType, image.bytes)
     }
 
     private suspend fun events(peer: SyncPeerEntity, request: HttpRequest): HttpResponse {
@@ -105,20 +106,5 @@ class KoboRoutes(
         val result = merger.merge(peer.deviceId, batch.events) ?: return HttpResponse.error(401, "unauthorized")
         onActivity(SyncActivity(peer.deviceId, peer.name, clock.instant(), result.merged))
         return HttpResponse.json(200, json.encodeToString(EventsAck(result.ackedSeq)))
-    }
-
-    companion object {
-        /** The stored file's type, from its first bytes: the store re-encodes, so the source URL's type may not hold. */
-        fun contentTypeOf(file: File): String {
-            val head = file.inputStream().use { input -> ByteArray(ImageFormats.HEAD_BYTES).let { it.copyOf(input.read(it).coerceAtLeast(0)) } }
-            return when (ImageFormats.kindOf(head)) {
-                ImageKind.JPEG -> "image/jpeg"
-                ImageKind.PNG -> "image/png"
-                ImageKind.GIF -> "image/gif"
-                ImageKind.WEBP -> "image/webp"
-                ImageKind.SVG -> "image/svg+xml"
-                ImageKind.OTHER_BITMAP, ImageKind.NOT_AN_IMAGE -> "application/octet-stream"
-            }
-        }
     }
 }

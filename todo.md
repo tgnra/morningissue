@@ -201,12 +201,18 @@ The protocol is `docs/kobo-sync.md`; see "Sync with Kobo" in `docs/how-it-works.
 - [x] Event merge in one transaction with `ackedSeq`, affinity relearned as for the phone's own reader.
 - [x] Pairing with Allow and Deny, hashed tokens checked in constant time, Forget.
 - [x] HTTP server on 47824 and UDP beacon on 47823, only while the Sync screen is started; body, header and event caps.
+- [x] Saved articles (`GET /v1/saved`, `saved` in the manifest), with their full text fetched while the Sync screen is open.
+- [x] Pictures prepared on the phone (`GET /v1/images?url=&w=`): store, then Coil's cache, then the internet; greyscale JPEG or PNG; cached; prepared ahead while the screen is open. The screen stays on.
 - [ ] **Run it against a real Kobo**, and look at the Sync screen on a phone, a tablet and in E-ink.
 - [ ] **Bundle size.** Back-page index stories carry their full stored text, like every other story, so an edition with a long index may make a bundle of several megabytes. Measure a real one; if it is too big, send index stories without `blocks` (the Kobo already falls back to the summary).
 - [ ] **The manifest encodes all three bundles** on every fetch to hash them. Cheap for three editions; cache by edition if it ever shows up.
 - [ ] **Android 17's local network protection.** Raising `targetSdk` to 37 may make serving to the LAN need a runtime permission. Check before raising it (see Open questions).
 - [ ] **Events after the next build** have already counted their stories as unopened for that build (the spec's known v1 limit). Merging could undo the run's count for a story the Kobo opened; not done.
 - [ ] **No encryption.** The token and the editions cross the Wi-Fi in clear, as the spec accepts for v1.
+- [ ] **The pre-warm runs once per opening.** An edition released, or an article saved, while the Sync screen is open has its pictures prepared only when the Kobo asks. Watching the database and topping up would close that.
+- [ ] **A slow picture can outlast the Kobo's wait.** One the phone must download takes up to the store's 30-second timeout, plus its turn behind 3 others; the Kobo's request timeout is 30 seconds. The pre-warm makes this rare; the Kobo could allow 60 seconds for images.
+- [ ] **The JPEG/PNG choice** is a tone count, tested on drawn examples, not on a corpus of real article pictures. Check a real edition's split and sizes, and how a photograph on a large white page fares.
+- [ ] **Pictures are not measured on a device**: how long 600 take to prepare on a mid-range phone, and the memory a large original costs while decoding (bounded by sampling and 4 million pixels, 2 at a time).
 
 ## Smaller gaps against the original spec
 

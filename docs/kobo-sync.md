@@ -107,7 +107,7 @@ Every article saved on the phone, `order` newest saved first, each in full: the 
 
 The image for that source URL, prepared for e-ink: decoded on the phone, the first frame of an animation, flattened onto white, converted to 8-bit greyscale, scaled down (never up) to at most `w` pixels wide, and encoded as a greyscale JPEG (`image/jpeg`), or as a greyscale PNG (`image/png`) for line art and images with few tones. The Kobo sends `w` as its screen's short side in pixels; without `w` the phone uses 1264.
 
-The phone takes the source from its image store, and fetches it from the internet when the store doesn't have it, with the same client, limits and timeouts as the reader's image loading. Prepared images are cached on the phone (in the app's cache, evictable, keyed by URL and `w`), so a second Kobo or a retried sync costs nothing. `404` means the image can't be got or decoded; SVG is not rasterised in v1 and gets `404`.
+The phone takes the source from its image store, and fetches it from the internet when the store doesn't have it, with the same client, limits and timeouts as the reader's image loading. Prepared images are cached on the phone (in the app's cache, evictable, keyed by URL and `w`), so a second Kobo or a retried sync costs nothing. `404` means the image can't be got or decoded; SVG is not rasterised in v1 and gets `404`. The phone holds `w` to 160..2048, and an image it has to download can take up to 30 seconds to answer.
 
 The Kobo fetches every `img` block URL and every `imageUrl` in its editions and saved articles, up to 3 requests at a time, and skips the ones that 404. It shows the article text first and fills in images as they arrive.
 
