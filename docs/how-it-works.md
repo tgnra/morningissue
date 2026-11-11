@@ -363,7 +363,9 @@ Optional and off by default. Settings has the switch and, when it is on, the rel
 
 ### The Extra edition
 
-`EditionPublisher.publishExtraEdition(feedIds)` (also on `EditionRepository`) prints an edition at once from chosen feeds, meant for sources the reader has just added. The caller syncs those feeds first. No screen calls it yet.
+`EditionPublisher.publishExtraEdition(feedIds)` (also on `EditionRepository`) prints an edition at once from chosen feeds, meant for sources the reader has just added. The caller syncs those feeds first.
+
+The newsstand makes the offer (`ui/newsstand/ExtraOffer.kt`). Sources added after the newest edition's cutoff bring up a notice with "Print an Extra edition" and "Not now". Printing syncs those sources and calls `publishExtraEdition`. "Not now" is remembered (`AppSettings.extraOfferDismissedAt`), so the same sources are not offered twice; they join the next scheduled edition as usual. Nothing is offered before the first edition, or on a date that already has an Extra edition. Covers and paper headers read "No. 12 · Extra".
 
 - **What it covers.** Those feeds' posts first seen in the last 3 days that no edition has printed. Each feed's 5 newest posts are exempt from the 30-day age limit and the freshness floor, so a quiet blog still shows what it has.
 - **Structure.** The same as a morning edition, without held-over posts or a pull-out. Kind `EXTRA`, the next running number, released immediately, dated today.

@@ -107,7 +107,10 @@ In progress. The edition engine's part is built; how it works is in `docs/how-it
 ### Extra edition
 
 - [x] Engine: `EditionPublisher.publishExtraEdition(feedIds)` prints an edition at once from chosen feeds without disturbing the schedule (`EditionKind.EXTRA`).
-- [ ] A way to ask for one after adding sources, and an "Extra" label on its cover.
+- [x] The newsstand offers one after sources are added; covers and paper headers say "Extra".
+- [ ] Not yet seen on a device: the offer, printing from it, and the label.
+- [ ] The Back issues calendar shows one edition per day, the morning one, so an Extra or Evening edition on the same date cannot be opened from it once it has left the rack.
+- [ ] If sources are added after tomorrow's edition was pre-built but before it is released, the Extra and the pre-built edition can both carry the same stories. Untested.
 - [ ] Only one Extra edition per calendar date can be stored, because `edition` has a unique `(date, kind)` index. Lifting this needs a schema change.
 
 ### Benchmark
