@@ -74,6 +74,7 @@ internal object XmlFeedParser {
                 ns == NS_CONTENT && name == "encoded" -> item.contentHtml = p.readElementText()
                 ns == NS_DC && name == "creator" -> item.author = p.readElementText()
                 ns == NS_DC && name == "date" -> item.published = item.published ?: p.readElementText()
+                ns == NS_DC && name == "subject" -> item.addCategory(p.readElementText())
                 isAtom(ns) && name == "link" -> {
                     val rel = p.attr("rel") ?: "alternate"
                     if (rel == "alternate" && item.link == null) item.link = p.attr("href")
@@ -102,8 +103,10 @@ internal object XmlFeedParser {
                 name == "enclosure" -> {
                     val url = p.attr("url")
                     if (url != null && isImage(p.attr("type"), null, url)) item.enclosureImage = item.enclosureImage ?: url
+                    item.addEnclosure(url, p.attr("type"))
                     p.skipElement()
                 }
+                name == "category" -> item.addCategory(p.readElementText())
                 else -> p.skipElement()
             }
         }
@@ -191,9 +194,15 @@ internal object XmlFeedParser {
                         if (rel == "alternate" && href != null && !linkIsHtml) {
                             item.link = href
                             linkIsHtml = type == "text/html"
-                        } else if (rel == "enclosure" && href != null && isImage(type, null, href)) {
-                            item.enclosureImage = item.enclosureImage ?: href
+                        } else if (rel == "enclosure" && href != null) {
+                            if (isImage(type, null, href)) item.enclosureImage = item.enclosureImage ?: href
+                            item.addEnclosure(href, type)
                         }
+                        p.skipElement()
+                    }
+                    // `term` identifies the category; `label` is its human spelling, when given.
+                    "category" -> {
+                        item.addCategory(p.attr("term"), p.attr("label"))
                         p.skipElement()
                     }
                     "published", "issued", "created" -> item.published = item.published ?: p.readElementText()

@@ -13,4 +13,7 @@ import org.junit.runner.RunWith
 class FeedParserOnAndroidTest : FeedParserTest()
 
 @RunWith(AndroidJUnit4::class)
+class FeedSignalsParserOnAndroidTest : FeedSignalsParserTest()
+
+@RunWith(AndroidJUnit4::class)
 class OpmlOnAndroidTest : OpmlTest()

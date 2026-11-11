@@ -2,8 +2,12 @@ package net.tgnra.morningissue.sync
 
 import java.security.MessageDigest
 import java.time.Instant
+import net.tgnra.morningissue.model.ArticleCategory
+import net.tgnra.morningissue.model.ArticleTraitRules
+import net.tgnra.morningissue.model.ArticleTraits
 import net.tgnra.morningissue.model.ContentBlock
 import net.tgnra.morningissue.model.ContentBlocks
+import net.tgnra.morningissue.model.EnclosureKind
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 enum class FeedFormat { RSS, ATOM, JSON }
@@ -39,7 +43,16 @@ class ParsedItem internal constructor(
     private val summaryHtml: String?,
     private val bodyHtml: String?,
     private val baseUrl: String,
+    /** The feed's site, for telling a post that links elsewhere from one of the site's own. */
+    private val siteUrl: String? = null,
+    /** The feed's categories for the post: one per key, in the feed's order, at most `ArticleCategories.MAX_PER_ARTICLE`. */
+    val categories: List<ArticleCategory> = emptyList(),
+    /** Every attachment the feed lists, images included, with absolute addresses. */
+    val enclosures: List<ItemEnclosure> = emptyList(),
 ) {
+    /** What the post carries besides text; see [ItemEnclosure.kindOf]. */
+    val enclosure: EnclosureKind = ItemEnclosure.kindOf(enclosures)
+
     val content: ItemContent by lazy {
         val blocks = bodyHtml?.let { HtmlBlocks.convert(it, baseUrl) }.orEmpty()
         val plainText = ContentBlocks.plainText(blocks)
@@ -57,6 +70,7 @@ class ParsedItem internal constructor(
             wordCount = ContentBlocks.wordCount(plainText.ifEmpty { summary.orEmpty() }),
             imageUrl = image,
             contentHash = Texts.hash(Texts.squash(title).lowercase() + "\n" + Texts.squash(plainText.ifEmpty { summary.orEmpty() })),
+            traits = ArticleTraitRules.compute(title, url, siteUrl, blocks, enclosure),
         )
     }
 
@@ -80,7 +94,48 @@ data class ItemContent(
     val imageUrl: String?,
     /** Hash of the normalised title and text, for spotting the same story across feeds. */
     val contentHash: String,
+    /** Structural features of the post, from the feed's own body. */
+    val traits: ArticleTraits,
 )
+
+/**
+ * A file attached to a post: RSS `<enclosure>`, Atom `link rel="enclosure"` or a JSON Feed
+ * attachment. [mediaType] is the MIME type the feed states, if any.
+ */
+data class ItemEnclosure(val url: String, val mediaType: String?) {
+    /**
+     * Audio or video by the stated type, else by the file extension. An image is [EnclosureKind.NONE]:
+     * feeds attach a post's picture this way, and it is already the lead image. Anything else
+     * (a PDF, a torrent, an unknown type) is [EnclosureKind.OTHER].
+     */
+    val kind: EnclosureKind
+        get() {
+            val type = mediaType?.lowercase()
+            return when {
+                type != null && type.startsWith("audio/") -> EnclosureKind.AUDIO
+                type != null && type.startsWith("video/") -> EnclosureKind.VIDEO
+                type != null && type.startsWith("image/") -> EnclosureKind.NONE
+                AUDIO_EXTENSION.containsMatchIn(url) -> EnclosureKind.AUDIO
+                VIDEO_EXTENSION.containsMatchIn(url) -> EnclosureKind.VIDEO
+                IMAGE_EXTENSION.containsMatchIn(url) -> EnclosureKind.NONE
+                else -> EnclosureKind.OTHER
+            }
+        }
+
+    companion object {
+        /** One kind for a post with several attachments: the first audio or video, else other, else none. */
+        fun kindOf(enclosures: List<ItemEnclosure>): EnclosureKind {
+            val kinds = enclosures.map { it.kind }
+            return kinds.firstOrNull { it == EnclosureKind.AUDIO || it == EnclosureKind.VIDEO }
+                ?: kinds.firstOrNull { it == EnclosureKind.OTHER }
+                ?: EnclosureKind.NONE
+        }
+
+        private val AUDIO_EXTENSION = Regex("""\.(mp3|m4a|m4b|aac|ogg|oga|opus|flac|wav)(\?|$)""", RegexOption.IGNORE_CASE)
+        private val VIDEO_EXTENSION = Regex("""\.(mp4|m4v|mov|webm|mkv|avi)(\?|$)""", RegexOption.IGNORE_CASE)
+        private val IMAGE_EXTENSION = Regex("""\.(jpe?g|png|gif|webp|avif|svg)(\?|$)""", RegexOption.IGNORE_CASE)
+    }
+}
 
 internal object Texts {
     private val SPACES = Regex("""\s+""")

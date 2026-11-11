@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -43,9 +44,18 @@ internal object JsonFeedParser {
             item.updated = entry.dateModified
             item.mediaImage = entry.image ?: entry.bannerImage
             item.enclosureImage = entry.attachments?.firstOrNull { it.mimeType?.startsWith("image/") == true }?.url
+            entry.attachments?.forEach { item.addEnclosure(it.url, it.mimeType) }
+            tags(entry.tags).forEach { item.addCategory(it) }
             feed.items += item
         }
         return feed
+    }
+
+    /** `tags` is an array of strings by the spec; a lone string or stray numbers must not sink the feed. */
+    private fun tags(element: JsonElement?): List<String> = when (element) {
+        is JsonArray -> element.mapNotNull { (it as? JsonPrimitive)?.takeIf { tag -> tag !is JsonNull }?.content }
+        is JsonPrimitive -> listOfNotNull(element.takeIf { it !is JsonNull }?.content)
+        else -> emptyList()
     }
 
     @Serializable
@@ -81,5 +91,6 @@ internal object JsonFeedParser {
         val author: Author? = null,
         val authors: List<Author>? = null,
         val attachments: List<Attachment>? = null,
+        val tags: JsonElement? = null,
     )
 }
