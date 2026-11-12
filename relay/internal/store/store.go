@@ -458,7 +458,8 @@ func (s *Store) SetDevices(gid string, keys [][]byte) ([]string, error) {
 func (s *Store) PutPackage(gid, pid, tmpPath string, size int64, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.mutate(gid, func(g *Group) ([]string, error) {
+	var moved string
+	err := s.mutate(gid, func(g *Group) ([]string, error) {
 		if g.Package != nil && g.Package.ID == pid {
 			return nil, ErrConflict
 		}
@@ -468,12 +469,21 @@ func (s *Store) PutPackage(gid, pid, tmpPath string, size int64, now time.Time) 
 		if err := os.Rename(tmpPath, s.packagePath(gid, pid)); err != nil {
 			return nil, err
 		}
+		if _, again := g.Uploads[pid]; !again {
+			moved = s.packagePath(gid, pid)
+		}
 		if g.Uploads == nil {
 			g.Uploads = map[string]*Upload{}
 		}
 		g.Uploads[pid] = &Upload{Size: size, UploadedAt: now.UTC()}
 		return nil, nil
 	})
+	if err != nil && moved != "" {
+		// The metadata wasn't saved, so nothing points at the file. (A file that replaced an
+		// earlier upload under the same ID is kept: the metadata still lists that ID.)
+		_ = os.Remove(moved)
+	}
+	return err
 }
 
 // Publish makes an uploaded package current, with keys for the listed devices (keys for
@@ -644,7 +654,8 @@ func (s *Store) PutChanges(kid, batch, tmpPath string, size int64, now time.Time
 	if !ok {
 		return ErrNotFound
 	}
-	return s.mutate(gid, func(g *Group) ([]string, error) {
+	var moved string
+	err := s.mutate(gid, func(g *Group) ([]string, error) {
 		var remove []string
 		pending := 0
 		kept := g.Changes[:0]
@@ -669,9 +680,15 @@ func (s *Store) PutChanges(kid, batch, tmpPath string, size int64, now time.Time
 		if err := os.Rename(tmpPath, s.changePath(gid, id)); err != nil {
 			return nil, err
 		}
+		moved = s.changePath(gid, id)
 		g.Changes = append(g.Changes, Change{ID: id, Kid: kid, Batch: batch, Size: size, ReceivedAt: now.UTC()})
 		return remove, nil
 	})
+	if err != nil && moved != "" {
+		// The metadata wasn't saved, so nothing points at the file.
+		_ = os.Remove(moved)
+	}
+	return err
 }
 
 // Sweep deletes what has expired: packages and changes older than ttl, unpublished uploads

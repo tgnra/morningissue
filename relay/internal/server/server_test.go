@@ -48,6 +48,8 @@ type env struct {
 	srv   *server.Server
 	ts    *httptest.Server
 	owner []byte
+	// prefix goes in front of every path the helpers send and sign, for a relay under a base path.
+	prefix string
 }
 
 func newEnv(t *testing.T, configure ...func(*server.Config)) *env {
@@ -57,7 +59,7 @@ func newEnv(t *testing.T, configure ...func(*server.Config)) *env {
 		f(&e.cfg)
 	}
 	e.start()
-	t.Cleanup(func() { e.ts.Close() })
+	t.Cleanup(func() { e.stop() })
 	return e
 }
 
@@ -67,16 +69,26 @@ func (e *env) start() {
 	if err != nil {
 		e.t.Fatal(err)
 	}
+	replay, err := auth.OpenReplayCache(filepath.Join(e.dir, "replay"), e.clk.Now())
+	if err != nil {
+		e.t.Fatal(err)
+	}
 	e.cfg.Store = st
+	e.cfg.Replay = replay
 	e.cfg.Now = e.clk.Now
 	e.srv = server.New(e.cfg)
 	e.ts = httptest.NewServer(e.srv)
 }
 
+func (e *env) stop() {
+	e.ts.Close()
+	e.cfg.Replay.Close()
+}
+
 // restart stops the server and starts a new one on the same data directory.
 func (e *env) restart() {
 	e.t.Helper()
-	e.ts.Close()
+	e.stop()
 	e.start()
 }
 
@@ -118,7 +130,7 @@ func (r resp) errorCode(t *testing.T) string {
 // rawDo sends a request with the given Authorization header (none when empty).
 func (e *env) rawDo(method, path string, body []byte, authz string, hdr map[string]string) resp {
 	e.t.Helper()
-	req, err := http.NewRequest(method, e.ts.URL+path, bytes.NewReader(body))
+	req, err := http.NewRequest(method, e.ts.URL+e.prefix+path, bytes.NewReader(body))
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -148,7 +160,7 @@ func (e *env) rawDo(method, path string, body []byte, authz string, hdr map[stri
 func (e *env) do(key []byte, method, path string, body []byte, hdr map[string]string) resp {
 	e.t.Helper()
 	e.clk.Advance(time.Second)
-	return e.rawDo(method, path, body, auth.Header(key, method, path, e.clk.Now().Unix(), body), hdr)
+	return e.rawDo(method, path, body, auth.Header(key, method, e.prefix+path, e.clk.Now().Unix(), body), hdr)
 }
 
 func (e *env) doJSON(key []byte, method, path string, v any) resp {
@@ -637,6 +649,23 @@ func TestLimits(t *testing.T) {
 	}
 }
 
+// A body the relay can't store, here because its tmp directory is gone, is the relay's failure
+// (500), not a malformed request (400) that a client would give up on.
+func TestStorageFailureIsInternal(t *testing.T) {
+	e := newEnv(t)
+	d := randKey()
+	e.register(d)
+	if err := os.RemoveAll(filepath.Join(e.dir, "tmp")); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.do(d, "PUT", "/v1/changes/1-1", envelope(10), nil); r.status != 500 || r.errorCode(t) != "internal" {
+		t.Fatalf("changes: %d %s", r.status, r.body)
+	}
+	if r := e.do(e.owner, "PUT", "/v1/group/packages/"+store.NewID(), envelope(10), nil); r.status != 500 {
+		t.Fatalf("package: %d %s", r.status, r.body)
+	}
+}
+
 func TestSweeper(t *testing.T) {
 	e := newEnv(t)
 	d := randKey()
@@ -767,6 +796,148 @@ func TestRestartPersistence(t *testing.T) {
 	}
 	if m, _ := filepath.Glob(filepath.Join(e.dir, "tmp", "*")); len(m) != 0 {
 		t.Fatalf("tmp not cleared on start: %v", m)
+	}
+}
+
+// A request replayed after the relay restarts, within the window, is still refused.
+func TestReplayAcrossRestart(t *testing.T) {
+	e := newEnv(t)
+	d := randKey()
+	e.register(d)
+	type signed struct {
+		method, path string
+		body         []byte
+		authz        string
+	}
+	sign := func(key []byte, method, path string, body []byte) signed {
+		e.clk.Advance(time.Second)
+		return signed{method, path, body, auth.Header(key, method, path, e.clk.Now().Unix(), body)}
+	}
+	gb, _ := json.Marshal(map[string]string{"ownerKey": b64(e.owner)})
+	reqs := []signed{
+		sign(d, "PUT", "/v1/changes/1-5", envelope(40)),
+		sign(e.owner, "GET", "/v1/group/status", nil),
+		sign(e.owner, "PUT", "/v1/group", gb),
+	}
+	for _, q := range reqs {
+		if r := e.rawDo(q.method, q.path, q.body, q.authz, nil); r.status >= 300 {
+			t.Fatalf("%s %s: %d %s", q.method, q.path, r.status, r.body)
+		}
+	}
+	replays := func(want string) {
+		t.Helper()
+		for _, q := range reqs {
+			r := e.rawDo(q.method, q.path, q.body, q.authz, nil)
+			if r.status != 401 || r.errorCode(t) != want {
+				t.Fatalf("%s %s replayed: %d %s, want 401 %q", q.method, q.path, r.status, r.body, want)
+			}
+		}
+	}
+
+	// A crash: the replay file is never closed.
+	e.ts.Close()
+	e.start()
+	e.clk.Advance(100 * time.Second)
+	replays("replay")
+	// New requests are accepted straight away.
+	expect(t, e.do(d, "GET", "/v1/package", nil, nil), 204)
+
+	// A clean restart, after a sweep has rewritten the file.
+	if err := e.srv.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	e.restart()
+	e.clk.Advance(190 * time.Second)
+	replays("replay")
+	if n := len(e.changes()); n != 1 {
+		t.Fatalf("%d changes, want 1", n)
+	}
+
+	// Once out of skew, they fail on the clock, and the sweeper forgets them.
+	e.clk.Advance(20 * time.Second)
+	replays("skew")
+	e.clk.Advance(10 * time.Minute)
+	if err := e.srv.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(e.dir, "replay"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) != 0 {
+		t.Fatalf("replay file after the window:\n%s", b)
+	}
+}
+
+// A signature with ts 300 s ahead passes the skew check until 601 s after ts - 300, so it must be
+// remembered that long even when it was first seen part way through a second.
+func TestReplayAtTheEdgeOfSkew(t *testing.T) {
+	e := newEnv(t)
+	e.register()
+	e.clk.Advance(500 * time.Millisecond)
+	path := "/v1/group/status"
+	h := auth.Header(e.owner, "GET", path, e.clk.Now().Unix()+300, nil)
+	expect(t, e.rawDo("GET", path, nil, h, nil), 200)
+	e.clk.Advance(600*time.Second + 200*time.Millisecond)
+	if r := e.rawDo("GET", path, nil, h, nil); r.status != 401 || r.errorCode(t) != "replay" {
+		t.Fatalf("replay at the edge of skew: %d %s", r.status, r.body)
+	}
+	e.clk.Advance(time.Second)
+	if r := e.rawDo("GET", path, nil, h, nil); r.status != 401 || r.errorCode(t) != "skew" {
+		t.Fatalf("a second later: %d %s", r.status, r.body)
+	}
+}
+
+// Under a base path the relay routes on the path below it and checks signatures over the full
+// path as sent, as both clients sign it when the relay address has a path.
+func TestBasePath(t *testing.T) {
+	e := newEnv(t, func(c *server.Config) { c.BasePath = "/morningissue/" })
+	e.prefix = "/morningissue"
+	d := randKey()
+	e.register(d)
+	pkg := envelope(5000)
+	pid := e.publish(pkg, d)
+	r := e.do(d, "GET", "/v1/package", nil, nil)
+	expect(t, r, 200)
+	r = e.do(d, "GET", "/v1/packages/"+pid, nil, map[string]string{"Range": "bytes=100-"})
+	expect(t, r, 206)
+	if !bytes.Equal(r.body, pkg[100:]) {
+		t.Fatal("package differs")
+	}
+	expect(t, e.do(d, "PUT", "/v1/changes/1-3", envelope(30), nil), 204)
+	if ch := e.changes(); len(ch) != 1 || ch[0].Batch != "1-3" {
+		t.Fatalf("changes = %+v", ch)
+	}
+	expect(t, e.rawDo("GET", "/v1/health", nil, "", nil), 200)
+	expect(t, e.do(e.owner, "GET", "/v1/group/status?x=1", nil, nil), 200)
+
+	// Signed over the path without the base, as a proxy that strips it would pass it on.
+	now := e.clk.Now().Unix()
+	if r := e.rawDo("GET", "/v1/group/status", nil, auth.Header(e.owner, "GET", "/v1/group/status", now, nil), nil); r.status != 401 || r.errorCode(t) != "signature" {
+		t.Fatalf("signed without the base path: %d %s", r.status, r.body)
+	}
+
+	// Anything outside the base path is not found, signed or not.
+	e.prefix = ""
+	for _, p := range []string{"/v1/health", "/morningissue", "/morningissue/", "/morningissuex/v1/health", "/other/morningissue/v1/health"} {
+		if r := e.rawDo("GET", p, nil, "", nil); r.status != 404 {
+			t.Errorf("GET %s: %d, want 404", p, r.status)
+		}
+	}
+	h := auth.Header(e.owner, "GET", "/v1/group/status", e.clk.Now().Unix(), nil)
+	expect(t, e.rawDo("GET", "/v1/group/status", nil, h, nil), 404)
+}
+
+func TestCleanBasePath(t *testing.T) {
+	for in, want := range map[string]string{"": "", "/": "", "/morningissue": "/morningissue", "/morningissue/": "/morningissue", "/a/b-c_d.e/": "/a/b-c_d.e"} {
+		if got, err := server.CleanBasePath(in); err != nil || got != want {
+			t.Errorf("CleanBasePath(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"morningissue", "/a//b", "/a/../b", "/a/./b", "/a?b", "/a#b", "/a b", "/a%20b"} {
+		if got, err := server.CleanBasePath(in); err == nil {
+			t.Errorf("CleanBasePath(%q) = %q, want an error", in, got)
+		}
 	}
 }
 

@@ -43,6 +43,7 @@ Every flag can also be set by the environment variable in brackets.
 | `-registration-token` [`RELAY_REGISTRATION_TOKEN`] | none | When set, a new group can only be created with this token (the phone sends it as `X-Relay-Registration`). Set one on any relay reachable from the internet, or anyone can use it. |
 | `-ttl` [`RELAY_TTL`] | `48h` | How long packages and changes are kept. |
 | `-max-package` [`RELAY_MAX_PACKAGE`] | `512MiB` | Largest package accepted, in bytes or with `KiB`, `MiB` or `GiB`. |
+| `-base-path` [`RELAY_BASE_PATH`] | none | Serve the API under a path prefix such as `/morningissue`, for a relay that shares a site with other things. Everything outside it gets `404`. See [Under a path prefix](#under-a-path-prefix). |
 | `-quiet` [`RELAY_QUIET`] | off | Don't log each request. Errors are still logged. |
 
 Prefer the environment variable for the token, so it doesn't show in the process list.
@@ -63,12 +64,15 @@ The server's clock must be right. Requests are refused when their timestamp is m
 
 ```
 <data>/tmp/                       uploads being received
+<data>/replay                     signatures seen in the last 10 minutes
 <data>/groups/<group>/group.json  devices, the current package, pending changes
 <data>/groups/<group>/packages/   package envelopes
 <data>/groups/<group>/changes/    changes envelopes
 ```
 
 A sweeper runs every minute and deletes packages and changes older than the TTL, uploads that were never published after an hour, and groups whose phone hasn't been in touch for 90 days. The phone deletes changes as soon as it has merged them, and the package once every device has it. Deleting means removing the files.
+
+Every signed request is refused if its signature has been seen before. The relay appends each signature to `<data>/replay` before acting on the request, so a request replayed after a restart is still refused; the sweeper rewrites the file without the signatures whose timestamp the clock check would refuse anyway, which keeps it to about ten minutes of requests.
 
 Plan disk space for one package per phone (tens to hundreds of MB) plus a briefly overlapping upload when the phone publishes a new one.
 
@@ -163,3 +167,28 @@ server {
 ```
 
 Whatever the proxy, it must pass the path and query through exactly as sent, since they are part of what is signed. `proxy_pass` with no path after the address, and Caddy's `reverse_proxy`, both do. Don't redirect plain HTTP to HTTPS for this name.
+
+### Under a path prefix
+
+To serve the relay from a path on a site that has other things on it, such as `https://example.com/morningissue`, start it with `-base-path /morningissue` (or `RELAY_BASE_PATH=/morningissue`) and give the phone and the Kobo that address, path included. Both sign the full path they send, prefix and all, and the relay checks the signature over that full path and routes on what follows the prefix.
+
+So the proxy must pass the path on with the prefix still in it. In Caddy that is `handle` (not `handle_path`, which strips it):
+
+```caddyfile
+example.com {
+	handle /morningissue/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+	# … the rest of the site
+}
+```
+
+In nginx, a `location` with no path after the address in `proxy_pass`:
+
+```nginx
+location /morningissue/ {
+    proxy_pass http://127.0.0.1:8080;   # not http://127.0.0.1:8080/
+}
+```
+
+A proxy that strips the prefix makes every signed request fail with `401 "signature"`. The health check is then at `/morningissue/v1/health`.

@@ -7,14 +7,17 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tgnra/morningissue/relay/internal/auth"
@@ -54,6 +57,12 @@ type Config struct {
 	MaxPackage int64
 	// RegistrationToken, when set, is needed to create a group.
 	RegistrationToken string
+	// Replay remembers the signatures seen. Open it with auth.OpenReplayCache in the data
+	// directory, so that a replay is caught across a restart. Nil means in memory only.
+	Replay *auth.ReplayCache
+	// BasePath serves the API under a path prefix such as "/morningissue" (see CleanBasePath).
+	// Requests outside it get 404. Empty means the API is at "/".
+	BasePath string
 	// Log receives errors, and one line per request when LogRequests is set. Nil means no logging.
 	Log         *log.Logger
 	LogRequests bool
@@ -77,7 +86,11 @@ func New(cfg Config) *Server {
 	if cfg.MaxPackage <= 0 {
 		cfg.MaxPackage = DefaultMaxPackage
 	}
-	s := &Server{cfg: cfg, replay: auth.NewReplayCache(), mux: http.NewServeMux()}
+	cfg.BasePath = strings.TrimRight(cfg.BasePath, "/")
+	if cfg.Replay == nil {
+		cfg.Replay = auth.NewReplayCache()
+	}
+	s := &Server{cfg: cfg, replay: cfg.Replay, mux: http.NewServeMux()}
 	m := s.mux
 	m.HandleFunc("GET /v1/health", s.health)
 	m.HandleFunc("PUT /v1/group", s.putGroup)
@@ -97,15 +110,59 @@ func New(cfg Config) *Server {
 	return s
 }
 
-// ServeHTTP sets Date from the relay's clock on every response and logs the request.
+// CleanBasePath checks a base path such as "/morningissue" and returns it without a trailing
+// slash; "" and "/" mean none.
+func CleanBasePath(p string) (string, error) {
+	p = strings.TrimRight(p, "/")
+	if p == "" {
+		return "", nil
+	}
+	if p[0] != '/' || strings.ContainsAny(p, "?#% \t\r\n") || path.Clean(p) != p {
+		return "", fmt.Errorf("bad base path %q: it should look like /morningissue", p)
+	}
+	return p, nil
+}
+
+// ServeHTTP sets Date from the relay's clock on every response, routes on the path below the
+// base path, and logs the request. Signatures are still checked over the request target exactly
+// as sent, base path included.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	w.Header().Set("Date", s.cfg.Now().UTC().Format(http.TimeFormat))
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-	s.mux.ServeHTTP(rec, r)
+	if routed, ok := s.belowBase(r); ok {
+		s.mux.ServeHTTP(rec, routed)
+	} else {
+		writeError(rec, http.StatusNotFound, "not_found")
+	}
 	if s.cfg.Log != nil && s.cfg.LogRequests {
 		s.cfg.Log.Printf("%s %s %d %dB %s", r.Method, r.URL.Path, rec.status, rec.written, time.Since(start).Round(time.Millisecond))
 	}
+}
+
+// belowBase returns the request with the base path taken off its URL, leaving RequestURI as
+// sent. ok is false when the path isn't under the base path.
+func (s *Server) belowBase(r *http.Request) (*http.Request, bool) {
+	base := s.cfg.BasePath
+	if base == "" {
+		return r, true
+	}
+	p, ok := strings.CutPrefix(r.URL.Path, base)
+	if !ok || !strings.HasPrefix(p, "/") {
+		return nil, false
+	}
+	u := *r.URL
+	u.Path = p
+	// RawPath is only set when the path has escapes; the base path has none.
+	if rp, ok := strings.CutPrefix(u.RawPath, base); ok {
+		u.RawPath = rp
+	} else {
+		u.RawPath = ""
+	}
+	r2 := new(http.Request)
+	*r2 = *r
+	r2.URL = &u
+	return r2, true
 }
 
 type statusRecorder struct {
@@ -125,8 +182,7 @@ func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter 
 // Sweep deletes expired data and forgets expired signatures.
 func (s *Server) Sweep() error {
 	now := s.cfg.Now()
-	s.replay.Prune(now)
-	return s.cfg.Store.Sweep(now, s.cfg.TTL)
+	return errors.Join(s.replay.Prune(now), s.cfg.Store.Sweep(now, s.cfg.TTL))
 }
 
 // RunSweeper calls Sweep every SweepInterval until ctx is done.
@@ -258,8 +314,7 @@ func (s *Server) finish(w http.ResponseWriter, r *http.Request, c *caller, k kin
 		return false
 	}
 	now := s.cfg.Now()
-	if s.replay.Seen(c.creds.Kid, c.creds.Sig, now) {
-		unauthorized(w, "replay")
+	if !s.checkReplay(w, c.creds, now) {
 		return false
 	}
 	var err error
@@ -271,6 +326,21 @@ func (s *Server) finish(w http.ResponseWriter, r *http.Request, c *caller, k kin
 	if errors.Is(err, store.ErrNotFound) {
 		// Removed between preauth and now.
 		unauthorized(w, "unknown")
+		return false
+	}
+	if err != nil {
+		s.internal(w, err)
+		return false
+	}
+	return true
+}
+
+// checkReplay records a verified signature and refuses it if it was seen before. It writes the
+// response itself when it fails.
+func (s *Server) checkReplay(w http.ResponseWriter, creds auth.Credentials, now time.Time) bool {
+	seen, err := s.replay.Seen(creds.Kid, creds.Sig, creds.TS, now)
+	if seen {
+		unauthorized(w, "replay")
 		return false
 	}
 	if err != nil {
@@ -337,8 +407,26 @@ func (h *headWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// errBody is a failure to read the request body, as when the client goes away.
+var errBody = errors.New("reading the body")
+
+// bodyReader keeps the error from reading the body, to tell it from a failure to write it.
+type bodyReader struct {
+	r   io.Reader
+	err error
+}
+
+func (b *bodyReader) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if err != nil && err != io.EOF {
+		b.err = err
+	}
+	return n, err
+}
+
 // receive streams the body to a temporary file, hashing it, up to limit bytes. On success the
-// caller owns the file at path.
+// caller owns the file at path. A failure to read the body is errBody; any other error is the
+// relay's own.
 func (s *Server) receive(r *http.Request, limit int64) (*received, error) {
 	if r.ContentLength > limit {
 		return nil, errTooLarge
@@ -356,7 +444,11 @@ func (s *Server) receive(r *http.Request, limit int64) (*received, error) {
 	}()
 	var h hash.Hash = sha256.New()
 	head := &headWriter{}
-	n, err := io.Copy(io.MultiWriter(f, h, head), io.LimitReader(r.Body, limit+1))
+	body := &bodyReader{r: r.Body}
+	n, err := io.Copy(io.MultiWriter(f, h, head), io.LimitReader(body, limit+1))
+	if body.err != nil {
+		return nil, fmt.Errorf("%w: %v", errBody, body.err)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -389,8 +481,13 @@ func (s *Server) authStream(w http.ResponseWriter, r *http.Request, k kind, limi
 		writeError(w, http.StatusRequestEntityTooLarge, "too_large")
 		return nil, nil, false
 	}
-	if err != nil {
+	if errors.Is(err, errBody) {
 		writeError(w, http.StatusBadRequest, "malformed")
+		return nil, nil, false
+	}
+	if err != nil {
+		// The relay's own failure, such as a full disk: not the client's fault.
+		s.internal(w, err)
 		return nil, nil, false
 	}
 	if !s.finish(w, r, c, k, rc.hash) {
@@ -451,8 +548,7 @@ func (s *Server) putGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.cfg.Now()
-	if s.replay.Seen(creds.Kid, creds.Sig, now) {
-		unauthorized(w, "replay")
+	if !s.checkReplay(w, creds, now) {
 		return
 	}
 	create := true

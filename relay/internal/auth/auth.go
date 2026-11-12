@@ -10,7 +10,6 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -20,7 +19,8 @@ var B64 = base64.RawURLEncoding
 const (
 	// MaxSkew is how far a request's ts may be from the relay's clock.
 	MaxSkew = 300 * time.Second
-	// ReplayWindow is how long a seen signature is remembered.
+	// ReplayWindow is how long a seen signature is remembered at least. A signature passes the
+	// skew check for at most 2 × MaxSkew, so this covers it.
 	ReplayWindow = 600 * time.Second
 )
 
@@ -105,44 +105,4 @@ func InSkew(ts int64, now time.Time) bool {
 // Verify checks c.Sig against the request in constant time.
 func Verify(key []byte, c Credentials, method, pathAndQuery string, bodyHash []byte) bool {
 	return hmac.Equal(Sign(key, method, pathAndQuery, c.TS, bodyHash), c.Sig)
-}
-
-// ReplayCache remembers signatures for ReplayWindow. It is safe for concurrent use.
-type ReplayCache struct {
-	mu   sync.Mutex
-	seen map[string]time.Time // kid|sig -> when it expires
-}
-
-func NewReplayCache() *ReplayCache {
-	return &ReplayCache{seen: make(map[string]time.Time)}
-}
-
-// Seen records the signature and reports whether it had already been seen within the window.
-func (r *ReplayCache) Seen(kid string, sig []byte, now time.Time) bool {
-	k := kid + "|" + string(sig)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if exp, ok := r.seen[k]; ok && now.Before(exp) {
-		return true
-	}
-	r.seen[k] = now.Add(ReplayWindow)
-	return false
-}
-
-// Prune forgets expired signatures.
-func (r *ReplayCache) Prune(now time.Time) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for k, exp := range r.seen {
-		if !now.Before(exp) {
-			delete(r.seen, k)
-		}
-	}
-}
-
-// Len returns the number of remembered signatures.
-func (r *ReplayCache) Len() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.seen)
 }
