@@ -6,32 +6,25 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * The wire format of the Kobo sync, protocol v1. `docs/kobo-sync.md` is the contract and these
- * classes follow it field for field; the Kobo side (`kobo/` at the repository root) parses the
- * fixtures in `docs/kobo-sync-fixtures/`, which `KoboFixturesTest` writes from them.
+ * The bodies a Kobo gets from the phone and sends back: protocol v1's manifest, edition
+ * bundle, saved shelf and events (`docs/kobo-sync.md`), which relay sync carries unchanged in
+ * its encrypted package and changes (`docs/relay-sync.md`). These classes follow the spec field
+ * for field; the Kobo side (`kobo/` at the repository root) parses the fixtures in
+ * `docs/kobo-sync-fixtures/`, which `KoboFixturesTest` writes from them.
  *
  * Times are ISO-8601 instants in UTC to the second (`2026-11-11T06:30:00Z`), dates are
  * `yyyy-MM-dd`, IDs are Room row IDs.
  */
 object KoboProtocol {
     const val VERSION = 1
-    const val APP = "morningissue"
-    const val HTTP_PORT = 47824
-    const val BEACON_PORT = 47823
 
     /** How many released editions the manifest offers. */
     const val EDITIONS_OFFERED = 3
 
-    /** How long `POST /v1/pair` waits for Allow or Deny on the Sync screen. */
-    const val PAIR_WAIT_MILLIS = 60_000L
-
-    /** Request bodies past this are refused with 413, before they are read. */
-    const val MAX_BODY_BYTES = 1 shl 20
-
-    /** A `POST /v1/events` with more events than this is refused with 413. */
+    /** A changes batch with more events than this is dropped. */
     const val MAX_EVENTS_PER_REQUEST = 500
 
-    /** Longest `deviceId` and `name` a pairing request may carry. */
+    /** Longest `deviceId` and `name` a pairing code may carry. */
     const val MAX_DEVICE_ID_CHARS = 64
     const val MAX_NAME_CHARS = 64
 
@@ -46,21 +39,7 @@ object KoboProtocol {
     }
 }
 
-@Serializable
-data class Beacon(
-    val app: String = KoboProtocol.APP,
-    val v: Int = KoboProtocol.VERSION,
-    val port: Int = KoboProtocol.HTTP_PORT,
-    val name: String,
-    val dbId: String,
-)
-
-@Serializable
-data class PairRequest(val deviceId: String, val name: String)
-
-@Serializable
-data class PairResponse(val token: String, val dbId: String)
-
+/** The manifest; a relay package's `manifest.json` adds to it and leaves out [ackedSeq] (`relay/RelayPackage.kt`). */
 @Serializable
 data class Manifest(
     val v: Int = KoboProtocol.VERSION,
@@ -70,7 +49,7 @@ data class Manifest(
     val saved: ManifestSaved,
 )
 
-/** The manifest's line for `GET /v1/saved`. */
+/** The manifest's line for the saved shelf. */
 @Serializable
 data class ManifestSaved(
     val count: Int,
@@ -89,7 +68,7 @@ data class ManifestEdition(
     val version: String,
 )
 
-/** `GET /v1/editions/{id}`. [articles] is keyed by article ID as a string, as JSON requires. */
+/** An edition bundle (v1's `GET /v1/editions/{id}`). [articles] is keyed by article ID as a string, as JSON requires. */
 @Serializable
 data class EditionBundle(
     val id: Long,
@@ -103,7 +82,7 @@ data class EditionBundle(
     val articles: Map<String, BundleArticle>,
 )
 
-/** `GET /v1/saved`: every saved article, [order] newest saved first. [articles] is keyed as in an edition. */
+/** The saved shelf (v1's `GET /v1/saved`): every saved article, [order] newest saved first. [articles] is keyed as in an edition. */
 @Serializable
 data class SavedBundle(
     val version: String,
@@ -147,9 +126,6 @@ data class BundleEngagement(
     val likedAt: String?,
 )
 
-@Serializable
-data class EventBatch(val events: List<SyncEvent>)
-
 /**
  * One thing the reader did on the Kobo. One flat shape for every type, so that an event of a
  * type this version does not know still decodes, and is skipped. [value] is a number for
@@ -166,6 +142,3 @@ data class SyncEvent(
     val ms: Long? = null,
     val at: String? = null,
 )
-
-@Serializable
-data class EventsAck(val ackedSeq: Long)

@@ -29,7 +29,7 @@ class EventMergeTest {
     fun setUp() = runTest {
         db = MorningIssueDatabase.inMemory(ApplicationProvider.getApplicationContext())
         ids = KoboTestData.seed(db)
-        db.syncPeerDao().pair(device, "Kobo Libra 2", PeerTokens.hash("token"), RELEASE)
+        db.syncPeerDao().pairRelay(device, "Kobo Libra 2", 1264, "auth", "enc", RELEASE)
         merger = KoboEventMerger(db, NOW_CLOCK)
     }
 

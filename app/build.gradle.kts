@@ -15,13 +15,17 @@ val hasReleaseSigning = listOf(
     releaseKeystoreFile, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword
 ).none { it.isNullOrBlank() }
 
-// The relay Relay sync uses until the reader sets another, and its registration token. They
-// come from a Gradle property (-P, or ~/.gradle/gradle.properties) or the environment (CI
-// secrets) and are never kept in the repository: the token only keeps bots from creating
-// groups on the relay, and a public repository would hand it to them. Empty means none.
+// The relay the Kobo sync goes through, and its registration token. The app has no setting for
+// either: they are fixed when it is built, from a Gradle property (-P, or
+// ~/.gradle/gradle.properties) or the environment (CI variables and secrets). The address
+// defaults to the project's relay when neither is set, or is empty. The token is never kept in
+// the repository: it only keeps bots from creating groups on the relay, and a public
+// repository would hand it to them. Empty means none.
 fun buildSetting(property: String, variable: String): String =
     providers.gradleProperty(property).orElse(providers.environmentVariable(variable)).getOrElse("").trim()
-val builtInRelayAddress = buildSetting("morningissue.relayAddress", "MORNINGISSUE_RELAY_ADDRESS")
+val defaultRelayAddress = "https://mirelay.tgnra.net"
+val givenRelayAddress = buildSetting("morningissue.relayAddress", "MORNINGISSUE_RELAY_ADDRESS")
+val builtInRelayAddress = givenRelayAddress.ifEmpty { defaultRelayAddress }
 val builtInRelayToken = buildSetting("morningissue.relayToken", "MORNINGISSUE_RELAY_TOKEN")
 fun kotlinString(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$") + "\""
 
@@ -113,6 +117,8 @@ android {
                 // `-PsimulationReport` (or `-PsimulationReport=<dir>`) makes the ranking simulation
                 // write a report per persona, by default to build/reports/simulation/.
                 project.findProperty("simulationReport")?.let { dir -> it.systemProperty("morningissue.simulation.report", dir) }
+                // Whether this build was given a relay address, so a test can check the default otherwise.
+                it.systemProperty("morningissue.relayAddressGiven", givenRelayAddress.isNotEmpty().toString())
             }
         }
     }

@@ -546,53 +546,15 @@
     <!-- Sync with Kobo -->
     <string name="settings_kobo">Kobo</string>
     <string name="settings_kobo_sync">Sync with Kobo</string>
-    <string name="settings_kobo_sync_detail">Sends the latest three editions to a Kobo e-reader on the same Wi-Fi, and brings back what you read, Liked and saved there.</string>
+    <string name="settings_kobo_sync_detail">Sends the latest three editions to a Kobo e-reader through the relay, and brings back what you read, Liked and saved there.</string>
     <string name="settings_kobo_open">Open</string>
     <string name="kobo_title">Sync with Kobo</string>
-    <string name="kobo_phone">This phone</string>
-    <string name="kobo_address">Address</string>
-    <string name="kobo_address_detail">The phone listens only while this screen is open. On the Kobo, choose Morning Issue from the main menu; both need to be on the same Wi-Fi. If the Kobo cannot find the phone, put this address in its config.json.</string>
-    <string name="kobo_address_value">%1$s, port %2$d</string>
-    <string name="kobo_no_wifi">Not on Wi-Fi</string>
-    <string name="kobo_status_starting">Starting…</string>
-    <string name="kobo_status_waiting">Waiting for a Kobo.</string>
-    <string name="kobo_status_no_wifi">Connect this phone to Wi-Fi, the same network as the Kobo.</string>
-    <string name="kobo_status_port_in_use">Port %1$d is in use by another app, so a Kobo cannot reach Morning Issue. Close that app and open this screen again.</string>
-    <string name="kobo_status_synced">%1$s synced at %2$s.</string>
-    <plurals name="kobo_status_synced_changes">
-        <item quantity="one">%1$s synced at %2$s, with %3$,d change from its reader.</item>
-        <item quantity="other">%1$s synced at %2$s, with %3$,d changes from its reader.</item>
-    </plurals>
-    <string name="kobo_preparing_images">Preparing images %1$,d/%2$,d</string>
-    <string name="kobo_paired">Paired Kobos</string>
-    <string name="kobo_none_paired">No Kobo is paired yet. The first time a Kobo syncs, it asks here to be allowed.</string>
-    <string name="kobo_last_synced">Last synced %1$s</string>
-    <string name="kobo_never_synced">Not synced yet</string>
-    <string name="kobo_forget">Forget</string>
-    <string name="kobo_forget_description">Forget %1$s</string>
-    <string name="kobo_pair_title">Allow %1$s to sync?</string>
-    <string name="kobo_pair_detail">It will get the latest three editions and send back what is opened, read, Liked and saved on it. Allow only a device you know.</string>
-    <string name="kobo_allow">Allow</string>
-    <string name="kobo_deny">Deny</string>
-    <string name="kobo_relay">Away from home</string>
-    <string name="kobo_relay_sync">Relay sync</string>
-    <string name="kobo_relay_sync_detail">Syncs a Kobo that is not on the same Wi-Fi, through a relay server you run. Everything the relay holds is encrypted, and deleted once used.</string>
-    <string name="kobo_relay_open">Open</string>
-    <string name="relay_title">Relay sync</string>
-    <string name="relay_server">Relay server</string>
-    <string name="relay_address">Address</string>
-    <string name="relay_address_detail">The relay’s https:// address. The phone sends it keys, so plain http is not allowed here.</string>
-    <string name="relay_address_hint">https://relay.example.org</string>
-    <string name="relay_token">Registration token</string>
-    <string name="relay_token_detail">Only if the relay asks for one before it will hold this phone’s editions.</string>
-    <string name="relay_token_hint">None</string>
-    <string name="relay_save">Save</string>
-    <string name="relay_saved">Saved.</string>
+    <string name="relay_forget">Forget</string>
+    <string name="relay_server">Relay</string>
     <string name="relay_for_kobo">On the Kobo</string>
-    <string name="relay_for_kobo_detail">Type this address in the Kobo’s Morning Issue settings, or put it in its config.json as "relay". A Kobo may use the relay’s plain http address if it has one.</string>
-    <string name="relay_for_kobo_none">Set the address above first.</string>
-    <string name="relay_devices">Kobos on the relay</string>
-    <string name="relay_none">No Kobo is paired for relay sync. Show the pairing code on the Kobo, then scan it here.</string>
+    <string name="relay_for_kobo_detail">The Kobo syncs through this relay too. Type its address in the Kobo’s Morning Issue settings, or put it in its config.json as "relay".</string>
+    <string name="relay_devices">Paired Kobos</string>
+    <string name="relay_none">No Kobo is paired yet. Show the pairing code on the Kobo, then scan it here.</string>
     <string name="relay_scan">Scan a Kobo’s code</string>
     <string name="relay_paste_hint">Or paste the code: morningissue:pair?…</string>
     <string name="relay_pair">Pair</string>
@@ -606,7 +568,7 @@
     </plurals>
     <string name="relay_keys_lost">Its keys did not survive moving this app to another phone. Scan its code again.</string>
     <string name="relay_status_unavailable">The relay could not be asked about the Kobos.</string>
-    <string name="relay_forget_description">Forget %1$s on the relay</string>
+    <string name="relay_forget_description">Forget %1$s</string>
     <string name="relay_sync">Sync</string>
     <string name="relay_publish">Publish</string>
     <string name="relay_publish_detail">Sends the latest three editions, the saved articles and their pictures. It also happens after each edition is built.</string>
@@ -626,7 +588,7 @@
         <item quantity="one">Published %2$s for 1 Kobo: %3$,d editions, %4$,d saved articles and %5$,d pictures.</item>
         <item quantity="other">Published %2$s for %1$,d Kobos: %3$,d editions, %4$,d saved articles and %5$,d pictures.</item>
     </plurals>
-    <string name="relay_result_no_devices">Nothing to publish: no Kobo is paired for relay sync.</string>
+    <string name="relay_result_no_devices">Nothing to publish: no Kobo is paired.</string>
     <string name="relay_result_nothing">Nothing new from the Kobos.</string>
     <plurals name="relay_result_collected">
         <item quantity="one">Brought back %1$,d change from the Kobos.</item>
@@ -641,7 +603,7 @@
         <item quantity="other">%1$,d batches could not be downloaded and will be tried again.</item>
     </plurals>
     <string name="relay_result_paired">%1$s is paired.</string>
-    <string name="relay_result_paired_no_address">%1$s is paired. Set the relay’s address to start syncing.</string>
+    <string name="relay_result_paired_no_address">%1$s is paired, but this app was built without a relay address.</string>
     <string name="relay_result_paired_not_told">%1$s is paired, but the relay could not be told. %2$s</string>
     <string name="relay_result_forgotten">Forgotten.</string>
     <string name="relay_result_forgotten_not_told">Forgotten here, but the relay could not be told. %1$s</string>
@@ -650,11 +612,11 @@
     <string name="relay_code_bad">That pairing code is incomplete. Show it again on the Kobo.</string>
     <string name="relay_failed_publish">Publish failed. %1$s</string>
     <string name="relay_failed_done">Done failed. %1$s</string>
-    <string name="relay_problem_no_address">Set the relay’s address first.</string>
-    <string name="relay_problem_not_https">The address must start with https://, because the phone sends the relay keys.</string>
-    <string name="relay_problem_bad_address">That does not read as an address.</string>
-    <string name="relay_problem_network">The relay could not be reached. Check the address and the connection.</string>
-    <string name="relay_problem_registration">The relay asks for a registration token, and the one set is missing or wrong.</string>
+    <string name="relay_problem_no_address">This app was built without a relay address.</string>
+    <string name="relay_problem_not_https">The relay address built into this app does not start with https://.</string>
+    <string name="relay_problem_bad_address">The relay address built into this app does not read as an address.</string>
+    <string name="relay_problem_network">The relay could not be reached. Check the connection.</string>
+    <string name="relay_problem_registration">The relay asks for a registration token, and the one built into this app is missing or wrong.</string>
     <string name="relay_problem_unauthorized">The relay did not accept this phone’s signature. Check that the phone’s clock is right.</string>
     <string name="relay_problem_too_large">The package is larger than the relay accepts.</string>
     <string name="relay_problem_too_many">The relay is holding as much as it allows. Run Done, or forget a Kobo.</string>

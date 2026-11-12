@@ -3,8 +3,6 @@ package net.tgnra.morningissue
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.net.ConnectivityManager
-import android.os.Build
-import android.provider.Settings
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import java.io.File
@@ -47,9 +45,7 @@ import net.tgnra.morningissue.edition.EditionScheduler
 import net.tgnra.morningissue.edition.ReleaseTimes
 import net.tgnra.morningissue.embedding.EmbedderAsset
 import net.tgnra.morningissue.kobo.InstallId
-import net.tgnra.morningissue.kobo.KoboImageWidths
 import net.tgnra.morningissue.kobo.KoboImages
-import net.tgnra.morningissue.kobo.KoboSync
 import net.tgnra.morningissue.relay.AndroidKeystoreWrapper
 import net.tgnra.morningissue.relay.ImagePreparer
 import net.tgnra.morningissue.relay.RelaySettings
@@ -114,10 +110,7 @@ interface AppContainer {
     /** Print now: the foreground build of an edition that was not printed in the background. */
     val editionPrinter: EditionPrinter
 
-    /** Sync with a Kobo over the local network, while the Sync screen is open; see `docs/kobo-sync.md`. */
-    val koboSync: KoboSync
-
-    /** Sync with a Kobo anywhere, through a relay server; see `docs/relay-sync.md`. */
+    /** Sync with a Kobo, through the relay server built into the app; see `docs/relay-sync.md`. */
     val relaySync: RelaySync
 
     val imageLoader: ImageLoader
@@ -245,7 +238,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
 
     override val editions: EditionRepository by lazy { RoomEditionRepository(database, editionPublisher, clock) }
 
-    /** The image preparation of the Kobo sync, shared by LAN and relay sync so that both use one cache. */
+    /** The image preparation of the Kobo sync; each package makes one, over one cache. */
     private fun newKoboImages() = KoboImages(
         storeFile = imageFiles::fileFor,
         client = { okHttpClient },
@@ -266,20 +259,6 @@ class DefaultAppContainer(context: Context) : AppContainer {
             clock = clock,
             allowLocalHttp = (appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0,
             scope = appScope,
-        )
-    }
-
-    override val koboSync: KoboSync by lazy {
-        KoboSync(
-            database = database,
-            installId = InstallId(appContext.settingsDataStore),
-            newImages = ::newKoboImages,
-            fullText = fullTextFetcher,
-            widths = KoboImageWidths(appContext.settingsDataStore),
-            clock = clock,
-            deviceName = {
-                Settings.Global.getString(appContext.contentResolver, Settings.Global.DEVICE_NAME)?.takeIf { it.isNotBlank() } ?: Build.MODEL
-            },
         )
     }
 }

@@ -18,7 +18,8 @@ import net.tgnra.morningissue.data.db.EditionItemRow
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 
 /**
- * Builds what a Kobo downloads: the manifest, an edition's bundle and the saved list (`docs/kobo-sync.md`).
+ * Builds what a Kobo downloads in a relay package: the manifest, the edition bundles and the saved
+ * list, in protocol v1's formats (`docs/kobo-sync.md`).
  * Pure; [KoboExporter] reads the database and hands the rows in.
  */
 object BundleExport {
@@ -101,7 +102,7 @@ object BundleExport {
     /**
      * Every image a Kobo fetches for [articles]: each lead `imageUrl` and every `img` block's
      * `url`, in order of first appearance, without repeats. The Kobo fetches the same list
-     * (`kobo/src/model.rs`), so this is what the phone prepares ahead of it.
+     * (`kobo/src/model.rs`), so these are the pictures a package carries.
      */
     fun imageUrls(articles: Collection<BundleArticle>): List<String> {
         val urls = LinkedHashSet<String>()
@@ -135,18 +136,6 @@ object BundleExport {
 
 /** Reads the database for [BundleExport]. Only ever exports editions released by now. */
 class KoboExporter(private val database: MorningIssueDatabase, private val clock: Clock) {
-    /** The manifest for a device whose merged events reach [ackedSeq]. */
-    suspend fun manifest(dbId: String, ackedSeq: Long): Manifest = database.withReadTransaction {
-        val editions = database.editionDao().getRecentReleased(clock.instant(), KoboProtocol.EDITIONS_OFFERED)
-        val saved = savedBundle()
-        Manifest(
-            dbId = dbId,
-            ackedSeq = ackedSeq,
-            editions = editions.map { BundleExport.manifestEntry(it, BundleExport.encode(bundle(it))) },
-            saved = ManifestSaved(count = saved.order.size, version = saved.version),
-        )
-    }
-
     /**
      * Everything a relay package carries, read in one transaction so that the manifest and the
      * bodies agree: the manifest (its `ackedSeq` left at 0, since a package has one per
@@ -173,23 +162,12 @@ class KoboExporter(private val database: MorningIssueDatabase, private val clock
 
     class Snapshot(
         val manifest: Manifest,
-        /** Edition ID to its encoded bundle, as `GET /v1/editions/{id}` sends it. */
+        /** Edition ID to its encoded bundle, as v1's `GET /v1/editions/{id}` sent it. */
         val editions: List<Pair<Long, String>>,
-        /** As `GET /v1/saved` sends it. */
+        /** As v1's `GET /v1/saved` sent it. */
         val saved: String,
         val articles: List<BundleArticle>,
     )
-
-    /** `GET /v1/saved`, encoded. */
-    suspend fun saved(): String = KoboProtocol.json.encodeToString(database.withReadTransaction { savedBundle() })
-
-    /** The editions the manifest offers and the saved list, for the pre-warm: every article a Kobo can be sent. */
-    suspend fun offeredArticles(): Offered = database.withReadTransaction {
-        val editions = database.editionDao().getRecentReleased(clock.instant(), KoboProtocol.EDITIONS_OFFERED).map { bundle(it) }
-        Offered(editions.flatMap { it.articles.values }, savedBundle().articles.values.toList())
-    }
-
-    class Offered(val editions: List<BundleArticle>, val saved: List<BundleArticle>)
 
     private suspend fun savedBundle(): SavedBundle {
         val rows = database.articleDao().getSaved()
@@ -200,12 +178,6 @@ class KoboExporter(private val database: MorningIssueDatabase, private val clock
         articleIds.distinct().chunked(ArticleSignalDao.MAX_IDS)
             .flatMap { database.archiveDao().contents(it) }
             .associate { it.articleId to it.blocksJson }
-
-    /** The encoded bundle of edition [id], or null when there is none or it is not released yet. */
-    suspend fun edition(id: Long): String? = database.withReadTransaction {
-        val edition = database.editionDao().getById(id)?.takeIf { !it.releaseAt.isAfter(clock.instant()) }
-        edition?.let { BundleExport.encode(bundle(it)) }
-    }
 
     private suspend fun bundle(edition: EditionEntity): EditionBundle {
         val items = database.editionDao().getItems(edition.id)

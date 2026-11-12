@@ -1,6 +1,8 @@
 package net.tgnra.morningissue.relay
 
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.ByteArrayInputStream
@@ -59,6 +61,8 @@ class RelaySyncTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var db: MorningIssueDatabase
     private lateinit var ids: Seeded
+    private lateinit var store: DataStore<Preferences>
+    private lateinit var installId: InstallId
     private lateinit var settings: RelaySettings
     private lateinit var sync: RelaySync
     private val keys = FakeKeyWrapper()
@@ -85,8 +89,14 @@ class RelaySyncTest {
         server.start()
         db = MorningIssueDatabase.inMemory(ApplicationProvider.getApplicationContext())
         ids = KoboTestData.seed(db)
-        settings = RelaySettings(PreferenceDataStoreFactory.create(scope = scope) { File(folder.root, "settings.preferences_pb") })
-        settings.setAddress(server.url("/").toString())
+        store = PreferenceDataStoreFactory.create(scope = scope) { File(folder.root, "settings.preferences_pb") }
+        installId = InstallId(PreferenceDataStoreFactory.create(scope = scope) { File(folder.root, "id.preferences_pb") })
+        useRelay(server.url("/").toString())
+    }
+
+    /** As though the app were built with [address] and [token]: the settings store, and so the owner secret, stay. */
+    private fun useRelay(address: String, token: String = "") {
+        settings = RelaySettings(store, address, token)
         sync = newSync()
     }
 
@@ -94,7 +104,7 @@ class RelaySyncTest {
         database = db,
         settings = settings,
         keys = keys,
-        installId = InstallId(PreferenceDataStoreFactory.create(scope = scope) { File(folder.root, "id.preferences_pb") }),
+        installId = installId,
         client = { okhttp3.OkHttpClient() },
         newImages = {
             ImagePreparer { url, widths ->
@@ -274,22 +284,18 @@ class RelaySyncTest {
     }
 
     @Test
-    fun aKoboPairedBothWaysSharesOneAckedSeq() = runBlocking {
-        // Paired over Wi-Fi first, then for the relay: one row, one ackedSeq.
-        db.syncPeerDao().pair("b7e2", "Kobo Libra 2", net.tgnra.morningissue.kobo.PeerTokens.hash("token"), NOW)
+    fun eventsAlreadyMergedAreSkipped() = runBlocking {
+        // Events 1-2 were merged before: over Wi-Fi by an earlier version, or from a batch sent twice.
         pairBoth()
+        db.syncPeerDao().setAcked("b7e2", 2, NOW)
         val pageView = SyncEvent(seq = 2, type = "pageView", editionId = ids.edition, page = 1, ms = 5_000, at = BundleExport.time(NOW))
-        // Events 1-2 arrive over Wi-Fi, as KoboRoutes merges them.
-        net.tgnra.morningissue.kobo.KoboEventMerger(db, clock).merge("b7e2", listOf(opened(1, ids.lead, 1), pageView))
         // The same events come again through the relay, with one new one.
         relay.deviceUploads(libra.auth, "1-3", changes(libra, "1-3", "b7e2", opened(1, ids.lead, 1), pageView, opened(3, ids.top, 3)))
         val done = sync.done() as RelayResult.Collected
         assertEquals(1, done.events)
         assertEquals(3L, db.syncPeerDao().get("b7e2")!!.ackedSeq)
-        // The page time was added once, not twice.
-        assertEquals(5_000L, db.editionDao().getPageViews(ids.edition).single().msVisible)
-        val peer = db.syncPeerDao().get("b7e2")!!
-        assertTrue(peer.isLanPaired && peer.isRelayPaired)
+        // The page time from before was not added again.
+        assertTrue(db.editionDao().getPageViews(ids.edition).isEmpty())
     }
 
     @Test
@@ -323,7 +329,7 @@ class RelaySyncTest {
         val first = sync.pair(libra.code()) as RelayResult.Paired
         assertEquals(RelayProblem.REGISTRATION_REFUSED, first.problem)
         assertEquals(RelayProblem.REGISTRATION_REFUSED, (sync.publish() as RelayResult.Failed).problem)
-        settings.setRegistrationToken("letmein")
+        useRelay(server.url("/").toString(), token = "letmein")
         assertTrue(sync.publish() is RelayResult.Published)
         assertEquals(setOf(libra.kid), relay.devices.keys)
     }
@@ -367,7 +373,7 @@ class RelaySyncTest {
 
     @Test
     fun aPlainHttpRelayIsRefused() = runBlocking {
-        settings.setAddress("http://relay.example")
+        useRelay("http://relay.example")
         sync.pair(libra.code())
         assertEquals(RelayProblem.NOT_HTTPS, (sync.publish() as RelayResult.Failed).problem)
         assertTrue(relay.requests.isEmpty())

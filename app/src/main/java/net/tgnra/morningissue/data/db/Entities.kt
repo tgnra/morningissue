@@ -414,26 +414,32 @@ class DiscoveryCandidateEntity(
 )
 
 /**
- * A Kobo paired with this phone for local-network sync (`docs/kobo-sync.md`). [deviceId] is
- * the random ID the Kobo made for itself; [tokenHash] is the SHA-256 of the token it was given,
- * in hex, so the token itself is never stored. [ackedSeq] is the highest event `seq` from this
- * device that has been merged; it is written in the same transaction as the events it covers.
+ * A Kobo paired with this phone for relay sync (`docs/relay-sync.md`). [deviceId] is the random
+ * ID the Kobo made for itself. [ackedSeq] is the highest event `seq` from this device that has
+ * been merged; it is written in the same transaction as the events it covers.
+ *
+ * Earlier versions also paired Kobos over the local network (`docs/kobo-sync.md`), which the
+ * app no longer does. A row they left keeps its [tokenHash] and [ackedSeq], so that the Kobo
+ * keeps its place when its relay code is scanned; until then nothing reads it.
  */
 @Entity(tableName = "sync_peer")
 data class SyncPeerEntity(
     @PrimaryKey val deviceId: String,
     /** What the Kobo calls itself ("Kobo Libra 2"), as the Sync screen shows it. */
     val name: String,
-    /** SHA-256 of its local-network token; null when it is paired only through a relay. */
+    /**
+     * SHA-256 of the token an earlier version gave it for local-network sync; never checked, and
+     * null for every Kobo paired since.
+     */
     val tokenHash: String?,
     /**
-     * The highest event `seq` from this device the phone has merged, whichever way the events
-     * came: a Kobo has one event log, which it may send over the local network or a relay.
+     * The highest event `seq` from this device the phone has merged: a Kobo has one event log,
+     * whichever way an earlier version took its events.
      */
     @ColumnInfo(defaultValue = "0") val ackedSeq: Long = 0,
-    /** When the reader last allowed this device; pairing again replaces the token and this. */
+    /** When the row was made: the first pairing, of either kind. */
     val pairedAt: Instant,
-    /** When the device last fetched the manifest or sent events; null until its first sync. */
+    /** When events from the device were last merged; null until then. */
     val lastSyncAt: Instant? = null,
     /** The short side of its screen from its relay pairing code; null when it is not paired for relay sync. */
     val relayWidth: Int? = null,
@@ -444,6 +450,5 @@ data class SyncPeerEntity(
     /** When its relay pairing code was last scanned. */
     val relayPairedAt: Instant? = null,
 ) {
-    val isLanPaired: Boolean get() = tokenHash != null
     val isRelayPaired: Boolean get() = relayAuthKey != null && relayEncKey != null
 }
