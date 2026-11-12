@@ -252,6 +252,47 @@ class RelaySyncTest {
     }
 
     @Test
+    fun reUploadedAndOverlappingBatchesMergeEachEventOnce() = runBlocking {
+        pairBoth()
+        // After a 401 unknown, or 48 hours without an ack, a Kobo uploads its unacknowledged events
+        // again, in new batches whose ranges overlap the old ones.
+        relay.deviceUploads(libra.auth, "1-2", changes(libra, "1-2", "b7e2", opened(1, ids.lead, 1), opened(2, ids.top, 2)))
+        relay.deviceUploads(libra.auth, "2-3", changes(libra, "2-3", "b7e2", opened(2, ids.top, 2), opened(3, ids.section, 3)))
+        var done = sync.done() as RelayResult.Collected
+        assertEquals(2, done.batches)
+        assertEquals(3, done.events)
+        assertEquals(3L, db.syncPeerDao().get("b7e2")!!.ackedSeq)
+        // A later re-upload of everything since 1 adds only what is new.
+        relay.deviceUploads(
+            libra.auth, "1-4",
+            changes(libra, "1-4", "b7e2", opened(1, ids.lead, 1), opened(2, ids.top, 2), opened(3, ids.section, 3), opened(4, ids.index, 4)),
+        )
+        done = sync.done() as RelayResult.Collected
+        assertEquals(1, done.events)
+        assertEquals(4L, db.syncPeerDao().get("b7e2")!!.ackedSeq)
+        assertTrue(relay.changes.isEmpty())
+    }
+
+    @Test
+    fun aKoboPairedBothWaysSharesOneAckedSeq() = runBlocking {
+        // Paired over Wi-Fi first, then for the relay: one row, one ackedSeq.
+        db.syncPeerDao().pair("b7e2", "Kobo Libra 2", net.tgnra.morningissue.kobo.PeerTokens.hash("token"), NOW)
+        pairBoth()
+        val pageView = SyncEvent(seq = 2, type = "pageView", editionId = ids.edition, page = 1, ms = 5_000, at = BundleExport.time(NOW))
+        // Events 1-2 arrive over Wi-Fi, as KoboRoutes merges them.
+        net.tgnra.morningissue.kobo.KoboEventMerger(db, clock).merge("b7e2", listOf(opened(1, ids.lead, 1), pageView))
+        // The same events come again through the relay, with one new one.
+        relay.deviceUploads(libra.auth, "1-3", changes(libra, "1-3", "b7e2", opened(1, ids.lead, 1), pageView, opened(3, ids.top, 3)))
+        val done = sync.done() as RelayResult.Collected
+        assertEquals(1, done.events)
+        assertEquals(3L, db.syncPeerDao().get("b7e2")!!.ackedSeq)
+        // The page time was added once, not twice.
+        assertEquals(5_000L, db.editionDao().getPageViews(ids.edition).single().msVisible)
+        val peer = db.syncPeerDao().get("b7e2")!!
+        assertTrue(peer.isLanPaired && peer.isRelayPaired)
+    }
+
+    @Test
     fun batchesThatDoNotReadAreDropped() = runBlocking {
         pairBoth()
         // Encrypted with the other device's key; seq outside its range; and not an envelope at all.
