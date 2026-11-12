@@ -34,6 +34,7 @@ fn opts(beacon_port: u16, beacon_secs: u64, phone: Option<String>) -> Options {
         image_width: 1264,
         image_workers: 3,
         progress: None,
+        relay: None,
     }
 }
 

@@ -38,6 +38,19 @@ pub enum SyncError {
     Protocol(String),
     Storage(String),
     TimedOut,
+    /// The relay address in Settings or `config.json` cannot be used.
+    RelayAddress(String),
+    /// The relay answered `401 unknown`: the phone has not listed this Kobo yet (`waiting`,
+    /// it never has) or no longer does.
+    RelayUnpaired { waiting: bool },
+    /// The relay could not be reached, or the connection broke.
+    Relay(String),
+    /// The relay answered something unexpected.
+    RelayProtocol(String),
+    /// The relay's certificate was not valid at the time the Kobo believes.
+    Clock,
+    /// The package or its key failed to decrypt or made no sense; nothing was installed.
+    Integrity(String),
 }
 
 impl fmt::Display for SyncError {
@@ -55,6 +68,14 @@ impl fmt::Display for SyncError {
             SyncError::Protocol(e) => write!(f, "The phone sent something unexpected ({e})."),
             SyncError::Storage(e) => write!(f, "Could not save to the Kobo ({e})."),
             SyncError::TimedOut => write!(f, "Sync took too long and stopped."),
+            SyncError::RelayAddress(e) => write!(f, "The relay address can\u{2019}t be used: {e}"),
+            SyncError::RelayUnpaired { waiting: true } => write!(f, "Waiting for the phone: scan the code in Settings, Pair through relay, with Morning Issue on the phone."),
+            SyncError::RelayUnpaired { waiting: false } => write!(f, "Not paired: the phone no longer accepts this Kobo. Pair through relay again in Settings."),
+            SyncError::Relay(e) if e.contains("timed out") || e.contains("temporarily unavailable") => write!(f, "The relay took too long to answer."),
+            SyncError::Relay(_) => write!(f, "The relay could not be reached."),
+            SyncError::RelayProtocol(e) => write!(f, "The relay sent something unexpected ({e})."),
+            SyncError::Clock => write!(f, "The Kobo\u{2019}s clock is wrong, so the relay\u{2019}s certificate can\u{2019}t be checked. Sync once with the phone on the same Wi-Fi to set it."),
+            SyncError::Integrity(e) => write!(f, "The relay\u{2019}s package failed its check and was not installed ({e})."),
         }
     }
 }
@@ -76,6 +97,8 @@ pub struct SyncReport {
     pub saved_fetched: bool,
     pub images_fetched: usize,
     pub images_missing: usize,
+    /// Through the relay rather than with the phone on the LAN.
+    pub via_relay: bool,
 }
 
 /// What a running sync has got to, so the reader can show what arrived.
@@ -117,6 +140,9 @@ pub struct Options {
     pub image_workers: usize,
     /// Told as each part arrives, on the sync's own threads.
     pub progress: Option<ProgressFn>,
+    /// The relay's address (`http[s]://host[:port][/prefix]`): typed in Settings, else
+    /// `relay` in `config.json`. Used once this Kobo has a relay secret.
+    pub relay: Option<String>,
 }
 
 impl Options {
@@ -134,6 +160,7 @@ impl Options {
             image_width: 1264,
             image_workers: 3,
             progress: None,
+            relay: c.relay.clone(),
         }
     }
 }
@@ -222,6 +249,7 @@ impl<'a> Session<'a> {
                 if let Some(date) = r.header("Date").and_then(time::parse_http_date) {
                     // Half-second midpoint of the header's whole seconds.
                     self.state.clock_offset_ms = date + 500 - time::system_millis();
+                    crate::tls::set_clock_offset(self.state.clock_offset_ms);
                 }
                 Ok(r)
             }
@@ -419,6 +447,7 @@ impl<'a> Session<'a> {
         self.state.last_address = Some(self.address.clone());
         self.state.last_sync_at = Some(time::system_millis());
         self.state.last_error = None;
+        self.state.last_via_relay = false;
         self.store.save_state(&self.state).map_err(SyncError::from)?;
         self.store.collect_garbage(&keep).map_err(SyncError::from)?;
         Ok(())
@@ -490,7 +519,36 @@ impl<'a> Session<'a> {
 }
 
 /// Runs a whole sync. The outcome (time or error) is saved in the state for the home screen.
+///
+/// With a relay address and a relay secret (the pairing code has been shown), the relay is
+/// tried first (`docs/relay-sync.md`). If that fails for any reason, the phone is looked for
+/// on this network as before; if it is not there either, the relay's error is the one kept.
+/// Without both, only the LAN is used.
 pub fn sync(store: &Store, opts: &Options) -> Result<SyncReport, SyncError> {
+    store.ensure_dirs()?;
+    let state = store.load_state()?;
+    let Some(relay) = opts.relay.as_deref().filter(|_| state.relay_secret.is_some()) else {
+        return sync_lan(store, opts);
+    };
+    let relay_error = match crate::relay::sync(store, opts, relay) {
+        Ok(r) => return Ok(r),
+        Err(e) => e,
+    };
+    eprintln!("relay sync failed: {relay_error}; looking for the phone on this network");
+    match sync_lan(store, opts) {
+        Ok(r) => Ok(r),
+        Err(SyncError::NoPhone) => {
+            let mut s = store.load_state()?;
+            s.last_error = Some(relay_error.to_string());
+            store.save_state(&s)?;
+            Err(relay_error)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// A sync with the phone on the LAN (`docs/kobo-sync.md`).
+fn sync_lan(store: &Store, opts: &Options) -> Result<SyncReport, SyncError> {
     store.ensure_dirs()?;
     let started = Instant::now();
     let mut state = store.load_state()?;

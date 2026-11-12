@@ -31,6 +31,10 @@ pub struct Manifest {
     pub editions: Vec<ManifestEdition>,
     /// Left out by a phone that has no saved shelf to offer.
     pub saved: Option<SavedInfo>,
+    /// A relay package's manifest: `"relay/1"`.
+    pub protocol: Option<String>,
+    /// A relay package's manifest: the `ackedSeq` of every paired relay device, by `deviceId`.
+    pub acked: BTreeMap<String, i64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
