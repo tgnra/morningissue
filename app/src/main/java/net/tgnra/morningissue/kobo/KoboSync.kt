@@ -119,7 +119,8 @@ class KoboSync(
     private val state = MutableStateFlow(KoboSyncStatus())
     val status: StateFlow<KoboSyncStatus> = state.asStateFlow()
 
-    val peers: Flow<List<SyncPeerEntity>> = database.syncPeerDao().observeAll()
+    /** Devices paired for local-network sync; relay pairings are on the Relay screen. */
+    val peers: Flow<List<SyncPeerEntity>> = database.syncPeerDao().observeLan()
 
     suspend fun forget(deviceId: String) = database.syncPeerDao().forget(deviceId)
 
@@ -235,23 +236,11 @@ class KoboSync(
         }
     }
 
-    /** The reader's full-text fetch for each saved article whose page has not been fetched yet. */
-    private suspend fun fetchSavedText() = coroutineScope {
-        val articles = database.articleDao()
-        val permits = Semaphore(TEXT_PARALLEL)
-        for (row in articles.getSaved()) {
-            val id = row.article.id
-            if (articles.getContentSource(id) == ContentSource.FETCHED) continue
-            launch { permits.withPermit { fullText.ensureFullText(id) } }
-        }
-    }
+    private suspend fun fetchSavedText() = fetchSavedFullText(database, fullText)
 
     private companion object {
         /** Images prepared at once ahead of the Kobo; downloads among them are capped by `KoboImageConfig.PARALLEL_FETCHES`. */
         const val PREWARM_PARALLEL = 4
-
-        /** Saved articles' pages fetched at once, as the edition prefetch does. */
-        const val TEXT_PARALLEL = 4
     }
 
     /** A manifest fetch right after events keeps the count of the events, so the line reads as one sync. */
@@ -259,5 +248,22 @@ class KoboSync(
         val previous = current.last
         val merged = activity.eventsMerged ?: previous?.takeIf { it.deviceId == activity.deviceId }?.eventsMerged
         current.copy(last = activity.copy(eventsMerged = merged))
+    }
+}
+
+/** Saved articles' pages fetched at once, as the edition prefetch does. */
+private const val TEXT_PARALLEL = 4
+
+/**
+ * The reader's full-text fetch for each saved article whose page has not been fetched yet, so
+ * that the saved shelf a Kobo gets, over the local network or a relay, carries the full text.
+ */
+suspend fun fetchSavedFullText(database: MorningIssueDatabase, fullText: FullTextFetcher) = coroutineScope {
+    val articles = database.articleDao()
+    val permits = Semaphore(TEXT_PARALLEL)
+    for (row in articles.getSaved()) {
+        val id = row.article.id
+        if (articles.getContentSource(id) == ContentSource.FETCHED) continue
+        launch { permits.withPermit { fullText.ensureFullText(id) } }
     }
 }

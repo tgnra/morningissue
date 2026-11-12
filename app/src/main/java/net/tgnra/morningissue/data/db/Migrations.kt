@@ -153,6 +153,33 @@ object Migrations {
         }
     }
 
+    /**
+     * Version 6 lets a Kobo pair for relay sync (`docs/relay-sync.md`) in the same `sync_peer`
+     * row as its local-network pairing, since both send the one event log and share its
+     * `ackedSeq`.
+     *
+     * - `tokenHash` may now be null, for a device paired only through a relay. SQLite cannot
+     *   drop a NOT NULL constraint in place, so the table is rebuilt and every row copied.
+     * - Four new columns hold the relay pairing: `relayWidth`, `relayAuthKey` and `relayEncKey`
+     *   (wrapped with a Keystore key) and `relayPairedAt`. They start null: version 5 had no
+     *   relay sync, so every existing device stays paired over the local network only.
+     */
+    val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+        override suspend fun migrate(connection: SQLiteConnection) {
+            connection.execSQL(
+                "CREATE TABLE IF NOT EXISTS `_new_sync_peer` (`deviceId` TEXT NOT NULL, `name` TEXT NOT NULL, `tokenHash` TEXT, " +
+                    "`ackedSeq` INTEGER NOT NULL DEFAULT 0, `pairedAt` INTEGER NOT NULL, `lastSyncAt` INTEGER, `relayWidth` INTEGER, " +
+                    "`relayAuthKey` TEXT, `relayEncKey` TEXT, `relayPairedAt` INTEGER, PRIMARY KEY(`deviceId`))",
+            )
+            connection.execSQL(
+                "INSERT INTO `_new_sync_peer` (`deviceId`, `name`, `tokenHash`, `ackedSeq`, `pairedAt`, `lastSyncAt`) " +
+                    "SELECT `deviceId`, `name`, `tokenHash`, `ackedSeq`, `pairedAt`, `lastSyncAt` FROM `sync_peer`",
+            )
+            connection.execSQL("DROP TABLE `sync_peer`")
+            connection.execSQL("ALTER TABLE `_new_sync_peer` RENAME TO `sync_peer`")
+        }
+    }
+
     /** Every step, for `RoomDatabase.Builder.addMigrations`. */
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
 }

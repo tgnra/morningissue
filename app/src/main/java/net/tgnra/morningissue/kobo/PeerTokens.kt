@@ -38,7 +38,7 @@ object PeerTokens {
         val presented = digest(token)
         var found: SyncPeerEntity? = null
         for (peer in peers) {
-            val stored = unhex(peer.tokenHash) ?: continue
+            val stored = peer.tokenHash?.let(::unhex) ?: continue
             if (MessageDigest.isEqual(presented, stored) && found == null) found = peer
         }
         return found

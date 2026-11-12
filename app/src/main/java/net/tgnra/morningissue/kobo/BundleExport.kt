@@ -147,6 +147,39 @@ class KoboExporter(private val database: MorningIssueDatabase, private val clock
         )
     }
 
+    /**
+     * Everything a relay package carries, read in one transaction so that the manifest and the
+     * bodies agree: the manifest (its `ackedSeq` left at 0, since a package has one per
+     * device), each offered edition's encoded bundle by ID, the encoded saved list, and every
+     * article in them, for the images.
+     */
+    suspend fun snapshot(dbId: String): Snapshot = database.withReadTransaction {
+        val editions = database.editionDao().getRecentReleased(clock.instant(), KoboProtocol.EDITIONS_OFFERED)
+        val bundles = editions.map { it to bundle(it) }
+        val encoded = bundles.map { (edition, bundle) -> edition to BundleExport.encode(bundle) }
+        val saved = savedBundle()
+        Snapshot(
+            manifest = Manifest(
+                dbId = dbId,
+                ackedSeq = 0,
+                editions = encoded.map { (edition, text) -> BundleExport.manifestEntry(edition, text) },
+                saved = ManifestSaved(count = saved.order.size, version = saved.version),
+            ),
+            editions = encoded.map { (edition, text) -> edition.id to text },
+            saved = KoboProtocol.json.encodeToString(saved),
+            articles = bundles.flatMap { it.second.articles.values } + saved.articles.values,
+        )
+    }
+
+    class Snapshot(
+        val manifest: Manifest,
+        /** Edition ID to its encoded bundle, as `GET /v1/editions/{id}` sends it. */
+        val editions: List<Pair<Long, String>>,
+        /** As `GET /v1/saved` sends it. */
+        val saved: String,
+        val articles: List<BundleArticle>,
+    )
+
     /** `GET /v1/saved`, encoded. */
     suspend fun saved(): String = KoboProtocol.json.encodeToString(database.withReadTransaction { savedBundle() })
 

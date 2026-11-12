@@ -424,10 +424,26 @@ data class SyncPeerEntity(
     @PrimaryKey val deviceId: String,
     /** What the Kobo calls itself ("Kobo Libra 2"), as the Sync screen shows it. */
     val name: String,
-    val tokenHash: String,
+    /** SHA-256 of its local-network token; null when it is paired only through a relay. */
+    val tokenHash: String?,
+    /**
+     * The highest event `seq` from this device the phone has merged, whichever way the events
+     * came: a Kobo has one event log, which it may send over the local network or a relay.
+     */
     @ColumnInfo(defaultValue = "0") val ackedSeq: Long = 0,
     /** When the reader last allowed this device; pairing again replaces the token and this. */
     val pairedAt: Instant,
     /** When the device last fetched the manifest or sent events; null until its first sync. */
     val lastSyncAt: Instant? = null,
-)
+    /** The short side of its screen from its relay pairing code; null when it is not paired for relay sync. */
+    val relayWidth: Int? = null,
+    /** Its relay auth key, wrapped with the Keystore key (`relay/KeyWrapper`), in base64url. */
+    val relayAuthKey: String? = null,
+    /** Its relay enc key, wrapped the same way. */
+    val relayEncKey: String? = null,
+    /** When its relay pairing code was last scanned. */
+    val relayPairedAt: Instant? = null,
+) {
+    val isLanPaired: Boolean get() = tokenHash != null
+    val isRelayPaired: Boolean get() = relayAuthKey != null && relayEncKey != null
+}
