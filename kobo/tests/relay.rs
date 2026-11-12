@@ -1,0 +1,396 @@
+//! The device order of `docs/relay-sync.md` against an in-process fake relay over a real
+//! socket, plain and TLS.
+
+mod fakephone;
+mod fakerelay;
+
+use fakerelay::{package, Edition, FakeRelay, Picture};
+use morningissue::crypto::{self, DeviceKeys};
+use morningissue::store::{Event, Store};
+use morningissue::sync::{sync, Options, SyncError};
+use serde_json::{json, Value};
+use std::path::PathBuf;
+use std::time::Duration;
+
+fn home(name: &str) -> PathBuf {
+    let p = std::env::temp_dir().join(format!("mi-relay-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&p);
+    std::fs::create_dir_all(&p).unwrap();
+    p
+}
+
+fn opts(relay: &str) -> Options {
+    Options {
+        beacon_wait: Duration::ZERO,
+        beacon_port: 1,
+        request_timeout: Duration::from_secs(5),
+        image_timeout: Duration::from_secs(5),
+        pair_timeout: Duration::from_secs(5),
+        deadline: Duration::from_secs(60),
+        configured_phone: None,
+        device_name: "Kobo Libra 2".into(),
+        manual_phone: None,
+        image_width: 1264,
+        image_workers: 3,
+        progress: None,
+        relay: Some(relay.into()),
+    }
+}
+
+/// A Kobo that has shown its pairing code: its store and its keys.
+fn kobo(name: &str) -> (Store, DeviceKeys) {
+    let store = Store::new(home(name));
+    let secret = store.ensure_relay_secret().unwrap();
+    // Made once.
+    assert_eq!(store.ensure_relay_secret().unwrap(), secret);
+    let keys = DeviceKeys::from_secret(&crypto::b64url_decode(&secret).unwrap());
+    (store, keys)
+}
+
+fn bundle(id: i64, headline: &str, images: &[&str]) -> Value {
+    let blocks: Vec<Value> = images.iter().map(|u| json!({"t": "img", "url": u})).chain([json!({"t": "p", "text": {"text": "Body.", "spans": []}})]).collect();
+    json!({
+        "id": id, "date": "2026-11-11", "kind": "MORNING", "number": id, "length": "STANDARD",
+        "releaseAt": "2026-11-11T06:30:00Z", "finishedAt": null,
+        "pages": [{"page": 1, "items": [{"articleId": id * 100, "slot": 0, "kind": "LEAD", "section": null, "reason": "r"}]}],
+        "articles": {(id * 100).to_string(): {
+            "feedTitle": "Feed", "title": headline, "author": null, "url": "https://example.com/a",
+            "publishedAt": "2026-11-10T20:00:00Z", "summary": "S", "imageUrl": images.first(), "wordCount": 300,
+            "blocks": blocks,
+            "engagement": {"openedAt": null, "readFraction": 0.0, "readAt": null, "savedAt": null, "likedAt": null}
+        }}
+    })
+}
+
+/// A picture `w` wide, with noise so it does not compress away.
+fn picture(w: u32, seed: u32) -> Vec<u8> {
+    let img = image::GrayImage::from_fn(w, w / 2, |x, y| image::Luma([((x * 7 + y * 13 + seed) ^ (x * y + seed)) as u8]));
+    let mut out = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+    out
+}
+
+fn event(seq: i64) -> Event {
+    Event { seq, kind: "opened".into(), article_id: Some(100), edition_id: None, page: None, value: None, ms: None, at: "2026-11-12T07:00:00Z".into() }
+}
+
+fn seqs(store: &Store) -> Vec<i64> {
+    store.read_events().unwrap().iter().map(|e| e.seq).collect()
+}
+
+fn editions() -> Vec<Edition> {
+    vec![(2, "v2".into(), bundle(2, "Second", &["http://img/a.png", "http://img/missing.webp"])), (1, "v1".into(), bundle(1, "First", &["http://img/b.png"]))]
+}
+
+fn pictures() -> Vec<Picture> {
+    vec![
+        // a.png at three widths; this Kobo's is there.
+        ("http://img/a.png".into(), 600, picture(600, 1), "image/png".into()),
+        ("http://img/a.png".into(), 1264, picture(1264, 2), "image/png".into()),
+        ("http://img/a.png".into(), 1600, picture(1600, 3), "image/png".into()),
+        // b.png only wider, and narrower: the wider one is scaled down.
+        ("http://img/b.png".into(), 1072, picture(1072, 4), "image/png".into()),
+        ("http://img/b.png".into(), 1404, picture(1404, 5), "image/png".into()),
+    ]
+}
+
+fn saved() -> Value {
+    json!({"version": "s1", "order": [100], "articles": {"100": bundle(1, "First", &[])["articles"]["100"]}})
+}
+
+fn id(n: u8) -> String {
+    crypto::b64url(&[n; 16])
+}
+
+#[test]
+fn a_package_is_installed_and_events_stay_until_a_package_acknowledges_them() {
+    let relay = FakeRelay::start();
+    let (store, keys) = kobo("install");
+    relay.list(&keys);
+    for s in 1..=3 {
+        store.append_event(&event(s)).unwrap();
+    }
+    relay.publish(&id(1), &package("db-A", &editions(), Some(("s1", saved())), &pictures(), json!({})), &[&keys]);
+
+    let r = sync(&store, &opts(&relay.url())).unwrap();
+    assert!(r.via_relay);
+    assert_eq!((r.events_sent, r.editions_fetched.clone(), r.saved_fetched), (3, vec![2, 1], true));
+    assert_eq!((r.images_fetched, r.images_missing), (2, 1));
+    // The events went as one encrypted batch, with this Kobo's deviceId.
+    let state = store.load_state().unwrap();
+    let changes = relay.changes_of(&keys);
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].0, "1-3");
+    assert_eq!(changes[0].1["deviceId"], state.device_id.as_str());
+    assert_eq!(changes[0].1["events"].as_array().unwrap().iter().map(|e| e["seq"].as_i64().unwrap()).collect::<Vec<_>>(), vec![1, 2, 3]);
+    // Not acknowledged yet: still kept, and still applied on top.
+    assert_eq!(seqs(&store), vec![1, 2, 3]);
+    assert_eq!((state.relay_uploaded_seq, state.relay_package.clone(), state.relay_fetched), (3, Some(id(1)), true));
+    assert!(state.last_via_relay && state.last_error.is_none() && state.relay_seen);
+    assert_eq!(state.db_id.as_deref(), Some("db-A"));
+    assert_eq!(state.edition_order, vec![2, 1]);
+    assert_eq!(relay.with(|s| s.fetched.clone()), vec![(keys.kid.clone(), id(1))]);
+    // This Kobo's width as it is; the wider one scaled down to it.
+    assert_eq!(store.read_image("http://img/a.png").unwrap(), picture(1264, 2));
+    let b = image::load_from_memory(&store.read_image("http://img/b.png").unwrap()).unwrap();
+    assert_eq!((b.width(), b.height()), (1264, 632));
+    assert_eq!(store.load_saved().order, vec![100]);
+    assert!(store.load_bundle(2).is_some() && store.load_bundle(1).is_some());
+    // Nothing left of the download.
+    assert_eq!(std::fs::read_dir(store.relay_dir()).unwrap().count(), 0);
+
+    // Nothing new: no upload, no download, the events stay.
+    let puts = relay.count("PUT /v1/changes/");
+    let r = sync(&store, &opts(&relay.url())).unwrap();
+    assert_eq!((r.events_sent, r.editions_fetched.len()), (0, 0));
+    assert_eq!(relay.count("PUT /v1/changes/"), puts);
+    assert_eq!(relay.count("GET /v1/packages/"), 1);
+    assert_eq!(seqs(&store), vec![1, 2, 3]);
+
+    // The phone merged them: the next package's acked covers 1 to 3.
+    store.append_event(&event(4)).unwrap();
+    let mut eds = editions();
+    eds[0].1 = "v2b".into();
+    relay.publish(&id(2), &package("db-A", &eds, Some(("s1", saved())), &pictures(), json!({ state.device_id.clone(): 3 })), &[&keys]);
+    let r = sync(&store, &opts(&relay.url())).unwrap();
+    assert_eq!((r.events_sent, r.editions_fetched.clone()), (1, vec![2]));
+    assert_eq!(relay.changes_of(&keys).iter().map(|c| c.0.clone()).collect::<Vec<_>>(), vec!["1-3", "4-4"]);
+    assert_eq!(seqs(&store), vec![4]);
+    let state = store.load_state().unwrap();
+    assert_eq!((state.relay_acked, state.relay_uploaded_seq), (3, 4));
+    assert!(store.next_seq(&state).unwrap() >= 5);
+}
+
+#[test]
+fn events_go_in_batches_of_500_and_wait_when_the_relay_is_full() {
+    let relay = FakeRelay::start();
+    let (store, keys) = kobo("batches");
+    relay.list(&keys);
+    for s in 1..=600 {
+        store.append_event(&event(s)).unwrap();
+    }
+    relay.with(|s| s.max_pending = 1);
+    let r = sync(&store, &opts(&relay.url())).unwrap();
+    assert_eq!(r.events_sent, 500);
+    assert_eq!(store.load_state().unwrap().relay_uploaded_seq, 500);
+    relay.with(|s| s.max_pending = 64);
+    let r = sync(&store, &opts(&relay.url())).unwrap();
+    assert_eq!(r.events_sent, 100);
+    let batches: Vec<(String, usize)> = relay.changes_of(&keys).iter().map(|(b, v)| (b.clone(), v["events"].as_array().unwrap().len())).collect();
+    assert_eq!(batches, vec![("1-500".into(), 500), ("501-600".into(), 100)]);
+    assert_eq!(seqs(&store).len(), 600);
+}
+
+#[test]
+fn a_dropped_download_resumes_with_range() {
+    let relay = FakeRelay::start();
+    let (store, keys) = kobo("resume");
+    relay.list(&keys);
+    relay.publish(&id(3), &package("db-A", &editions(), None, &pictures(), json!({})), &[&keys]);
+    let total = relay.with(|s| s.package.as_ref().unwrap().envelope.len());
+    let half = total / 2;
+    relay.with(|s| s.cut_download_after = Some(half));
+    match sync(&store, &opts(&relay.url())) {
+        Err(SyncError::Relay(_)) => {}
+        other => panic!("{other:?}"),
+    }
+    // Kept for next time, with nothing installed from it.
+    let part = store.relay_dir().join(format!("{}.mir", id(3)));
+    assert_eq!(std::fs::metadata(&part).unwrap().len() as usize, half);
+    assert!(store.load_state().unwrap().editions.is_empty());
+    assert!(store.load_state().unwrap().last_error.unwrap().contains("relay"));
+
+    let r = sync(&store, &opts(&relay.url())).unwrap();
+    assert_eq!(r.editions_fetched, vec![2, 1]);
+    assert_eq!(relay.with(|s| s.ranges.clone()), vec![None, Some(format!("bytes={half}-"))]);
+    assert!(!part.exists());
+}
+
+#[test]
+fn a_new_phone_database_wipes_everything() {
+    let relay = FakeRelay::start();
+    let (store, keys) = kobo("wipe");
+    relay.list(&keys);
+    relay.publish(&id(4), &package("db-A", &editions(), Some(("s1", saved())), &pictures(), json!({})), &[&keys]);
+    sync(&store, &opts(&relay.url())).unwrap();
+    store.save_liked(&[100]).unwrap();
+    assert!(store.has_image("http://img/a.png"));
+
+    // The phone was reinstalled (and this Kobo paired with it again).
+    relay.publish(&id(5), &package("db-B", &[(7, "x".into(), bundle(7, "Seventh", &[]))], None, &[], json!({})), &[&keys]);
+    let r = sync(&store, &opts(&relay.url())).unwrap();
+    assert!(r.wiped);
+    let state = store.load_state().unwrap();
+    assert_eq!((state.db_id.as_deref(), state.edition_order.clone()), (Some("db-B"), vec![7]));
+    assert!(store.load_bundle(1).is_none() && store.load_bundle(2).is_none());
+    assert!(!store.has_image("http://img/a.png"));
+    assert!(store.load_liked().is_empty());
+    assert!(store.load_saved().order.is_empty());
+}
+
+#[test]
+fn an_unlisted_kobo_waits_for_the_phone_and_sends_its_events_again_once_listed() {
+    let relay = FakeRelay::start();
+    let (store, keys) = kobo("unpaired");
+    store.append_event(&event(1)).unwrap();
+    store.append_event(&event(2)).unwrap();
+    // Scanned, but the phone has not sent the device list yet.
+    match sync(&store, &opts(&relay.url())) {
+        Err(SyncError::RelayUnpaired { waiting: true }) => {}
+        other => panic!("{other:?}"),
+    }
+    let state = store.load_state().unwrap();
+    assert!(state.relay_unpaired && !state.relay_seen);
+    assert!(state.last_error.unwrap().starts_with("Waiting for the phone"));
+
+    relay.list(&keys);
+    sync(&store, &opts(&relay.url())).unwrap();
+    let state = store.load_state().unwrap();
+    assert!(!state.relay_unpaired && state.relay_seen);
+    assert_eq!(state.relay_uploaded_seq, 2);
+
+    // The phone drops this Kobo, and the relay its pending changes.
+    relay.unlist(&keys);
+    match sync(&store, &opts(&relay.url())) {
+        Err(SyncError::RelayUnpaired { waiting: false }) => {}
+        other => panic!("{other:?}"),
+    }
+    let state = store.load_state().unwrap();
+    assert!(state.relay_unpaired);
+    assert!(state.last_error.unwrap().starts_with("Not paired"));
+    assert_eq!(state.relay_uploaded_seq, 0);
+    assert_eq!(seqs(&store), vec![1, 2]);
+
+    // Paired again with the same code: the events go again.
+    relay.list(&keys);
+    let r = sync(&store, &opts(&relay.url())).unwrap();
+    assert_eq!(r.events_sent, 2);
+    assert_eq!(relay.changes_of(&keys).iter().map(|c| c.0.clone()).collect::<Vec<_>>(), vec!["1-2"]);
+}
+
+#[test]
+fn a_wrong_clock_is_put_right_from_the_date_header_and_the_request_retried() {
+    let relay = FakeRelay::start();
+    let (store, keys) = kobo("skew");
+    relay.list(&keys);
+    relay.with(|s| s.skew_s = 3600);
+    relay.publish(&id(6), &package("db-A", &editions(), None, &[], json!({})), &[&keys]);
+    sync(&store, &opts(&relay.url())).unwrap();
+    assert_eq!(relay.with(|s| s.refused.clone()), vec!["skew".to_string()]);
+    let offset = store.load_state().unwrap().clock_offset_ms;
+    assert!((offset - 3_600_000).abs() < 3_000, "{offset}");
+    // The same requests again, in the same second, are signed afresh: never a replay.
+    sync(&store, &opts(&relay.url())).unwrap();
+    sync(&store, &opts(&relay.url())).unwrap();
+    assert_eq!(relay.with(|s| s.refused.clone()), vec!["skew".to_string()]);
+}
+
+#[test]
+fn a_tampered_package_is_not_installed() {
+    let relay = FakeRelay::start();
+    let (store, keys) = kobo("tamper");
+    relay.list(&keys);
+    relay.publish(&id(7), &package("db-A", &editions(), None, &pictures(), json!({})), &[&keys]);
+    relay.with(|s| {
+        let env = &mut s.package.as_mut().unwrap().envelope;
+        let n = env.len();
+        env[n - 40] ^= 0x10;
+    });
+    match sync(&store, &opts(&relay.url())) {
+        Err(SyncError::Integrity(_)) => {}
+        other => panic!("{other:?}"),
+    }
+    assert!(store.load_state().unwrap().editions.is_empty());
+    assert!(store.load_bundle(2).is_none());
+    assert_eq!(std::fs::read_dir(store.relay_dir()).unwrap().count(), 0, "neither the download nor the plaintext kept");
+    assert!(relay.with(|s| s.fetched.is_empty()));
+    // A key wrapped for another device does not open either.
+    let other = DeviceKeys::from_secret(&[9; 32]);
+    relay.publish(&id(8), &package("db-A", &editions(), None, &[], json!({})), &[&other]);
+    relay.with(|s| {
+        let p = s.package.as_mut().unwrap();
+        let k = p.keys.remove(&other.kid).unwrap();
+        p.keys.insert(keys.kid.clone(), k);
+    });
+    assert!(matches!(sync(&store, &opts(&relay.url())), Err(SyncError::Integrity(_))));
+    // A good one installs.
+    relay.publish(&id(9), &package("db-A", &editions(), None, &pictures(), json!({})), &[&keys]);
+    assert_eq!(sync(&store, &opts(&relay.url())).unwrap().editions_fetched, vec![2, 1]);
+}
+
+#[test]
+fn the_phone_on_the_lan_is_used_when_the_relay_cannot_be_reached() {
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let (store, _) = kobo("fallback");
+    let phone = fakephone::FakePhone::start("db-A");
+    phone.with(|s| s.editions = vec![(5, "v".into(), bundle(5, "Fifth", &[]))]);
+    let mut o = opts(&format!("http://127.0.0.1:{closed}"));
+    o.manual_phone = Some(phone.address.clone());
+    let r = sync(&store, &o).unwrap();
+    assert!(!r.via_relay);
+    assert_eq!(r.editions_fetched, vec![5]);
+    assert!(!store.load_state().unwrap().last_via_relay);
+    // Without a relay secret the relay is not tried at all.
+    let plain = Store::new(home("no-secret"));
+    let mut o = opts("http://127.0.0.1:9");
+    o.manual_phone = Some(phone.address.clone());
+    assert!(!sync(&plain, &o).unwrap().via_relay);
+}
+
+/// A CA and a `localhost` certificate it signed, valid from `not_before` (year).
+fn certificates(not_before: i32) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
+    let ca_key = KeyPair::generate().unwrap();
+    let mut ca = CertificateParams::new(Vec::<String>::new()).unwrap();
+    ca.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    let ca = ca.self_signed(&ca_key).unwrap();
+    let leaf_key = KeyPair::generate().unwrap();
+    let mut leaf = CertificateParams::new(vec!["localhost".to_string()]).unwrap();
+    leaf.not_before = rcgen::date_time_ymd(not_before, 1, 1);
+    leaf.not_after = rcgen::date_time_ymd(not_before + 50, 1, 1);
+    let leaf = leaf.signed_by(&leaf_key, &ca, &ca_key).unwrap();
+    (ca.der().to_vec(), leaf.der().to_vec(), leaf_key.serialize_der())
+}
+
+#[test]
+fn an_https_relay_is_reached_over_tls_and_a_certificate_from_the_future_blames_the_clock() {
+    let (ca, leaf, key) = certificates(2020);
+    morningissue::tls::add_trusted_root(ca);
+    let relay = FakeRelay::start_tls(vec![leaf], key);
+    assert!(relay.url().starts_with("https://localhost:"));
+    let (store, keys) = kobo("tls");
+    relay.list(&keys);
+    store.append_event(&event(1)).unwrap();
+    relay.publish(&id(10), &package("db-A", &editions(), None, &pictures(), json!({})), &[&keys]);
+    let r = sync(&store, &opts(&relay.url())).unwrap();
+    assert_eq!((r.events_sent, r.editions_fetched.clone()), (1, vec![2, 1]));
+    // Plain HTTP to a TLS port fails; it is not silently sent in the clear.
+    let mut plain = opts(&relay.url().replace("https://", "http://"));
+    plain.request_timeout = Duration::from_secs(2);
+    assert!(sync(&store, &plain).is_err());
+
+    // Not valid until 2100: the Kobo's time (however far behind) is the suspect.
+    let (ca, leaf, key) = certificates(2100);
+    morningissue::tls::add_trusted_root(ca);
+    let future = FakeRelay::start_tls(vec![leaf], key);
+    let (store, keys) = kobo("tls-future");
+    future.list(&keys);
+    match sync(&store, &opts(&future.url())) {
+        Err(SyncError::Clock) => {}
+        other => panic!("{other:?}"),
+    }
+    assert!(store.load_state().unwrap().last_error.unwrap().contains("clock is wrong"));
+}
+
+#[test]
+fn relay_addresses() {
+    use morningissue::relay::parse_address;
+    assert_eq!(parse_address("relay.example.org").unwrap(), "https://relay.example.org");
+    assert_eq!(parse_address("192.168.1.9:8080").unwrap(), "http://192.168.1.9:8080");
+    assert_eq!(parse_address("http://relay.example.org:8080/").unwrap(), "http://relay.example.org:8080");
+    assert_eq!(parse_address("HTTPS://Relay.Example.org:443").unwrap(), "https://relay.example.org");
+    assert!(parse_address("").is_err());
+    assert!(parse_address("ftp://x").is_err());
+    let uri = morningissue::relay::pair_uri("AAEC-_", "b7e2", "Kobo Libra 2", 1264);
+    assert_eq!(uri, "morningissue:pair?v=1&s=AAEC-_&d=b7e2&n=Kobo%20Libra%202&w=1264");
+}

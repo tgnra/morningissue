@@ -8,6 +8,9 @@ use std::path::Path;
 pub struct Config {
     /// `host:port` of the phone, for networks that drop broadcasts.
     pub phone: Option<String>,
+    /// The relay's address, `http[s]://host[:port]`, for relay sync. One typed in Settings
+    /// comes first.
+    pub relay: Option<String>,
     /// The name the phone shows when asked to allow pairing.
     pub name: Option<String>,
     /// How long `sync` listens for the phone's beacon, in seconds.
@@ -49,6 +52,7 @@ impl Default for Config {
     fn default() -> Config {
         Config {
             phone: None,
+            relay: None,
             name: None,
             beacon_seconds: 10,
             beacon_port: 47823,

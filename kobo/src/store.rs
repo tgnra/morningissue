@@ -37,6 +37,29 @@ pub struct State {
     /// Phone clock minus Kobo clock in milliseconds, from the phone's `Date` header. Added to
     /// event times so they are true UTC even when the Kobo's clock is off.
     pub clock_offset_ms: i64,
+    /// Relay sync (`docs/relay-sync.md`): the device secret `S`, base64url. Made once, when
+    /// Pair through relay is first opened, and never dropped by a state write; only Reset
+    /// erases it.
+    pub relay_secret: Option<String>,
+    /// The highest event `seq` uploaded to the relay as changes. Uploaded events stay in
+    /// `events.jsonl` until a package's `acked` covers them.
+    pub relay_uploaded_seq: i64,
+    /// When (true time, ms) the oldest upload that no package has acknowledged yet was made.
+    /// After the relay's 48 hours they are uploaded again.
+    pub relay_unacked_since: Option<i64>,
+    /// The ID of the package last installed.
+    pub relay_package: Option<String>,
+    /// `POST …/fetched` was answered for that package.
+    pub relay_fetched: bool,
+    /// `acked[deviceId]` in that package's manifest.
+    pub relay_acked: i64,
+    /// A signed request to the relay has been accepted since the secret was made.
+    pub relay_seen: bool,
+    /// The relay's last answer was `401 unknown`: the phone does not (or no longer) list
+    /// this Kobo.
+    pub relay_unpaired: bool,
+    /// The last sync that finished went through the relay.
+    pub last_via_relay: bool,
 }
 
 /// One line of `events.jsonl`, in the shape `POST /v1/events` sends.
@@ -173,8 +196,51 @@ impl Store {
     pub fn save_state(&self, state: &State) -> io::Result<()> {
         let _guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
         self.ensure_dirs()?;
+        // A sync thread's copy of the state may predate the relay secret the reader just
+        // made for the pairing code; the secret must survive that copy being saved.
+        let kept;
+        let state = if state.relay_secret.is_none() {
+            match self.read_state_file().and_then(|s| s.relay_secret) {
+                Some(secret) => {
+                    kept = State { relay_secret: Some(secret), ..state.clone() };
+                    &kept
+                }
+                None => state,
+            }
+        } else {
+            state
+        };
         let bytes = serde_json::to_vec_pretty(state).map_err(io::Error::other)?;
         atomic_write(&self.state_path(), &bytes)
+    }
+
+    fn read_state_file(&self) -> Option<State> {
+        fs::read(self.state_path()).ok().and_then(|b| serde_json::from_slice(&b).ok())
+    }
+
+    /// The relay secret `S` (base64url), made from the kernel's random source the first time.
+    pub fn ensure_relay_secret(&self) -> io::Result<String> {
+        let state = self.load_state()?;
+        if let Some(s) = state.relay_secret {
+            return Ok(s);
+        }
+        let _guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self.read_state_file().unwrap_or(state);
+        if let Some(s) = state.relay_secret {
+            return Ok(s);
+        }
+        let secret = crate::crypto::b64url(&crate::crypto::random::<32>()?);
+        state.relay_secret = Some(secret.clone());
+        state.relay_seen = false;
+        state.relay_unpaired = false;
+        let bytes = serde_json::to_vec_pretty(&state).map_err(io::Error::other)?;
+        atomic_write(&self.state_path(), &bytes)?;
+        Ok(secret)
+    }
+
+    /// Where a relay package is downloaded and decrypted.
+    pub fn relay_dir(&self) -> PathBuf {
+        self.data().join("relay")
     }
 
     pub fn load_bundle(&self, id: i64) -> Option<Bundle> {

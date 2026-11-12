@@ -1,5 +1,9 @@
 # The Kobo build links with the lld that ships with Rust and musl's self-contained CRT and libc,
-# so no C cross-compiler is needed.
+# so no GCC cross toolchain is needed. The only C and assembly in the build is ring's (for TLS
+# to relays), which clang compiles for the target directly.
 [target.armv7-unknown-linux-musleabihf]
 linker = "rust-lld"
 rustflags = ["-C", "link-self-contained=yes", "-C", "target-feature=+crt-static"]
+
+[env]
+CC_armv7_unknown_linux_musleabihf = "clang"

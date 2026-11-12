@@ -168,17 +168,30 @@ morningissue          the binary
 launch.sh             run by NickelMenu
 wifi-off.sh           turns Wi-Fi off (run by launch.sh on exit, and by the reader before sleep and after a sync on Wi-Fi it turned on)
 wifi-on.sh            turns Wi-Fi on and joins a network saved in Nickel's settings (run by the reader for Turn on Wi-Fi and sync)
-config.json           optional overrides (phone address, …)
+config.json           optional overrides (phone address, relay address as "relay", …)
 fonts/                bundled fonts and their licences
 data/state.json       deviceId, token, dbId, last address, next seq, per-edition versions,
-                      last sync result, clock offset from the phone's Date header
+                      last sync result, clock offset from the last Date header (phone or
+                      relay); for relay sync (docs/relay-sync.md): the device secret S
+                      (relaySecret, made when the pairing code is first shown, erased only
+                      by Reset), the highest seq uploaded (relayUploadedSeq) and since when
+                      uploads have waited for an ack (relayUnackedSince), the last package
+                      installed (relayPackage, relayFetched) and its acked[deviceId]
+                      (relayAcked), whether the relay has accepted this Kobo (relaySeen) or
+                      last answered 401 unknown (relayUnpaired), and lastViaRelay
+data/settings.json    what Settings changes, including a typed phone address and relay
+                      address (relayAddress)
 data/editions/<id>.json
 data/saved.json       the last GET /v1/saved (unsent `saved` events are applied on top when
                       it is loaded: a Kobo Save lists the article at once, an unsave drops it)
 data/liked.json       article IDs Liked on this Kobo, oldest first, at most 2000; erased
                       with the rest when the phone's dbId changes
 data/images/<sha256 of url>.img
-data/events.jsonl     unsent events, one JSON object per line, appended and fsynced
+data/events.jsonl     unsent events, one JSON object per line, appended and fsynced. With relay
+                      sync, events already uploaded stay here (and are applied on top) until
+                      a package's acked covers them
+data/relay/           a relay package while it downloads (<id>.mir, resumed with Range) and
+                      is decrypted (<id>.zip); emptied once it is installed
 data/launch.log       what launch.sh and the binary print, for diagnosing a device
 data/panic.txt        the last panic's thread, place and message, quoted by launch.sh after a crash
 ```
@@ -196,3 +209,5 @@ NickelMenu's main menu has an entry **Morning Issue**, which:
 5. When the reader exits, or crashes, the launcher tears Wi-Fi down to the state Nickel expects after a boot (`wifi-off.sh`, shared with the reader's sleep), and restarts Nickel the same way KOReader's launcher does, with Nickel's output on `/dev/null`. A crash is logged with its exit code or signal and the reader's panic message; the reader is not restarted. The launcher's lock (`/tmp/morningissue.lock`, holding its PID) is always released, and a lock whose launcher is gone is taken over, so the menu entry always works again.
 
 Events recorded while reading are sent at the next sync, which can be in the same session.
+
+With a relay address (typed in Settings or `"relay"` in `config.json`) and the pairing code shown once, each sync tries the relay first (`docs/relay-sync.md`) and falls back to the steps above when it fails; the relay's error is kept only if the phone isn't found either.

@@ -412,6 +412,19 @@ fn walk(size: &Size) -> Vec<Step> {
     s.push(mark("42-keypad-typed"));
     s.push(tap_on("KeyOk"));
     s.push(mark("43-settings-typed"));
+    // Relay sync: the address on the keyboard, then the pairing code.
+    s.push(tap_on("RelayTyped"));
+    s.push(mark("44-relay-keyboard"));
+    s.push(tap_on("KeyText(\"https://\")"));
+    for c in "relay.ex".chars() {
+        s.push(tap_on(&format!("KeyChar({c:?})")));
+    }
+    s.push(mark("45-relay-keyboard-typed"));
+    s.push(tap_on("KeyOk"));
+    s.push(mark("46-settings-relay"));
+    s.push(tap_on("OpenPair"));
+    s.push(mark("47-pair"));
+    s.push(tap_on("Back"));
     s.push(tap_on("Back"));
     s.push(tap_on("OpenSaved"));
     s.push(mark("50-saved"));
@@ -447,6 +460,19 @@ fn screens_at_every_size() {
         let o = run(&format!("{}/walk", size.name), size, &Setup::default(), walk(size));
         eprintln!("{}: {} refreshes, {} events, pictures in {}", size.name, o.refreshes.len(), o.events.len(), o.out.display());
         assert!(o.out.join("57-saved-after-unsave.png").exists());
+        // The relay address typed, and the pairing code drawn so a camera can read it.
+        let store = Store::new(&o.home);
+        let settings: Value = serde_json::from_slice(&std::fs::read(store.settings_path()).unwrap()).unwrap();
+        assert_eq!(settings["relayAddress"], "https://relay.ex");
+        let state = store.load_state().unwrap();
+        let secret = state.relay_secret.clone().expect("the secret is made for the code");
+        let shot = image::open(o.out.join("47-pair.png")).unwrap().to_luma8();
+        let mut prepared = rqrr::PreparedImage::prepare(shot);
+        let grids = prepared.detect_grids();
+        assert_eq!(grids.len(), 1, "one code on the pairing screen");
+        let (_, text) = grids[0].decode().unwrap();
+        let w = size.w.min(size.h);
+        assert_eq!(text, morningissue::relay::pair_uri(&secret, &state.device_id, &Config::default().device_name(), w as u32));
         // The first frame and every change of screen flash; page turns mostly don't.
         assert_eq!(o.refreshes[0].0, Refresh::Full);
         assert!(o.refreshes.iter().filter(|r| r.0 == Refresh::Partial).count() >= 6, "{:?}", o.refreshes);
@@ -723,6 +749,9 @@ fn orientation_from_settings_and_sensor() {
         mark("04-still-portrait-inverted"),
         tap_on("OpenSettings"),
         mark("05-settings"),
+        // Orientation is on the second page of Settings.
+        tap_on("Next"),
+        mark("05-settings-page-2"),
         // Landscape, the way the sensor last said the Kobo is held.
         tap_on("SetOrientation(Landscape)"),
         mark("06-settings-landscape"),
