@@ -1,6 +1,7 @@
 package net.tgnra.morningissue
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.net.ConnectivityManager
 import android.os.Build
 import android.provider.Settings
@@ -49,6 +50,10 @@ import net.tgnra.morningissue.kobo.InstallId
 import net.tgnra.morningissue.kobo.KoboImageWidths
 import net.tgnra.morningissue.kobo.KoboImages
 import net.tgnra.morningissue.kobo.KoboSync
+import net.tgnra.morningissue.relay.AndroidKeystoreWrapper
+import net.tgnra.morningissue.relay.ImagePreparer
+import net.tgnra.morningissue.relay.RelaySettings
+import net.tgnra.morningissue.relay.RelaySync
 import net.tgnra.morningissue.sync.CandidateFetcher
 import net.tgnra.morningissue.sync.FeedDiscovery
 import net.tgnra.morningissue.sync.FeedFetcher
@@ -111,6 +116,9 @@ interface AppContainer {
 
     /** Sync with a Kobo over the local network, while the Sync screen is open; see `docs/kobo-sync.md`. */
     val koboSync: KoboSync
+
+    /** Sync with a Kobo anywhere, through a relay server; see `docs/relay-sync.md`. */
+    val relaySync: RelaySync
 
     val imageLoader: ImageLoader
     val clock: Clock
@@ -237,18 +245,35 @@ class DefaultAppContainer(context: Context) : AppContainer {
 
     override val editions: EditionRepository by lazy { RoomEditionRepository(database, editionPublisher, clock) }
 
+    /** The image preparation of the Kobo sync, shared by LAN and relay sync so that both use one cache. */
+    private fun newKoboImages() = KoboImages(
+        storeFile = imageFiles::fileFor,
+        client = { okHttpClient },
+        cacheDirectory = File(appContext.cacheDir, "kobo-images"),
+        originals = CoilDiskOriginals { imageLoader.diskCache },
+    )
+
+    override val relaySync: RelaySync by lazy {
+        RelaySync(
+            database = database,
+            settings = RelaySettings(appContext.settingsDataStore),
+            keys = AndroidKeystoreWrapper(),
+            installId = InstallId(appContext.settingsDataStore),
+            client = { okHttpClient },
+            newImages = { newKoboImages().let { images -> ImagePreparer(images::prepare) } },
+            fullText = fullTextFetcher,
+            cacheDirectory = appContext.cacheDir,
+            clock = clock,
+            allowLocalHttp = (appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0,
+            scope = appScope,
+        )
+    }
+
     override val koboSync: KoboSync by lazy {
         KoboSync(
             database = database,
             installId = InstallId(appContext.settingsDataStore),
-            newImages = {
-                KoboImages(
-                    storeFile = imageFiles::fileFor,
-                    client = { okHttpClient },
-                    cacheDirectory = File(appContext.cacheDir, "kobo-images"),
-                    originals = CoilDiskOriginals { imageLoader.diskCache },
-                )
-            },
+            newImages = ::newKoboImages,
             fullText = fullTextFetcher,
             widths = KoboImageWidths(appContext.settingsDataStore),
             clock = clock,

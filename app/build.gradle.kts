@@ -141,6 +141,11 @@ dependencies {
     implementation(libs.readability4j)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    // Scanning a Kobo's relay pairing code, without Google Play services.
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

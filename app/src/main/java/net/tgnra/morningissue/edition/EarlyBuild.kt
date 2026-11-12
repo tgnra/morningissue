@@ -24,6 +24,7 @@ import net.tgnra.morningissue.data.settings.SettingsRepository
 import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.engine.schedule
 import net.tgnra.morningissue.model.EditionPage
+import net.tgnra.morningissue.relay.RelayWorker
 import net.tgnra.morningissue.sync.FeedSyncer
 import net.tgnra.morningissue.sync.FullTextFetcher
 import net.tgnra.morningissue.sync.FullTextResult
@@ -137,7 +138,7 @@ data class EarlyBuildOutcome(
 
 /**
  * The work of `EarlyBuildWorker`, kept apart from WorkManager so it can be tested directly:
- * final sync, build, prefetch, then schedule the next run. Each stage is isolated: a failed or
+ * final sync, build, prefetch, queue relay sync's Publish, then schedule the next run. Each stage is isolated: a failed or
  * slow sync does not stop the build, a failed prefetch does not undo it, and the next run is
  * scheduled whatever happened (except on cancellation, when WorkManager reruns the job itself).
  *
@@ -173,6 +174,12 @@ class EarlyBuild(
     private val prefetchTimeout: Duration = Duration.ofMinutes(4),
     /** The device's current time zone; not taken from [clock], whose zone is fixed at process start. */
     private val zone: () -> ZoneId = ZoneId::systemDefault,
+    /**
+     * The final stage, after the prefetch and before the next run is scheduled: in the app it
+     * queues relay sync's Publish (`relay/RelayWorker`). Isolated like the others: whatever
+     * it throws is ignored, so a relay problem never fails the build.
+     */
+    private val afterBuild: suspend (EarlyBuildOutcome) -> Unit = {},
 ) {
     /**
      * Runs every stage and returns what happened; it only throws on cancellation, or if the
@@ -197,6 +204,13 @@ class EarlyBuild(
             throw e
         } catch (e: Exception) {
             outcome = outcome.copy(error = e)
+        }
+        try {
+            afterBuild(outcome)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Relay sync is a passenger: the edition is built whatever happens to it.
         }
         scheduleNext()
         return outcome
@@ -289,6 +303,7 @@ class EarlyBuild(
                 },
                 clock = container.clock,
                 settings = container.settings,
+                afterBuild = { RelayWorker.enqueuePublish(context) },
             )
         }
     }

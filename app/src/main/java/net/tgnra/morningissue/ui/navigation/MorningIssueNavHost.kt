@@ -21,6 +21,7 @@ import net.tgnra.morningissue.ui.reader.ReaderScreen
 import net.tgnra.morningissue.ui.saved.SavedScreen
 import net.tgnra.morningissue.ui.search.SearchScreen
 import net.tgnra.morningissue.ui.settings.KoboSyncScreen
+import net.tgnra.morningissue.ui.settings.RelaySyncScreen
 import net.tgnra.morningissue.ui.settings.SettingsScreen
 import net.tgnra.morningissue.ui.sources.SourcePageScreen
 import net.tgnra.morningissue.ui.sources.SourcesScreen
@@ -36,7 +37,7 @@ import net.tgnra.morningissue.ui.theme.MorningIssueTheme
  *            ├─ Search ── Reader
  *            ├─ Saved / Liked ── Reader
  *            ├─ Sources ── Source page, Subscriptions desk, Find sources ── Reader, Passed
- *            └─ Settings ── Sync with Kobo
+ *            └─ Settings ── Sync with Kobo ── Relay sync
  * ```
  *
  * Screens never see the controller; they get one callback per way out.
@@ -146,7 +147,10 @@ fun MorningIssueNavHost(
             SettingsScreen(onBack = back, onOpenKoboSync = { navController.navigate(KoboSyncRoute) })
         }
         composable<KoboSyncRoute> {
-            KoboSyncScreen(onBack = back)
+            KoboSyncScreen(onBack = back, onOpenRelay = { navController.navigate(RelaySyncRoute) })
+        }
+        composable<RelaySyncRoute> {
+            RelaySyncScreen(onBack = back)
         }
     }
 }

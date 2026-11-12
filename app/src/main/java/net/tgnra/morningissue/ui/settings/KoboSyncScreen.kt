@@ -56,7 +56,7 @@ import net.tgnra.morningissue.ui.theme.MorningIssueTheme
  * only while the reader is looking at this screen, and the screen is kept on meanwhile.
  */
 @Composable
-fun KoboSyncScreen(onBack: () -> Unit) {
+fun KoboSyncScreen(onBack: () -> Unit, onOpenRelay: () -> Unit = {}) {
     val container = LocalAppContainer.current
     val sync = container.koboSync
     val scope = rememberCoroutineScope()
@@ -128,6 +128,11 @@ fun KoboSyncScreen(onBack: () -> Unit) {
                 peers.forEachIndexed { index, peer ->
                     if (index > 0) HairlineRule()
                     PeerRow(peer, now, zone, use24Hour, onForget = { scope.launch { sync.forget(peer.deviceId) } })
+                }
+            }
+            SettingsSection(stringResource(R.string.kobo_relay)) {
+                Setting(stringResource(R.string.kobo_relay_sync), stringResource(R.string.kobo_relay_sync_detail)) {
+                    PaperButton(stringResource(R.string.kobo_relay_open), onClick = onOpenRelay)
                 }
             }
         }

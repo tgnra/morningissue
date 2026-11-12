@@ -35,6 +35,7 @@ class EarlyBuildTest {
     private fun earlyBuild(
         syncer: FakeSyncer = FakeSyncer(journal),
         fullText: FakeFullText = FakeFullText(journal),
+        afterBuild: suspend (EarlyBuildOutcome) -> Unit = {},
     ) = EarlyBuild(
         feedSyncer = syncer,
         publisher = publisher,
@@ -48,7 +49,25 @@ class EarlyBuildTest {
         clock = clock,
         settings = settings,
         zone = { ZoneOffset.UTC },
+        afterBuild = afterBuild,
     )
+
+    @Test
+    fun relaySyncRunsLastAndItsFailureNeverFailsTheBuild() = runTest {
+        var told: EarlyBuildOutcome? = null
+        val outcome = earlyBuild(afterBuild = {
+            told = it
+            journal.add("relay")
+            throw IOException("relay down")
+        }).run()
+
+        assertNull(outcome.error)
+        assertEquals(7L, outcome.editionId)
+        assertEquals(outcome, told)
+        val steps = journal.all()
+        assertTrue(steps.indexOf("relay") > steps.indexOf("images"))
+        assertEquals("schedule", steps.last())
+    }
 
     @Test
     fun syncsBuildsPrefetchesThenSchedulesTheNextRun() = runTest {
