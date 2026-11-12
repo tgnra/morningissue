@@ -62,7 +62,7 @@ jobs:
           path: app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: ignore
 
-  # The Kobo reader's tests: sync against a fake phone, the phone's golden fixtures, and the
+  # The Kobo reader's tests: sync against a fake relay, the phone's golden fixtures, and the
   # screenshot walks at every supported screen size.
   kobo-tests:
     runs-on: ubuntu-latest

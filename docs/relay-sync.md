@@ -1,8 +1,8 @@
 # Relay sync (protocol relay/1)
 
-Relay sync lets a Kobo sync with the phone without both being on the same Wi-Fi. The phone uploads an encrypted package of editions, saved articles and pictures to a relay server. Each paired device uploads its encrypted changes and downloads the package. The phone then collects the changes, merges them and tells the relay to delete what it has finished with.
+Relay sync is how a Kobo syncs with the phone, wherever each of them is. The phone uploads an encrypted package of editions, saved articles and pictures to a relay server. Each paired device uploads its encrypted changes and downloads the package. The phone then collects the changes, merges them and tells the relay to delete what it has finished with.
 
-It sits beside LAN sync (`docs/kobo-sync.md`, protocol v1), which stays the default. Relay sync reuses v1's bodies unchanged: the manifest, edition bundles, the saved shelf and events. Only the way they travel is new.
+It is the only way a Kobo syncs. It carries the formats of `docs/kobo-sync.md` unchanged: the manifest, edition bundles, the saved shelf, pictures and events, first defined by protocol v1, a LAN protocol the Kobo no longer speaks. Only the way they travel is new.
 
 The relay is a dumb mailbox:
 
@@ -48,9 +48,9 @@ The QR code is this URI, its query values percent-encoded:
 morningissue:pair?v=1&s=<base64url S>&d=<deviceId>&n=<name>&w=<short side in px>
 ```
 
-- `d` is the device's existing `deviceId`, the UUID it already uses for LAN pairing.
+- `d` is the device's `deviceId`, a random UUID it makes once and keeps.
 - `n` is its name ("Kobo Libra 2").
-- `w` is the image width v1 already sends.
+- `w` is its screen's short side in pixels, the width the phone prepares its pictures at.
 - The phone refuses `v` values it doesn't know.
 
 Scanning is the consent: there is no extra Allow prompt.
@@ -59,7 +59,7 @@ The phone stores the device: `deviceId`, name, `w`, auth key and enc key. It sho
 
 While it shows the code, a device may ask whether the phone has done so: a signed `GET /v1/package` answers `401 "unknown"` until the device is listed, and `200` or `204` after. The Kobo asks every 5 seconds while the code is on screen and it is online, and syncs as soon as it is listed. It takes nothing else from that answer.
 
-The device also needs the relay's address. The QR code can't carry it, so the reader types it on the Kobo, or it is set as `"relay"` in `config.json`. The phone's settings show the address to copy.
+The device also needs the relay's address. The QR code can't carry it, since the device shows the code and doesn't read one. A Kobo uses `https://mirelay.tgnra.net` unless `"relay"` in its `config.json` names another (`http[s]://host[:port][/prefix]`; without a scheme, an IPv4 address gets `http://` and a name `https://`). Nothing on the Kobo changes it; Settings shows it. The phone must publish to the same relay.
 
 **Unpairing:** the phone removes the device and sends the list again. The relay deletes that device's pending changes and its fetch record. Its requests get `401` from then on, and the device shows itself as unpaired.
 
@@ -220,19 +220,19 @@ The package plaintext is a zip:
 
 | Entry | Holds |
 |---|---|
-| `manifest.json` | The v1 manifest (`v`, `dbId`, `editions`, `saved`) without `ackedSeq`, plus `"protocol": "relay/1"`, `"builtAt"` and `"acked": {"<deviceId>": <ackedSeq>, …}` for every paired relay device |
-| `editions/<id>.json` | One v1 edition bundle (`GET /v1/editions/{id}`) per manifest edition |
-| `saved.json` | The v1 saved shelf (`GET /v1/saved`) |
+| `manifest.json` | The manifest of `docs/kobo-sync.md` (`v`, `dbId`, `editions`, `saved`), with `"protocol": "relay/1"`, `"builtAt"` and `"acked": {"<deviceId>": <ackedSeq>, …}` for every paired relay device |
+| `editions/<id>.json` | One edition bundle (`docs/kobo-sync.md`) per manifest edition |
+| `saved.json` | The saved shelf (`docs/kobo-sync.md`) |
 | `images.json` | `[{"url": "…", "w": 1264, "file": "images/<sha256 hex of url>-<w>", "type": "image/jpeg"}]` |
-| `images/…` | Images prepared exactly as v1 `GET /v1/images` prepares them, at each paired device's `w` (one copy per distinct width) |
+| `images/…` | Pictures prepared as `docs/kobo-sync.md` ("Pictures") describes, at each paired device's `w` (one copy per distinct width) |
 
-A device reads `manifest.json` first. If `dbId` differs from the one it saved, it wipes and starts over, exactly as in v1. It takes the images at its own `w`; if its width is missing, it uses the nearest larger width and scales down.
+A device reads `manifest.json` first. If `dbId` differs from the one it saved, it wipes and starts over (`docs/kobo-sync.md`, "Manifest"). It takes the images at its own `w`; if its width is missing, it uses the nearest larger width and scales down.
 
 ## Changes contents
 
-The changes plaintext is `{"deviceId": "…", "events": [ … ]}`, holding at most 500 v1 events (`docs/kobo-sync.md`, `POST /v1/events`). Their `seq` values must lie within the batch's range.
+The changes plaintext is `{"deviceId": "…", "events": [ … ]}`, holding at most 500 events (`docs/kobo-sync.md`, "Events"). Their `seq` values must lie within the batch's range.
 
-The phone merges them exactly as v1 does:
+The phone merges them as `docs/kobo-sync.md` describes:
 
 - only events with `seq > ackedSeq` for that device;
 - in one transaction that also stores the new `ackedSeq`.
@@ -246,20 +246,20 @@ The phone drops, unmerged, a batch that fails to decrypt, or whose `deviceId` do
 Runs after the early build, when a relay is configured, and from **Publish** on the Sync screen.
 
 1. `PUT /v1/group` (only the first time, or after a `401`), then `PUT /v1/group/devices`.
-2. Build the package from the three latest released editions, the saved shelf and the images. Use the same export and image preparation as LAN sync.
+2. Build the package from the three latest released editions, the saved shelf and the images, exported and prepared as `docs/kobo-sync.md` describes.
 3. Encrypt it with a fresh package key and `PUT` it. Wrap the key for each device, then publish.
 
 ### Device: sync
 
-Runs on the Kobo's sync, when a relay address is set and the device has a secret.
+Runs on every Kobo sync, once the device has a secret (it has shown its pairing code). Without one the Kobo says it is not paired and asks the relay nothing.
 
 1. Upload unsent events, oldest first, in batches of up to 500 (`PUT /v1/changes/{first}-{last}`).
    - "Unsent" means above the highest `seq` already uploaded.
-   - Uploaded events are kept until a package's `acked` shows the phone has merged them, and they are still applied on top of what the device shows, as v1 does with unsent events.
+   - Uploaded events are kept until a package's `acked` shows the phone has merged them, and they are still applied on top of what the device shows, as unsent events are.
 2. `GET /v1/package`. If its `id` differs from the last installed one:
    - download to a temporary file, resuming with `Range`;
    - unwrap the key and decrypt as a stream;
-   - check `dbId`, then install the editions, saved shelf and images (v1 steps 5 to 7, writing to temporary files and renaming them into place);
+   - check `dbId`, then install the editions, saved shelf and images (`docs/kobo-sync.md`, "Installing a package", writing to temporary files and renaming them into place);
    - `POST …/fetched`.
 3. Delete events at or below `acked[deviceId]`.
    - The relay may delete uploaded changes before the phone merges them: after the TTL, or when the phone drops the device. So a device uploads its unacknowledged events again after a `401 "unknown"`, and once an upload has gone 48 hours without being acknowledged. The phone skips events at or below `ackedSeq`, so this is harmless.
@@ -273,7 +273,7 @@ Runs from **Done** on the Sync screen, and from the periodic sync when a relay i
 1. `GET /v1/group/changes`, then download and decrypt each batch.
 2. Merge each batch as above.
 3. `POST /v1/group/done` with every batch handled, merged or dropped.
-4. Relearn affinity if anything merged, as LAN sync does.
+4. Relearn affinity if anything merged, as for the phone's own reader.
 
 ## Test vectors
 
@@ -285,6 +285,6 @@ Some vectors use 16-byte chunks so that a short plaintext still spans several ch
 
 ## Known limits of relay/1
 
-- The relay address is typed on the device. The QR code can't carry it because the device shows the code, it doesn't read one.
-- A device's changes reach the edition engine only when the phone runs Done. Events that arrive after the next build have already counted their stories as unopened (v1's limit).
+- The QR code can't carry the relay's address, because the device shows the code and doesn't read one. A Kobo uses the default relay, or the one in its `config.json`.
+- A device's changes reach the edition engine only when the phone runs Done. Events that arrive after the next build have already counted their stories as unopened (`docs/kobo-sync.md`, "Events").
 - The relay sees group sizes, blob sizes and timing. Over plain HTTP, so does anyone on the network path.

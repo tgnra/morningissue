@@ -2,17 +2,16 @@
 
 A native e-ink reader for Kobo e-readers. You open it from NickelMenu. It shows editions
 and saved articles on the bare framebuffer while Nickel (Kobo's own reader) is stopped, and
-syncs with the Morning Issue app on your phone in the background over the Kobo's Wi-Fi: with
-the phone on the same network, or through a relay server when it isn't. The protocol, the
-files on the device and the launch flow are specified in
-[`docs/kobo-sync.md`](../docs/kobo-sync.md), and relay sync in
-[`docs/relay-sync.md`](../docs/relay-sync.md).
+syncs with the Morning Issue app on your phone in the background over the Kobo's Wi-Fi,
+through a relay server, so the phone can be anywhere. Relay sync is specified in
+[`docs/relay-sync.md`](../docs/relay-sync.md), and the formats it carries, the files on the
+device and the launch flow in [`docs/kobo-sync.md`](../docs/kobo-sync.md).
 
 It is one static binary, `morningissue`, built for `armv7-unknown-linux-musleabihf`. It has
 five subcommands:
 
 - `read` runs the reader (and its background sync).
-- `sync` fetches from the phone (or the relay) once, from a shell.
+- `sync` syncs through the relay once, from a shell.
 - `check` names the device and fails if this version can't draw on it.
 - `wifi-off` and `wifi-on` power the Wi-Fi chip down and up for `wifi-off.sh` and
   `wifi-on.sh` (ntx_io ioctl 208).
@@ -27,23 +26,22 @@ firmware 4.6 or newer.
    `.adds/morningissue/` and `.adds/nm/morningissue`. Folders starting with a dot may be
    hidden on your computer, but they are still created.
 3. Eject the drive. NickelMenu reads its configuration again once the Kobo leaves USB mode.
-4. On the phone, open Morning Issue's Kobo settings and keep the app open on the same Wi-Fi
-   network.
-5. On the Kobo, connect to Wi-Fi in Nickel, then open the main menu and tap
-   **Morning Issue**. The phone asks you to allow the Kobo the first time.
-6. To sync away from home too, pair it through a relay (below).
+4. On the Kobo, connect to Wi-Fi in Nickel, then open the main menu and tap
+   **Morning Issue**.
+5. Pair it with the phone (below).
 
-### Relay sync
+### Pairing
 
-A relay is a small server, run by you or someone you trust, that holds encrypted packages
-for the Kobo and the Kobo's encrypted changes for the phone. It never sees what you read.
+The Kobo syncs through a relay: a small server that holds encrypted packages for the Kobo
+and the Kobo's encrypted changes for the phone, and never sees what you read. The Kobo uses
+`https://mirelay.tgnra.net` unless `config.json` names another (see Configuration); the
+phone has to publish to the same one.
 
-1. On the Kobo, open **Settings** and tap the address beside **Pair through relay**. Type the
-   relay's address from the phone's Kobo settings (`https://relay.example.org`, or a plain
-   `http://` address with its port) and tap **OK**. You can set it as `"relay"` in
-   `config.json` instead.
-2. Tap **Pair through relay**. The Kobo shows a large QR code. Scan it with Morning Issue on
-   the phone (Kobo settings). Scanning is the consent; nothing is asked on the Kobo.
+1. On the Kobo, open **Settings** and tap **Pair with phone**. The Kobo shows a large QR
+   code. (Turn on Wi-Fi and sync, or Sync now, on a Kobo that has never been paired opens
+   it too.)
+2. Scan it with Morning Issue on the phone (Kobo settings). Scanning is the consent;
+   nothing is asked on the Kobo.
 3. While the code is shown and the Kobo is on Wi-Fi, it asks the relay every 5 seconds
    whether the phone has told it about this Kobo. Once it has, the Kobo goes back to
    Settings and syncs. (Offline, go back and tap **Turn on Wi-Fi and sync**; until the phone
@@ -69,20 +67,20 @@ change the screen mode.
 
 - **Home:** the latest edition large in the middle, earlier ones on the shelf below (beside
   it in landscape). **Exit** is at the top left, **Saved** and **Settings** at the top right.
-  The line at the foot says "Syncing…", when the last sync ran and with which phone,
-  "Offline", or why the last sync failed. Tap a cover to open it.
+  The line at the foot says "Syncing…", when the last sync ran, "Offline", or why the last
+  sync failed. Tap a cover to open it.
 - **Sync:** runs in the background as soon as the reader starts, if the Kobo is connected
-  to Wi-Fi. Editions, saved articles and pictures appear as they arrive. Without a
+  to Wi-Fi. Editions, saved articles and pictures appear as they are installed. Without a
   connection the home screen shows "Offline", and Settings has **Turn on Wi-Fi and sync**:
   it turns Wi-Fi on (joining a network saved in the Kobo's Wi-Fi settings), syncs, and turns
-  Wi-Fi off again. If the phone can't be found, Wi-Fi stays on and the sync is tried again
-  every few seconds, and at once when an address is typed, until it gets through; **Turn
-  Wi-Fi off** (beside the sync button whenever Wi-Fi is on) ends it, and so does sleep. If
-  no network is joined, Wi-Fi goes off again and the reader says so. With a relay, a sync
-  through it counts as getting through, even with nothing new; a relay that can't be
-  reached, or that is still waiting for the phone to pair this Kobo, counts as the phone not
-  being found; and a Kobo the phone has dropped turns Wi-Fi off, since it has to be paired
-  again.
+  Wi-Fi off again. A sync that gets through the relay turns it off even when it brings
+  nothing new. If the relay can't be reached, or is still waiting for the phone to publish
+  this Kobo, Wi-Fi stays on and the sync is tried again every few seconds until it gets
+  through; **Turn Wi-Fi off** (beside the sync button whenever Wi-Fi is on) ends it, and so
+  does sleep. Anything else, such as a Kobo the phone has dropped (it has to be paired
+  again), turns Wi-Fi off. If no network is joined, Wi-Fi goes off again and the reader says
+  so. A Kobo that has never been paired doesn't turn Wi-Fi on: the button opens the pairing
+  code.
 - **Edition and article pages** fill the screen. Swipe down from the top edge (or tap the top
   strip) to show the header (back, title) and the footer (position, and in an article
   **Like**, **Save** and **Aa**). A tap on the page, or 7 seconds, hides them again. The
@@ -99,10 +97,10 @@ change the screen mode.
   get the full text of say so and show the summary. Saving an article on the Kobo puts it at
   the top of the list at once, and unsaving takes it off at once; both are sent to the phone
   at the next sync.
-- **Settings:** the Wi-Fi state, how to find the phone (automatically, or a typed address
-  on a keypad; the port defaults to 47824), the relay (its address, typed on a keyboard, and
-  **Pair through relay**, with where pairing stands), **Sync now**, inverting the page-turn
-  buttons, orientation (portrait or landscape), Reset, and the last sync's result. When it
+- **Settings:** the Wi-Fi state, **Pair with phone** (with the relay's address beside it
+  and where pairing stands), **Sync now** or **Turn on Wi-Fi and sync**, **Turn Wi-Fi off**,
+  the last sync's result, inverting the page-turn buttons, orientation (portrait or
+  landscape), and Reset. The relay can't be changed here, only in `config.json`. When it
   doesn't all fit on the screen, Settings has pages, turned like Saved's. On a model with a
   mapped orientation sensor, the sensor turns the page upside down within the chosen
   orientation to match how you hold it, once the reading has held for 1.5 s, with a full
@@ -124,24 +122,17 @@ when the model has them.
 
 What you read is recorded in `data/events.jsonl` and sent on the next sync.
 
-### LAN and relay together
+### Relay sync
 
-Once a relay address is set and the pairing code has been shown, every sync tries the relay
-first. If that fails for any reason (no connection to the relay, not paired yet, a package
-that fails its check), the phone is looked for on the local network as before, and the
-relay's error is shown only if the phone isn't found either. Without a relay address, or
-before the code has been shown, only the LAN is used. Both kinds of sync send the same events
-under the same `deviceId`, and the phone skips the ones it has already merged, so they mix
-safely. Events sent to the relay stay on the Kobo until a package from the phone shows they
-were merged; if none does within the relay's 48 hours, they are sent again.
+Events are sent to the relay encrypted, and stay on the Kobo until a package from the phone
+shows they were merged; if none does within the relay's 48 hours, they are sent again.
 
 `https://` relays are checked against the Mozilla root certificates. Since a Kobo's clock can
-be far off, the time used for that is the clock corrected by the last `Date` the phone or the
-relay sent, and never earlier than the date the binary was built. If a certificate still
-looks out of date, the reader says the Kobo's clock is wrong: sync once with the phone on the
-same Wi-Fi to correct it, or use the relay's `http://` address. Plain HTTP is safe for the
-contents (everything is encrypted end to end and every request is signed); TLS hides only the
-request paths and sizes.
+be far off, the time used for that is the clock corrected by the last `Date` the relay sent,
+and never earlier than the date the binary was built. If a certificate still looks out of
+date, the reader says the Kobo's clock is wrong: connect to Wi-Fi in Nickel to set it, or use
+the relay's `http://` address. Plain HTTP is safe for the contents (everything is encrypted
+end to end and every request is signed); TLS hides only the request paths and sizes.
 
 ## Configuration
 
@@ -149,10 +140,8 @@ You can create `.adds/morningissue/config.json` yourself. Every field is optiona
 
 ```json
 {
-  "phone": "192.168.1.20:47824",
   "relay": "https://relay.example.org",
   "name": "Kobo in the kitchen",
-  "beaconSeconds": 10,
   "flashEvery": 6,
   "idleMinutes": 20,
   "touch": { "device": "/dev/input/event1", "swapXy": true, "mirrorX": false, "mirrorY": false },
@@ -160,13 +149,15 @@ You can create `.adds/morningissue/config.json` yourself. Every field is optiona
 }
 ```
 
-- `phone` is for networks that drop UDP broadcasts. An address typed in Settings is tried
-  before it and before the beacon.
-- `relay` is the relay's address, `http[s]://host[:port]`. One typed in Settings comes first.
-  Without `http://` or `https://`, an IPv4 address gets `http://` and a name `https://`.
+- `relay` is the relay's address, `http[s]://host[:port][/prefix]`, instead of the default
+  `https://mirelay.tgnra.net`. Without `http://` or `https://`, an IPv4 address gets
+  `http://` and a name `https://`. The phone has to publish to the same relay.
+- `name` is the name the phone shows for this Kobo once it has scanned the pairing code.
 - `touch` and `display` are escape hatches for a model whose profile turns out to be wrong.
 - `flashEvery` sets how many partial page turns pass before a full refresh.
 - Problems are logged to `.adds/morningissue/data/launch.log`.
+- Fields earlier versions used for LAN sync (`phone`, `beaconSeconds`, `beaconPort`) are
+  ignored.
 
 ## Supported devices
 
@@ -269,18 +260,6 @@ The script:
 cd kobo && cargo test
 ```
 
-- `tests/sync.rs` runs `sync` against an in-process fake phone. It covers:
-  - pairing;
-  - a 401 leading to re-pairing;
-  - idempotent acks;
-  - a dbId change wiping state;
-  - a changed edition version;
-  - image 404s;
-  - an interrupted sync keeping the editions that arrived;
-  - no phone found;
-  - `/v1/saved` fetched only when its version changes;
-  - pictures asked for at the screen width, three at a time;
-  - a typed address tried before the beacon.
 - `tests/relay_vectors.rs` reproduces every vector in `docs/relay-sync-fixtures/vectors.json`
   (key derivation, kids, the envelopes including the exact-multiple and empty ones, the
   wrapped key, the changes and both signatures) and checks that tampered, truncated and
@@ -295,15 +274,17 @@ cd kobo && cargo test
   - a `dbId` change wiping everything;
   - "Waiting for the phone", then paired, then dropped ("Not paired"), with the events sent
     again once paired again;
+  - a Kobo that has never shown its pairing code asking nothing;
   - a wrong clock put right from the `Date` header, and no signature ever sent twice;
   - tampered packages and wrongly wrapped keys installing nothing;
-  - the phone on the LAN used when the relay can't be reached;
   - asking whether the phone lists this Kobo yet, as the pairing screen does, without
     uploading or installing anything;
   - an `https://` relay over TLS, and a certificate not yet valid blamed on the clock.
 - `tests/relay_interop.rs` does the same against the real relay (`relay/`, Go), with the test
   as the phone. It is ignored unless `MORNINGISSUE_RELAY_BIN` names a built relay:
   `(cd relay && go build -o /tmp/relay .) && MORNINGISSUE_RELAY_BIN=/tmp/relay cargo test --test relay_interop -- --ignored`.
+- `tests/phone_fixtures.rs` parses the phone's golden fixtures (`docs/kobo-sync-fixtures/`):
+  the manifest, an edition bundle with every block type, and the saved shelf.
 - `tests/screens.rs` drives the whole reader through the desktop backend with scripted taps,
   swipes and keys, at:
   - 600×800 at 167 dpi;
@@ -313,26 +294,27 @@ cd kobo && cargo test
 
   It covers the sleep screen at every size; sleeping and waking by the power button, the
   cover and the idle timeout, with touches made while asleep or waking ignored; a kernel
-  that refuses to suspend; home with one, two and three editions, offline, syncing and after an error;
-  Settings (on two pages where it doesn't fit), the keypad, the relay keyboard and the pairing
-  code (decoded from the screenshot at every size); Saved; the reader with its chrome hidden and shown; the Aa
-  popover, with and without warmth; a background sync against the fake phone (a new
-  edition and pictures arriving while reading); no sync attempt offline; orientation (portrait
-  and landscape, each upside down, a brief tilt ignored, no sensor, the old setting); and
-  inverted buttons; and Turn on Wi-Fi and sync (Wi-Fi on, a sync, Wi-Fi off; staying on
-  while the phone can't be found until an address is typed or Turn Wi-Fi off is tapped; a
-  network that can't be joined; sleep while Wi-Fi is coming on; through the relay, a sync with
-  nothing new and one with a package turning Wi-Fi off, an unreachable relay and one waiting
-  for the phone keeping it on, a dropped Kobo turning it off); and the pairing code noticing
-  the phone's scan and syncing, and asking nothing when left at once or offline. It writes every screen, plus a `contact.png` sheet, to
-  `kobo/target/screens/<size>/<run>/`.
+  that refuses to suspend; home with one, two and three editions, offline, syncing and after
+  an error; Settings (on two pages where it doesn't fit) and the pairing code (decoded from
+  the screenshot at every size); Saved; the reader with its chrome hidden and shown; the Aa
+  popover, with and without warmth; a background sync through the fake relay (a new edition,
+  the saved shelf and pictures arriving while the reader is open); no sync attempt offline;
+  orientation (portrait and landscape, each upside down, a brief tilt ignored, no sensor,
+  the old setting); inverted buttons; Turn on Wi-Fi and sync (Wi-Fi on, a sync, Wi-Fi off,
+  with a package and with nothing new; staying on while the relay can't be reached or waits
+  for the phone, until it gets through or Turn Wi-Fi off is tapped; a dropped Kobo turning it
+  off; a network that can't be joined; sleep while Wi-Fi is coming on); an unpaired Kobo
+  opening the pairing code instead of turning Wi-Fi on; and the pairing code noticing the
+  phone's scan and syncing, and asking nothing when left at once or offline. It writes every
+  screen, plus a `contact.png` sheet, to `kobo/target/screens/<size>/<run>/`.
 - `tests/launch.rs` runs `launch/launch.sh` against a fake root with busybox-like stubs:
   Exit, a panic and a signal all bring Nickel back with its output on `/dev/null` and free
   the lock; stale locks (a dead PID, a reused PID, the empty lock 0.2.3 left) are taken
   over; a running launcher keeps it; a killed launcher still brings Nickel back. Run it
   under busybox's ash with `nix shell nixpkgs#rustup nixpkgs#busybox -c cargo test --test launch`.
 - Unit tests cover ioctl struct sizes, a recorded Libra 2 touch trace, the reading rules,
-  pagination of editions, code blocks, settings, addresses and dates.
+  pagination of editions, code blocks, settings (old typed addresses ignored), the default
+  relay and `config.json`, relay addresses and dates.
 
 ## Licences
 
