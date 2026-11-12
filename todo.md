@@ -214,6 +214,23 @@ The protocol is `docs/kobo-sync.md`; see "Sync with Kobo" in `docs/how-it-works.
 - [ ] **The JPEG/PNG choice** is a tone count, tested on drawn examples, not on a corpus of real article pictures. Check a real edition's split and sizes, and how a photograph on a large white page fares.
 - [ ] **Pictures are not measured on a device**: how long 600 take to prepare on a mid-range phone, and the memory a large original costs while decoding (bounded by sampling and 4 million pixels, 2 at a time).
 
+### Relay sync
+
+The protocol is `docs/relay-sync.md` (relay/1), with test vectors in `docs/relay-sync-fixtures/`. The phone uploads an encrypted package, Kobos upload encrypted changes and download it, and the phone's Done merges the changes and clears the relay. The relay server is `relay/` (Go), the Kobo side is in `kobo/`, and the phone side is in `app/` (`net.tgnra.morningissue.relay`); see "Relay sync" in `docs/how-it-works.md`.
+
+- [x] Spec with test vectors from fixed inputs, cross-checked against an independent Python implementation; Go, Rust and Kotlin each reproduce every vector.
+- [x] Relay server, standard library only: request signing with skew and replay checks, packages streamed to disk with Range resume, changes, Done, unpairing, and a sweeper (48 hours, 1 hour for unpublished uploads, 90 days for idle groups). Tested with `-race`; CI runs it on every push and attaches amd64 and arm64 binaries to releases.
+- [x] Kobo: Pair through relay (the QR code), a letter keyboard for the relay address, Settings in pages, the relay sync order with LAN sync as the fallback, and TLS for `https://` relays (rustls with ring; clang compiles ring for the ARM build). Certificate times are checked against the corrected clock and never before the build date. Tested against an in-process fake relay, a local TLS relay, and the real Go relay (`kobo/tests/relay_interop.rs`, run with `MORNINGISSUE_RELAY_BIN` set).
+- [x] Phone: schema version 6 (relay keys on the same `sync_peer` row, so a Kobo paired both ways has one `ackedSeq`), keys wrapped with the Android Keystore, QR scanning with CameraX and ZXing, Publish and Done on a Relay sync screen, Done then Publish after the early build, and Done after each periodic sync. Tested against a mock relay.
+- [ ] **Run it end to end on real devices**: the QR code scanned off a real e-ink screen, the Kobo keyboard's touch targets, TLS speed and memory on the Kobo, a large package over Kobo Wi-Fi, and the Relay sync screen on a phone, a tablet and in E-ink.
+- [ ] **A test of all three together.** The Kobo has been tested against the real relay, the phone only against a mock. A test that runs the Go relay, the phone's Publish and Done, and the Kobo client in one go would catch any disagreement between the two clients.
+- [ ] **The Kobo's pairing screen doesn't notice the scan.** The reader goes back and taps Sync now.
+- [ ] **The relay address is typed on the Kobo.** The phone's screen shows the address it uses; if Kobos should use a plain-HTTP port, the reader has to know it.
+- [ ] **Path prefixes.** Both clients sign the full path as sent and the relay routes from `/`, so a relay under a path prefix only works behind a proxy that passes the path through unchanged.
+- [ ] **The replay cache is in memory**, so a replay across a relay restart within 600 seconds is not caught.
+- [ ] **A very large package can outlast the Kobo's 600-second sync**; the download resumes at the next sync.
+- [ ] **A Kobo's changes reach the edition engine only at Done.** Events that arrive after the next build have already counted their stories as unopened (v1's limit).
+
 ## Smaller gaps against the original spec
 
 Specified but not built, and not assigned to a milestone.
@@ -284,7 +301,7 @@ Deliberately not being built. Listed so they are not mistaken for forgotten.
 | PDF or printable export of an edition | "Not initially" in the spec's decisions. |
 | Publish time adapting to when the reader opens the app | Decided against: a fixed reset time in the reader's time zone. |
 | Anything appearing between editions | Decided against. |
-| Accounts and cross-device sync | Decided against: fully local. |
+| Accounts and cross-device sync | Decided against: fully local. Relay sync (below) is not an account: the phone stays the only owner, the relay holds only end-to-end encrypted blobs for at most 48 hours, and it is optional beside LAN sync. |
 | OPML folder names as an affinity hint | Dropped in the spec's review. Folder names become tags instead. |
 | Reprint-only or empty editions | Decided against: with no new posts no edition is built. |
 
