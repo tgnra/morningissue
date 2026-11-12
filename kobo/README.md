@@ -238,7 +238,9 @@ VERSION=1.0.0 kobo/build.sh
 ```
 
 This needs Rust with the `armv7-unknown-linux-musleabihf` target, and clang. Without cargo on
-the PATH, the script runs rustup through `nix shell nixpkgs#rustup`. The binary is linked by
+the PATH, the script runs rustup through `nix shell nixpkgs#rustup`. Without clang, or with
+Nix's wrapped clang (which adds the host's glibc headers and so breaks ring's build for the
+target), it takes `nixpkgs#llvmPackages.clang-unwrapped` the same way. The binary is linked by
 `rust-lld` with musl's self-contained startup files, so no GCC cross toolchain is needed; the
 only C and assembly in the build is ring's (TLS for relays), which clang compiles for the
 target (`kobo/.cargo/config.toml` sets `CC_armv7_unknown_linux_musleabihf=clang`). Every other
