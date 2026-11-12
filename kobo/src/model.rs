@@ -1,33 +1,16 @@
-//! The protocol's JSON documents (`docs/kobo-sync.md`). Every reader here ignores fields it does
-//! not know and fills in fields that are missing, so a newer phone does not break an older Kobo.
+//! The JSON documents in a relay package (`docs/relay-sync.md`, formats in
+//! `docs/kobo-sync.md`). Every reader here ignores fields it does not know and fills in fields
+//! that are missing, so a newer phone does not break an older Kobo.
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase", default)]
-pub struct Beacon {
-    pub app: String,
-    pub v: i64,
-    pub port: u16,
-    pub name: String,
-    pub db_id: String,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct PairResponse {
-    pub token: String,
-    pub db_id: String,
-}
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Manifest {
     pub v: i64,
     pub db_id: String,
-    pub acked_seq: i64,
     pub editions: Vec<ManifestEdition>,
     /// Left out by a phone that has no saved shelf to offer.
     pub saved: Option<SavedInfo>,
@@ -44,7 +27,7 @@ pub struct SavedInfo {
     pub version: String,
 }
 
-/// `GET /v1/saved`, stored as `data/saved.json`.
+/// The saved shelf, a package's `saved.json`, stored as `data/saved.json`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SavedList {
@@ -92,13 +75,7 @@ pub struct ManifestEdition {
     pub version: String,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct EventsResponse {
-    pub acked_seq: i64,
-}
-
-/// `GET /v1/editions/{id}`.
+/// An edition bundle, a package's `editions/<id>.json`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Bundle {

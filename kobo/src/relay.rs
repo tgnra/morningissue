@@ -7,8 +7,8 @@
 //! 2. `GET /v1/package`. A package not installed yet is downloaded to `data/relay/<id>.mir`
 //!    (resuming with `Range`), its key unwrapped, and decrypted as a stream to
 //!    `data/relay/<id>.zip`. Then the `dbId` is checked (wiping on a change) and the editions,
-//!    the saved shelf and the pictures are installed as LAN sync installs them, each file
-//!    written whole and renamed into place. Then `POST …/fetched`.
+//!    the saved shelf and the pictures are installed (`docs/kobo-sync.md`, "Installing a
+//!    package"), each file written whole and renamed into place. Then `POST …/fetched`.
 //! 3. Delete the events at or below `acked[deviceId]`.
 //!
 //! Every request is signed with the device auth key. `ts` comes from the clock offset learnt
@@ -56,13 +56,13 @@ pub struct ImageEntry {
     pub kind: String,
 }
 
-/// Checks a relay address typed or configured: `http://` or `https://`, a host, an optional
-/// port and path prefix. An address typed without a scheme gets `http://` when it is an IPv4
+/// Checks a relay address from `config.json`: `http://` or `https://`, a host, an optional
+/// port and path prefix. An address without a scheme gets `http://` when it is an IPv4
 /// address and `https://` otherwise. Returns it written out in full.
 pub fn parse_address(s: &str) -> Result<String, String> {
     let s = s.trim();
     if s.is_empty() {
-        return Err("Type the relay address the phone\u{2019}s Kobo settings show.".into());
+        return Err("The address is empty.".into());
     }
     let full = if s.contains("://") {
         s.to_string()
@@ -249,7 +249,6 @@ impl<'a> Session<'a> {
         self.acknowledge()?;
         self.state.last_sync_at = Some(time::system_millis());
         self.state.last_error = None;
-        self.state.last_via_relay = true;
         self.save()
     }
 
@@ -413,7 +412,7 @@ impl<'a> Session<'a> {
         }
         self.check_db_id(&manifest.db_id)?;
 
-        // The editions, each saved as it is taken out, as LAN sync saves them as they arrive.
+        // The editions, each saved as it is taken out, so the reader can show it at once.
         let mut bundles: Vec<Bundle> = Vec::new();
         for e in &manifest.editions {
             let key = e.id.to_string();
@@ -460,7 +459,8 @@ impl<'a> Session<'a> {
             }
         }
 
-        // Pictures, in the order LAN sync fetches them, at this Kobo's width.
+        // Pictures, the newest edition's first in the order a reader meets them, then the
+        // saved articles', at this Kobo's width.
         let images: Vec<ImageEntry> = match zip.read("images.json", 16 << 20).map_err(|e| SyncError::Integrity(e.to_string()))? {
             Some(b) => serde_json::from_slice(&b).map_err(|e| SyncError::Integrity(format!("images.json: {e}")))?,
             None => Vec::new(),
@@ -491,7 +491,7 @@ impl<'a> Session<'a> {
             self.tell(Progress::Image(url));
         }
 
-        // Commit, as LAN sync's step 6.
+        // Commit: the editions that left the package and the pictures nothing refers to go.
         let keep: BTreeSet<i64> = manifest.editions.iter().map(|e| e.id).collect();
         self.report.editions_removed = self.state.editions.keys().filter_map(|k| k.parse().ok()).filter(|id| !keep.contains(id)).collect();
         self.state.editions = manifest.editions.iter().map(|e| (e.id.to_string(), e.version.clone())).collect();
@@ -537,14 +537,14 @@ fn sink_len(p: &Path) -> u64 {
     fs::metadata(p).map(|m| m.len()).unwrap_or(0)
 }
 
-fn session<'a>(store: &'a Store, opts: &'a Options, address: &str) -> Result<Session<'a>, SyncError> {
+fn session<'a>(store: &'a Store, opts: &'a Options) -> Result<Session<'a>, SyncError> {
     store.ensure_dirs()?;
     let state = store.load_state()?;
-    let ep = Endpoint::parse(address).map_err(SyncError::RelayAddress)?;
-    let secret = state.relay_secret.as_deref().and_then(crypto::b64url_decode).filter(|s| s.len() == 32).ok_or_else(|| SyncError::RelayAddress("this Kobo has no pairing secret yet".into()))?;
+    let secret = state.relay_secret.as_deref().and_then(crypto::b64url_decode).filter(|s| s.len() == 32).ok_or(SyncError::NotPaired)?;
+    let ep = Endpoint::parse(&opts.relay).map_err(SyncError::RelayAddress)?;
     crate::tls::set_clock_offset(state.clock_offset_ms);
     let keys = DeviceKeys::from_secret(&secret);
-    let report = SyncReport { address: ep.url(), via_relay: true, ..Default::default() };
+    let report = SyncReport { address: ep.url(), ..Default::default() };
     Ok(Session { store, opts, ep, keys, state, started: Instant::now(), report })
 }
 
@@ -557,8 +557,16 @@ fn mark_unpaired(state: &mut State) {
 }
 
 /// Runs a relay sync. The outcome is saved in the state for the home screen and Settings.
-pub fn sync(store: &Store, opts: &Options, address: &str) -> Result<SyncReport, SyncError> {
-    let mut s = session(store, opts, address)?;
+pub fn sync(store: &Store, opts: &Options) -> Result<SyncReport, SyncError> {
+    let mut s = match session(store, opts) {
+        Ok(s) => s,
+        Err(e) => {
+            let mut state = store.load_state()?;
+            state.last_error = Some(e.to_string());
+            store.save_state(&state)?;
+            return Err(e);
+        }
+    };
     let result = s.run();
     let mut state = s.state;
     if let Err(e) = &result {
@@ -576,8 +584,8 @@ pub fn sync(store: &Store, opts: &Options, address: &str) -> Result<SyncReport, 
 /// device list after scanning the code. Nothing is uploaded, downloaded or installed, and the
 /// last sync's result is left alone; what the relay said is saved in the state as a sync
 /// saves it.
-pub fn listed(store: &Store, opts: &Options, address: &str) -> Result<bool, SyncError> {
-    let mut s = session(store, opts, address)?;
+pub fn listed(store: &Store, opts: &Options) -> Result<bool, SyncError> {
+    let mut s = session(store, opts)?;
     let result = match s.send("GET", "/v1/package", None, &[], None) {
         Ok(r) if r.status == 200 || r.status == 204 => Ok(true),
         Ok(r) => Err(SyncError::RelayProtocol(format!("package: HTTP {}", r.status))),

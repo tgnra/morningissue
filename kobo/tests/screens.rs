@@ -2,10 +2,8 @@
 //! each step to `target/screens/<size>/`. Also checks the events the session recorded, what a
 //! sync started from the reader did, and what the light was told.
 
-mod fakephone;
 mod fakerelay;
 
-use fakephone::FakePhone;
 use fakerelay::FakeRelay;
 use morningissue::app::{self, App};
 use morningissue::config::Config;
@@ -151,8 +149,6 @@ struct Setup {
     editions: usize,
     saved: bool,
     online: bool,
-    /// A typed phone address in the settings.
-    phone: Option<String>,
     sync_on_start: bool,
     warmth: bool,
     /// A sync has never succeeded; this was the last error.
@@ -166,11 +162,11 @@ struct Setup {
     settings: Option<Value>,
     /// Turning Wi-Fi on joins no network.
     wifi_no_network: bool,
-    /// How long a sync listens for the phone's beacon.
-    beacon_seconds: u64,
-    /// A relay address typed in Settings, with the pairing code shown once already (the state
-    /// holds [`RELAY_SECRET`]).
+    /// The relay, as `relay` in `config.json`. None gives one where nobody listens, so a
+    /// test never reaches the real default relay.
     relay: Option<String>,
+    /// The pairing code has been shown once already: the state holds [`RELAY_SECRET`].
+    paired: bool,
     /// The relay has accepted this Kobo before (`relaySeen`).
     relay_seen: bool,
 }
@@ -181,7 +177,6 @@ impl Default for Setup {
             editions: 3,
             saved: true,
             online: true,
-            phone: None,
             sync_on_start: false,
             warmth: true,
             last_error: None,
@@ -190,14 +185,14 @@ impl Default for Setup {
             sensor: true,
             settings: None,
             wifi_no_network: false,
-            beacon_seconds: 10,
             relay: None,
+            paired: false,
             relay_seen: false,
         }
     }
 }
 
-/// The relay secret of a Kobo set up with [`Setup::relay`].
+/// The relay secret of a Kobo set up with [`Setup::paired`].
 const RELAY_SECRET: [u8; 32] = [7; 32];
 
 fn relay_keys() -> DeviceKeys {
@@ -210,7 +205,7 @@ fn setup(name: &str, now_ms: i64, s: &Setup) -> PathBuf {
     let _ = std::fs::remove_dir_all(&home);
     let store = Store::new(&home);
     store.ensure_dirs().unwrap();
-    let mut state = State { device_id: "test-device".into(), token: Some("t".into()), db_id: Some("db".into()), next_seq: 1, phone_name: Some("Pixel 9".into()), last_sync_at: Some(now_ms - 12 * 60_000), ..Default::default() };
+    let mut state = State { device_id: "test-device".into(), db_id: Some("db".into()), next_seq: 1, last_sync_at: Some(now_ms - 12 * 60_000), ..Default::default() };
     if let Some(e) = s.last_error {
         state.last_sync_at = None;
         state.last_error = Some(e.into());
@@ -224,20 +219,13 @@ fn setup(name: &str, now_ms: i64, s: &Setup) -> PathBuf {
         std::fs::write(store.saved_path(), serde_json::to_vec(&saved_list()).unwrap()).unwrap();
         state.saved_version = Some("s1".into());
     }
-    if s.relay.is_some() {
+    if s.paired {
         state.relay_secret = Some(crypto::b64url(&RELAY_SECRET));
         state.relay_seen = s.relay_seen;
     }
     store.save_state(&state).unwrap();
-    let mut settings = s.settings.clone().unwrap_or_else(|| json!({}));
-    if let Some(p) = &s.phone {
-        settings["phoneAddress"] = json!(p);
-    }
-    if let Some(r) = &s.relay {
-        settings["relayAddress"] = json!(r);
-    }
-    if settings != json!({}) {
-        std::fs::write(store.settings_path(), serde_json::to_vec(&settings).unwrap()).unwrap();
+    if let Some(settings) = &s.settings {
+        std::fs::write(store.settings_path(), serde_json::to_vec(settings).unwrap()).unwrap();
     }
     for (url, bytes) in pictures() {
         std::fs::write(store.images_dir().join(format!("{}.img", image_key(url))), bytes).unwrap();
@@ -340,7 +328,7 @@ fn run_with(dir: &str, size: &Size, s: &Setup, script: Vec<Step>, mut at_mark: i
         sync_on_start: s.sync_on_start,
         hit_probe: Some(Box::new(move |hits| *shared3.hits.borrow_mut() = hits.to_vec())),
     };
-    let mut app = App::new(Box::new(display), Box::new(input), Box::new(ScriptClock(shared.clone())), Store::new(&home), Config { beacon_seconds: s.beacon_seconds, ..Config::default() }, &fonts_dir(), opts).unwrap();
+    let mut app = App::new(Box::new(display), Box::new(input), Box::new(ScriptClock(shared.clone())), Store::new(&home), Config { relay: Some(s.relay.clone().unwrap_or_else(|| format!("http://{}", nobody()))), ..Config::default() }, &fonts_dir(), opts).unwrap();
     app.run().unwrap();
     contact_sheet(&out);
     let events: Vec<Value> = std::fs::read_to_string(home.join("data/events.jsonl")).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
@@ -395,7 +383,7 @@ fn pull_down(size: &Size) -> Step {
 }
 
 /// The walk every size takes: home, the edition page by page, an article with its chrome and
-/// the "Aa" popover, then Settings, the keypad and Saved.
+/// the "Aa" popover, then Settings, the pairing code and Saved.
 fn walk(size: &Size) -> Vec<Step> {
     let (w, h) = dims(size);
     let mut s = vec![mark("01-home"), tap_on("OpenEdition(0)"), Step::Wait(6000), mark("02-front")];
@@ -449,27 +437,10 @@ fn walk(size: &Size) -> Vec<Step> {
     s.push(mark("32-home-again"));
     s.push(tap_on("OpenSettings"));
     s.push(mark("40-settings"));
-    s.push(tap_on("PhoneTyped"));
-    s.push(mark("41-keypad"));
-    for c in "192.168.1.40".chars() {
-        s.push(tap_on(&format!("KeyChar({c:?})")));
-    }
-    s.push(mark("42-keypad-typed"));
-    s.push(tap_on("KeyOk"));
-    s.push(mark("43-settings-typed"));
-    // Relay sync: the address on the keyboard, then the pairing code.
-    s.push(tap_on("RelayTyped"));
-    s.push(mark("44-relay-keyboard"));
-    s.push(tap_on("KeyText(\"https://\")"));
-    for c in "relay.ex".chars() {
-        s.push(tap_on(&format!("KeyChar({c:?})")));
-    }
-    s.push(mark("45-relay-keyboard-typed"));
-    s.push(tap_on("KeyOk"));
-    s.push(mark("46-settings-relay"));
     s.push(tap_on("OpenPair"));
     s.push(mark("47-pair"));
     s.push(tap_on("Back"));
+    s.push(mark("48-settings-waiting"));
     s.push(tap_on("Back"));
     s.push(tap_on("OpenSaved"));
     s.push(mark("50-saved"));
@@ -505,10 +476,8 @@ fn screens_at_every_size() {
         let o = run(&format!("{}/walk", size.name), size, &Setup::default(), walk(size));
         eprintln!("{}: {} refreshes, {} events, pictures in {}", size.name, o.refreshes.len(), o.events.len(), o.out.display());
         assert!(o.out.join("57-saved-after-unsave.png").exists());
-        // The relay address typed, and the pairing code drawn so a camera can read it.
+        // The pairing code drawn so a camera can read it.
         let store = Store::new(&o.home);
-        let settings: Value = serde_json::from_slice(&std::fs::read(store.settings_path()).unwrap()).unwrap();
-        assert_eq!(settings["relayAddress"], "https://relay.ex");
         let state = store.load_state().unwrap();
         let secret = state.relay_secret.clone().expect("the secret is made for the code");
         let shot = image::open(o.out.join("47-pair.png")).unwrap().to_luma8();
@@ -545,11 +514,10 @@ fn screens_at_every_size() {
         for e in o.events.iter().filter(|e| e["type"] == "pageView") {
             assert!(e["ms"].as_i64().unwrap() < 30_000, "article time is never page time: {e}");
         }
-        // The settings were kept: the bigger text, the warmer light, the typed address.
+        // The settings were kept: the bigger text, the warmer light.
         let settings: Value = serde_json::from_slice(&std::fs::read(Store::new(&o.home).settings_path()).unwrap()).unwrap();
         assert_eq!(settings["textSize"], 4);
         assert_eq!(settings["warmth"], 40);
-        assert_eq!(settings["phoneAddress"], "192.168.1.40:47824");
         // The light went back to Nickel's levels on the way out.
         assert_eq!(o.light.last(), Some(&('w', 30)), "{:?}", o.light);
         assert!(o.light.contains(&('w', 40)));
@@ -567,7 +535,7 @@ fn home_screens() {
             ("home-1", Setup { editions: 1, ..Default::default() }),
             ("home-2", Setup { editions: 2, ..Default::default() }),
             ("home-offline", Setup { online: false, sync_on_start: true, ..Default::default() }),
-            ("home-error", Setup { editions: 0, saved: false, last_error: Some("The phone stopped answering. Keep Sync with Kobo open on the phone."), ..Default::default() }),
+            ("home-error", Setup { editions: 0, saved: false, last_error: Some("Can\u{2019}t reach the relay."), ..Default::default() }),
         ] {
             let mut script = vec![mark(name)];
             if name == "home-offline" {
@@ -581,15 +549,26 @@ fn home_screens() {
     }
 }
 
-/// Starting with Wi-Fi off never reaches for the phone, even with an address typed.
+/// Where Settings doesn't fit on the screen, the foot bar turns its pages, and what is on
+/// the second works.
+#[test]
+fn settings_in_pages() {
+    let size = &SIZES[0];
+    let script = vec![tap_on("OpenSettings"), mark("01-settings"), tap_on("Next"), mark("02-settings-page-2"), tap_on("Reset"), mark("03-reset-armed"), tap_on("ResetCancel"), Step::Wait(500)];
+    let o = run(&format!("{}/settings-pages", size.name), size, &Setup::default(), script);
+    // Reset on the second page armed it, or there would have been no Cancel to tap.
+    assert!(o.out.join("03-reset-armed.png").exists());
+}
+
+/// Starting with Wi-Fi off never reaches for the relay, even paired.
 #[test]
 fn offline_never_tries_to_sync() {
-    let phone = FakePhone::start("db");
-    phone.with(|s| s.tokens = vec!["t".into()]);
-    let setup = Setup { online: false, sync_on_start: true, phone: Some(phone.address.clone()), ..Default::default() };
+    let relay = FakeRelay::start();
+    relay.list(&relay_keys());
+    let setup = Setup { online: false, sync_on_start: true, relay: Some(relay.url()), paired: true, relay_seen: true, ..Default::default() };
     let o = run("offline", &SIZES[2], &setup, vec![Step::Sleep(500), tap_on("OpenSettings"), mark("settings"), Step::Sleep(300)]);
     assert_eq!(o.syncs_started, 0);
-    assert!(phone.with(|s| s.requests.is_empty()));
+    assert!(relay.with(|s| s.requests.is_empty()));
 }
 
 /// Real time for a sync thread to finish, in steps the reader can poll between.
@@ -597,17 +576,15 @@ fn sleep_steps(ms: u64) -> Vec<Step> {
     (0..ms / 100).map(|_| Step::Sleep(100)).collect()
 }
 
-/// Offline, Turn on Wi-Fi and sync turns Wi-Fi on, syncs with the phone, and turns it off
+/// Offline, Turn on Wi-Fi and sync turns Wi-Fi on, syncs through the relay, and turns it off
 /// again; the home screen says so at each step.
 #[test]
 fn turn_on_wifi_sync_and_turn_off() {
-    let phone = FakePhone::start("db");
-    phone.with(|s| {
-        s.tokens = vec!["t".into()];
-        s.editions = [121, 120, 119, 118].into_iter().map(|id| (id, format!("v{id}"), edition(id))).collect();
-    });
+    let relay = FakeRelay::start();
+    relay.list(&relay_keys());
+    publish_editions(&relay);
     let size = &SIZES[2];
-    let setup = Setup { online: false, sync_on_start: true, phone: Some(phone.address.clone()), ..Default::default() };
+    let setup = Setup { online: false, sync_on_start: true, relay: Some(relay.url()), paired: true, relay_seen: true, ..Default::default() };
     let mut script = vec![Step::Sleep(300), mark("01-home-offline"), tap_on("OpenSettings"), mark("02-settings-offline"), tap_on("WifiAndSync"), mark("03-settings-turning-on")];
     script.push(Step::Wait(desktop::RADIO_ON_MS + 500));
     script.extend(sleep_steps(3000));
@@ -623,57 +600,23 @@ fn turn_on_wifi_sync_and_turn_off() {
     assert_eq!(Store::new(&o.home).load_state().unwrap().edition_order, vec![121, 120, 119, 118]);
 }
 
-/// Taps an address into the keypad, one key at a time.
-fn type_address(addr: &str) -> Vec<Step> {
-    let mut steps: Vec<Step> = (0..21).map(|_| tap_on("KeyDelete")).collect();
-    steps.extend(addr.chars().map(|c| tap_on(&format!("KeyChar({c:?})"))));
-    steps.push(tap_on("KeyOk"));
-    steps
-}
-
-/// With no phone to be found, Wi-Fi stays on and the sync is tried again; once the address
-/// is typed the next try reaches the phone and Wi-Fi goes off. Turn Wi-Fi off ends it too.
+/// A Kobo that has never shown its pairing code can't sync: Turn on Wi-Fi and sync (offline)
+/// and Sync now (online) open the pairing code instead, and Wi-Fi is left alone.
 #[test]
-fn wifi_stays_on_until_the_phone_is_found() {
-    let phone = FakePhone::start("db");
-    phone.with(|s| s.tokens = vec!["t".into()]);
-    // Nobody listens here.
-    let nobody = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().to_string();
+fn never_paired_opens_the_pairing_code() {
     let size = &SIZES[2];
-    let setup = Setup { online: false, phone: Some(nobody.clone()), beacon_seconds: 1, ..Default::default() };
-    let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
-    script.extend(sleep_steps(2500));
-    script.push(mark("01-settings-looking"));
-    script.push(Step::Key(Key::Home));
-    script.push(mark("02-home-looking"));
-    script.push(tap_on("OpenSettings"));
-    // Still on, and tried again.
-    script.push(Step::Wait(6000));
-    script.extend(sleep_steps(2500));
-    script.push(tap_on("PhoneTyped"));
-    script.extend(type_address(&phone.address));
-    script.extend(sleep_steps(2000));
-    script.push(mark("03-settings-found"));
-    script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
-    script.push(mark("04-settings-off"));
-    let o = run("wifi-looking", size, &setup, script);
-    assert!(o.syncs_started >= 3, "{}", o.syncs_started);
-    assert_eq!(o.radio, vec!["on", "off"]);
-    assert!(!o.wifi_left_on);
-    assert!(phone.with(|s| s.requests.iter().any(|r| r.contains("/v1/manifest"))));
-
-    // Turn Wi-Fi off while looking.
-    let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
-    script.extend(sleep_steps(2500));
-    script.push(tap_on("WifiOff"));
-    script.push(mark("01-turning-off"));
-    script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
-    script.push(Step::Wait(10_000));
-    script.push(mark("02-off"));
-    let o = run("wifi-looking-off", size, &setup, script);
-    assert_eq!(o.radio, vec!["on", "off"]);
-    assert_eq!(o.syncs_started, 1);
-    assert!(!o.wifi_left_on);
+    for (name, online, action) in [("unpaired-offline", false, "WifiAndSync"), ("unpaired-online", true, "SyncNow")] {
+        let setup = Setup { online, ..Default::default() };
+        let script = vec![tap_on("OpenSettings"), mark("01-settings-unpaired"), tap_on(action), mark("02-pair"), Step::Wait(desktop::RADIO_ON_MS + 500), tap_on("Back"), mark("03-settings-waiting")];
+        let o = run(name, size, &setup, script);
+        assert!(o.radio.is_empty(), "{name}: {:?}", o.radio);
+        assert_eq!(o.syncs_started, 0, "{name}");
+        assert_eq!(o.wifi_left_on, online, "{name}");
+        // The code was made and shown.
+        assert!(Store::new(&o.home).load_state().unwrap().relay_secret.is_some(), "{name}");
+        let shot = image::open(o.out.join("02-pair.png")).unwrap().to_luma8();
+        assert_eq!(rqrr::PreparedImage::prepare(shot).detect_grids().len(), 1, "{name}");
+    }
 }
 
 /// Wi-Fi that joins no network is turned off again and says why; no sync is tried. Sleep
@@ -681,13 +624,13 @@ fn wifi_stays_on_until_the_phone_is_found() {
 #[test]
 fn wifi_that_cannot_connect_goes_off_again() {
     let size = &SIZES[2];
-    let setup = Setup { online: false, wifi_no_network: true, ..Default::default() };
+    let setup = Setup { online: false, wifi_no_network: true, paired: true, ..Default::default() };
     let script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500), Step::Wait(desktop::RADIO_OFF_MS + 500), mark("01-settings-no-network"), Step::Key(Key::Home), mark("02-home-no-network")];
     let o = run("wifi-no-network", size, &setup, script);
     assert_eq!(o.radio, vec!["on", "off"]);
     assert_eq!(o.syncs_started, 0);
 
-    let setup = Setup { online: false, ..Default::default() };
+    let setup = Setup { online: false, paired: true, ..Default::default() };
     let script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(500), Step::Key(Key::Power), Step::Wait(20_000), Step::Key(Key::Power), mark("01-woken")];
     let o = run("wifi-sleep", size, &setup, script);
     assert_eq!(o.radio, vec!["on stopped"]);
@@ -695,7 +638,7 @@ fn wifi_that_cannot_connect_goes_off_again() {
     assert_eq!(o.syncs_started, 0);
 }
 
-/// An address where nobody listens.
+/// An address where nobody listens (`host:port`).
 fn nobody() -> String {
     std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().to_string()
 }
@@ -706,8 +649,8 @@ fn publish_editions(relay: &FakeRelay) {
     relay.publish(&crypto::b64url(&[1; 16]), &fakerelay::package("db", &editions, None, &[], json!({})), &[&relay_keys()]);
 }
 
-/// Turn on Wi-Fi and sync with the phone away: a sync through the relay is a success, even
-/// with nothing new, and Wi-Fi goes off again after it.
+/// Turn on Wi-Fi and sync: a sync through the relay is a success, even with nothing new, and
+/// Wi-Fi goes off again after it.
 #[test]
 fn turn_on_wifi_sync_through_the_relay_and_turn_off() {
     let size = &SIZES[2];
@@ -717,7 +660,7 @@ fn turn_on_wifi_sync_through_the_relay_and_turn_off() {
         if package {
             publish_editions(&relay);
         }
-        let setup = Setup { online: false, phone: Some(nobody()), beacon_seconds: 1, relay: Some(relay.url()), relay_seen: true, ..Default::default() };
+        let setup = Setup { online: false, relay: Some(relay.url()), paired: true, relay_seen: true, ..Default::default() };
         let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
         script.extend(sleep_steps(3000));
         script.push(mark("01-settings-synced"));
@@ -729,44 +672,51 @@ fn turn_on_wifi_sync_through_the_relay_and_turn_off() {
         assert!(!o.wifi_left_on);
         assert_eq!(o.syncs_started, 1, "{run_name}");
         let state = Store::new(&o.home).load_state().unwrap();
-        assert!(state.last_via_relay && state.last_error.is_none(), "{run_name}: {:?}", state.last_error);
+        assert!(state.last_error.is_none(), "{run_name}: {:?}", state.last_error);
         let expected: Vec<i64> = if package { vec![121, 120, 119, 118] } else { vec![120, 119, 118] };
         assert_eq!(state.edition_order, expected, "{run_name}");
         assert_eq!(relay.with(|s| s.fetched.len()), usize::from(package));
     }
 }
 
-/// With the phone away and the relay unreachable, or not yet told about this Kobo, Wi-Fi
-/// stays on and the sync is tried again, as when the phone can't be found; once the phone
-/// lists this Kobo with the relay, the next try gets through and Wi-Fi goes off.
+/// With the relay unreachable, or not yet told about this Kobo, Wi-Fi stays on and the sync is
+/// tried again, until Turn Wi-Fi off; once the phone lists this Kobo with the relay, the next
+/// try gets through and Wi-Fi goes off.
 #[test]
 fn wifi_stays_on_while_the_relay_cannot_help_yet() {
     let size = &SIZES[2];
     // Unreachable, until Turn Wi-Fi off.
-    let setup = Setup { online: false, phone: Some(nobody()), beacon_seconds: 1, relay: Some(format!("http://{}", nobody())), relay_seen: true, ..Default::default() };
+    let setup = Setup { online: false, relay: Some(format!("http://{}", nobody())), paired: true, relay_seen: true, ..Default::default() };
     let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
     script.extend(sleep_steps(2500));
-    script.push(mark("01-settings-looking"));
+    script.push(mark("01-settings-unreachable"));
+    script.push(Step::Key(Key::Home));
+    script.push(mark("02-home-unreachable"));
+    script.push(tap_on("OpenSettings"));
     script.push(Step::Wait(6000));
     script.extend(sleep_steps(2500));
     script.push(tap_on("WifiOff"));
     script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
     script.push(Step::Wait(10_000));
-    script.push(mark("02-off"));
+    script.push(mark("03-off"));
     let o = run("wifi-relay-unreachable", size, &setup, script);
-    assert!(o.syncs_started >= 2, "{}", o.syncs_started);
+    let tries = o.syncs_started;
+    assert!(tries >= 2, "{tries}");
     assert_eq!(o.radio, vec!["on", "off"]);
     assert!(!o.wifi_left_on);
     let state = Store::new(&o.home).load_state().unwrap();
-    assert_eq!(state.last_error.as_deref(), Some("The relay could not be reached."));
+    assert_eq!(state.last_error.as_deref(), Some("Can\u{2019}t reach the relay."));
 
     // Waiting for the phone to list this Kobo, which it does part way through.
     let relay = FakeRelay::start();
     publish_editions(&relay);
-    let setup = Setup { online: false, phone: Some(nobody()), beacon_seconds: 1, relay: Some(relay.url()), ..Default::default() };
+    let setup = Setup { online: false, relay: Some(relay.url()), paired: true, ..Default::default() };
     let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
     script.extend(sleep_steps(2500));
     script.push(mark("01-settings-waiting"));
+    script.push(Step::Key(Key::Home));
+    script.push(mark("01-home-waiting"));
+    script.push(tap_on("OpenSettings"));
     script.push(mark("phone-lists"));
     script.push(Step::Wait(6000));
     script.extend(sleep_steps(3000));
@@ -792,7 +742,7 @@ fn wifi_stays_on_while_the_relay_cannot_help_yet() {
 fn wifi_goes_off_when_the_phone_dropped_this_kobo() {
     let relay = FakeRelay::start();
     let size = &SIZES[2];
-    let setup = Setup { online: false, phone: Some(nobody()), beacon_seconds: 1, relay: Some(relay.url()), relay_seen: true, ..Default::default() };
+    let setup = Setup { online: false, relay: Some(relay.url()), paired: true, relay_seen: true, ..Default::default() };
     let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
     script.extend(sleep_steps(2500));
     script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
@@ -814,7 +764,7 @@ fn the_pairing_screen_notices_the_scan_and_syncs() {
     let relay = FakeRelay::start();
     publish_editions(&relay);
     let size = &SIZES[2];
-    let setup = Setup { phone: Some(nobody()), beacon_seconds: 1, relay: Some(relay.url()), ..Default::default() };
+    let setup = Setup { relay: Some(relay.url()), paired: true, ..Default::default() };
     let mut script = vec![tap_on("OpenSettings"), tap_on("OpenPair"), mark("01-pair-waiting")];
     // Asked once, and not listed yet.
     script.push(Step::Wait(5500));
@@ -824,7 +774,7 @@ fn the_pairing_screen_notices_the_scan_and_syncs() {
     script.push(Step::Wait(5500));
     script.extend(sleep_steps(3000));
     script.push(mark("03-settings-synced"));
-    // Back on Settings (only it has Pair through relay), and the code shown again asks
+    // Back on Settings (only it has Pair with phone), and the code shown again asks
     // nothing more: this Kobo is paired.
     script.push(tap_on("OpenPair"));
     script.push(mark("04-pair-paired"));
@@ -839,7 +789,7 @@ fn the_pairing_screen_notices_the_scan_and_syncs() {
     });
     assert_eq!(o.syncs_started, 1);
     let state = Store::new(&o.home).load_state().unwrap();
-    assert!(state.relay_seen && !state.relay_unpaired && state.last_via_relay);
+    assert!(state.relay_seen && !state.relay_unpaired && state.last_error.is_none());
     assert_eq!(state.edition_order, vec![121, 120, 119, 118]);
     assert_eq!(relay.with(|s| s.fetched.len()), 1);
     // Two questions, then the sync's own GET /v1/package and its one download.
@@ -849,7 +799,7 @@ fn the_pairing_screen_notices_the_scan_and_syncs() {
     // Left at once, or shown offline, the code asks nothing.
     let relay = FakeRelay::start();
     for (name, online) in [("pair-left", true), ("pair-offline", false)] {
-        let setup = Setup { online, phone: Some(nobody()), relay: Some(relay.url()), ..Default::default() };
+        let setup = Setup { online, relay: Some(relay.url()), paired: true, ..Default::default() };
         let mut script = vec![tap_on("OpenSettings"), tap_on("OpenPair")];
         if online {
             script.push(tap_on("Back"));
@@ -862,54 +812,50 @@ fn the_pairing_screen_notices_the_scan_and_syncs() {
     assert!(relay.with(|s| s.requests.is_empty()));
 }
 
-/// While the phone takes its time, the home screen says it is syncing.
+/// While the relay takes its time, the home screen says it is syncing.
 #[test]
 fn syncing_status_on_every_size() {
-    // A phone that takes the connection and never answers.
+    // A relay that takes the connection and never answers.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap().to_string();
+    let address = format!("http://{}", listener.local_addr().unwrap());
     for size in &SIZES {
-        let setup = Setup { sync_on_start: true, phone: Some(address.clone()), ..Default::default() };
+        let setup = Setup { sync_on_start: true, relay: Some(address.clone()), paired: true, relay_seen: true, ..Default::default() };
         let o = run(&format!("{}/home-syncing", size.name), size, &setup, vec![Step::Sleep(300), mark("home-syncing"), tap_on("OpenSettings"), mark("settings-syncing")]);
         assert_eq!(o.syncs_started, 1);
     }
     drop(listener);
 }
 
-/// A sync started by the reader, against a fake phone: a new edition shows up on the home
-/// screen while the reader is open, pictures are asked for at the screen's width, three at a
-/// time, and the saved list follows the phone.
+/// A sync started by the reader, through the relay: a new edition shows up on the home screen
+/// while the reader is open, pictures are taken at the screen's width, and the saved list
+/// follows the phone.
 #[test]
 fn what_a_sync_brings_shows_as_it_arrives() {
-    let phone = FakePhone::start("db");
+    let relay = FakeRelay::start();
+    relay.list(&relay_keys());
     let mut saved = saved_list();
     // The phone has dropped the summary-only article and saved nothing new.
     saved["order"] = json!([9038, 9001]);
     saved["articles"].as_object_mut().unwrap().remove("9006");
     saved["version"] = "s2".into();
-    phone.with(|s| {
-        s.tokens = vec!["t".into()];
-        s.editions = [121, 120, 119, 118].into_iter().map(|id| (id, format!("v{id}"), edition(id))).collect();
-        s.saved = Some(("s2".into(), saved));
-        for (url, bytes) in pictures() {
-            s.images.insert(url.into(), bytes);
-        }
-        s.images.insert("https://example.org/img/harbour.jpg".into(), encode(photo(1400, 900, 3), image::ImageFormat::Jpeg));
-        s.images.insert("https://example.org/img/harbour-plan.png".into(), encode(plan(1200, 800), image::ImageFormat::Png));
-        s.image_delay_ms = 2500;
-    });
+    let editions: Vec<fakerelay::Edition> = [121, 120, 119, 118].into_iter().map(|id| (id, format!("v{id}"), edition(id))).collect();
+    let mut pics: Vec<fakerelay::Picture> = pictures().into_iter().map(|(url, bytes)| (url.to_string(), 1264, bytes, "image/jpeg".to_string())).collect();
+    let harbour = encode(photo(1400, 900, 3), image::ImageFormat::Jpeg);
+    pics.push(("https://example.org/img/harbour.jpg".into(), 1264, harbour.clone(), "image/jpeg".into()));
+    pics.push(("https://example.org/img/harbour-plan.png".into(), 1264, encode(plan(1200, 800), image::ImageFormat::Png), "image/png".into()));
+    relay.publish(&crypto::b64url(&[2; 16]), &fakerelay::package("db", &editions, Some(("s2", saved)), &pics, json!({})), &[&relay_keys()]);
     let size = &SIZES[2];
-    let setup = Setup { sync_on_start: true, phone: Some(phone.address.clone()), ..Default::default() };
+    let setup = Setup { sync_on_start: true, relay: Some(relay.url()), paired: true, relay_seen: true, ..Default::default() };
     let mut script = vec![mark("01-before")];
-    // Wait for the new edition, then look at it while its pictures come.
+    // Wait for the new edition, then look at it with its pictures.
     for _ in 0..15 {
         script.push(Step::Sleep(100));
     }
     script.push(mark("02-new-edition"));
     script.push(tap_on("OpenEdition(0)"));
     script.push(tap_on("OpenArticle(9001)"));
-    script.push(mark("03-article-while-pictures-come"));
-    for _ in 0..100 {
+    script.push(mark("03-article"));
+    for _ in 0..20 {
         script.push(Step::Sleep(100));
     }
     script.push(Step::Key(Key::Forward));
@@ -922,13 +868,12 @@ fn what_a_sync_brings_shows_as_it_arrives() {
     script.push(mark("06-saved-after-sync"));
     let o = run("arrival", size, &setup, script);
     assert_eq!(o.syncs_started, 1);
-    let widths = phone.with(|s| s.image_widths.clone());
-    assert!(!widths.is_empty() && widths.iter().all(|w| *w == Some(1264)), "{widths:?}");
-    assert!(phone.with(|s| s.max_images_in_flight) <= 3);
     let store = Store::new(&o.home);
     let state = store.load_state().unwrap();
     assert_eq!(state.edition_order, vec![121, 120, 119, 118]);
     assert_eq!(store.load_saved().order, vec![9038, 9001]);
+    assert_eq!(store.read_image("https://example.org/img/harbour.jpg"), Some(harbour));
+    assert_eq!(relay.with(|s| s.fetched.len()), 1);
 }
 
 /// The panel picture in `dir/panel/<name>.png` (as the panel physically shows it).
@@ -961,9 +906,6 @@ fn orientation_from_settings_and_sensor() {
         mark("04-still-portrait-inverted"),
         tap_on("OpenSettings"),
         mark("05-settings"),
-        // Orientation is on the second page of Settings.
-        tap_on("Next"),
-        mark("05-settings-page-2"),
         // Landscape, the way the sensor last said the Kobo is held.
         tap_on("SetOrientation(Landscape)"),
         mark("06-settings-landscape"),

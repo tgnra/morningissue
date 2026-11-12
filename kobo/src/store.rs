@@ -16,11 +16,7 @@ use std::path::{Path, PathBuf};
 #[serde(rename_all = "camelCase", default)]
 pub struct State {
     pub device_id: String,
-    pub token: Option<String>,
     pub db_id: Option<String>,
-    /// `host:port` of the phone the last successful request reached.
-    pub last_address: Option<String>,
-    pub phone_name: Option<String>,
     /// The next event `seq` to hand out. Events in `events.jsonl` may already be higher; see
     /// [`Store::next_seq`].
     pub next_seq: i64,
@@ -34,7 +30,7 @@ pub struct State {
     pub last_sync_at: Option<i64>,
     /// Why the last attempt failed; None when it succeeded.
     pub last_error: Option<String>,
-    /// Phone clock minus Kobo clock in milliseconds, from the phone's `Date` header. Added to
+    /// True time minus Kobo clock in milliseconds, from the relay's `Date` header. Added to
     /// event times so they are true UTC even when the Kobo's clock is off.
     pub clock_offset_ms: i64,
     /// Relay sync (`docs/relay-sync.md`): the device secret `S`, base64url. Made once, when
@@ -58,11 +54,9 @@ pub struct State {
     /// The relay's last answer was `401 unknown`: the phone does not (or no longer) list
     /// this Kobo.
     pub relay_unpaired: bool,
-    /// The last sync that finished went through the relay.
-    pub last_via_relay: bool,
 }
 
-/// One line of `events.jsonl`, in the shape `POST /v1/events` sends.
+/// One line of `events.jsonl`, in the shape a changes batch carries (`docs/relay-sync.md`).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
@@ -260,7 +254,7 @@ impl Store {
         ids.into_iter().filter(|id| state.editions.contains_key(&id.to_string())).filter_map(|id| self.load_bundle(id)).collect()
     }
 
-    /// The saved articles from the last `GET /v1/saved`, or an empty list.
+    /// The saved articles from the last package's `saved.json`, or an empty list.
     pub fn load_saved(&self) -> SavedList {
         fs::read(self.saved_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
@@ -353,7 +347,7 @@ impl Store {
     }
 
     /// Removes every edition, image and unsent event (a `dbId` change). Keeps the device ID,
-    /// the token and the seq counter, which only goes up.
+    /// the relay secret and the seq counter, which only goes up.
     pub fn wipe(&self, state: &mut State) -> io::Result<()> {
         let next = self.next_seq(state)?;
         for dir in [self.editions_dir(), self.images_dir()] {

@@ -72,21 +72,7 @@ fn against_the_real_relay() {
     let secret = crypto::b64url_decode(&store.ensure_relay_secret().unwrap()).unwrap();
     let device = DeviceKeys::from_secret(&secret);
     let device_id = store.load_state().unwrap().device_id;
-    let opts = Options {
-        beacon_wait: Duration::ZERO,
-        beacon_port: 1,
-        request_timeout: Duration::from_secs(10),
-        image_timeout: Duration::from_secs(10),
-        pair_timeout: Duration::from_secs(10),
-        deadline: Duration::from_secs(120),
-        configured_phone: None,
-        device_name: "Kobo Libra 2".into(),
-        manual_phone: None,
-        image_width: 1264,
-        image_workers: 1,
-        progress: None,
-        relay: Some(url.clone()),
-    };
+    let opts = Options { request_timeout: Duration::from_secs(10), deadline: Duration::from_secs(120), image_width: 1264, progress: None, relay: url.clone() };
 
     // Before the phone lists it: waiting.
     assert!(matches!(sync(&store, &opts), Err(SyncError::RelayUnpaired { waiting: true })));

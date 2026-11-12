@@ -1,9 +1,9 @@
 //! TLS for `https://` relays: rustls with the ring provider and the Mozilla roots
-//! (webpki-roots). The phone on the LAN is always plain HTTP.
+//! (webpki-roots).
 //!
 //! Certificate validity needs roughly the right time, and a Kobo's clock can be badly wrong.
 //! The time the client believes is the system clock plus the offset learnt from the last
-//! `Date` header a relay or the phone sent, and never earlier than the build time.
+//! `Date` header the relay sent, and never earlier than the build time.
 
 use rustls::client::ClientConnection;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};

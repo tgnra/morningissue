@@ -1,12 +1,11 @@
 //! What the reader's Settings screen and "Aa" popover change, kept in `data/settings.json`.
-//! A missing or broken file gives the defaults; unknown fields are ignored.
+//! A missing or broken file gives the defaults; unknown fields are ignored, among them the
+//! typed phone address (`phoneAddress`) and relay address (`relayAddress`) that earlier
+//! versions kept here.
 
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::Path;
-
-/// The phone's port when none is typed (`docs/kobo-sync.md`, "Transport").
-pub const DEFAULT_PORT: u16 = 47824;
 
 /// The text sizes the reader offers, as a factor of the base size.
 pub const TEXT_SIZES: [f32; 5] = [0.86, 0.93, 1.0, 1.12, 1.26];
@@ -48,12 +47,6 @@ fn lenient_orientation<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
-    /// `host:port` typed on the keypad; None finds the phone by its beacon.
-    pub phone_address: Option<String>,
-    /// The relay's address typed on the keyboard (`http[s]://host[:port]`); None uses
-    /// `relay` in `config.json`, if any.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub relay_address: Option<String>,
     /// Swaps the two page-turn buttons.
     pub invert_buttons: bool,
     /// None until chosen: the reader starts in the orientation it finds the screen in.
@@ -69,7 +62,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { phone_address: None, relay_address: None, invert_buttons: false, orientation: None, text_size: DEFAULT_TEXT_SIZE, brightness: None, warmth: None }
+        Settings { invert_buttons: false, orientation: None, text_size: DEFAULT_TEXT_SIZE, brightness: None, warmth: None }
     }
 }
 
@@ -79,12 +72,6 @@ impl Settings {
         s.text_size = s.text_size.min(TEXT_SIZES.len() - 1);
         s.brightness = s.brightness.map(|v| v.min(100));
         s.warmth = s.warmth.map(|v| v.min(100));
-        if let Some(a) = &s.phone_address {
-            s.phone_address = parse_address(a).ok();
-        }
-        if let Some(a) = &s.relay_address {
-            s.relay_address = crate::relay::parse_address(a).ok();
-        }
         s
     }
 
@@ -98,46 +85,9 @@ impl Settings {
     }
 }
 
-/// Checks an address typed on the keypad: an IPv4 address with an optional port. Returns it
-/// as `a.b.c.d:port`, with the default port when none was typed.
-pub fn parse_address(s: &str) -> Result<String, &'static str> {
-    let s = s.trim();
-    if s.is_empty() {
-        return Err("Type the address the phone's Sync with Kobo screen shows.");
-    }
-    let (host, port) = match s.split_once(':') {
-        Some((h, p)) => (h, Some(p)),
-        None => (s, None),
-    };
-    let parts: Vec<&str> = host.split('.').collect();
-    let ok = parts.len() == 4 && parts.iter().all(|p| !p.is_empty() && p.len() <= 3 && p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u16>().is_ok_and(|n| n <= 255));
-    if !ok {
-        return Err("An address is four numbers from 0 to 255 with dots between, like 192.168.1.20.");
-    }
-    let port = match port {
-        None => DEFAULT_PORT,
-        Some(p) => match p.parse::<u16>() {
-            Ok(n) if n > 0 && !p.starts_with('0') => n,
-            _ => return Err("The port after ':' is a number from 1 to 65535."),
-        },
-    };
-    let host: Vec<String> = parts.iter().map(|p| p.parse::<u16>().unwrap().to_string()).collect();
-    Ok(format!("{}:{port}", host.join(".")))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn addresses() {
-        assert_eq!(parse_address("192.168.1.20"), Ok("192.168.1.20:47824".into()));
-        assert_eq!(parse_address("10.0.0.7:8080"), Ok("10.0.0.7:8080".into()));
-        assert_eq!(parse_address("010.0.0.7"), Ok("10.0.0.7:47824".into()));
-        for bad in ["", "1.2.3", "1.2.3.4.5", "256.1.1.1", "1..2.3", "1.2.3.4:", "1.2.3.4:0", "1.2.3.4:70000", "1.2.3.4:1:2", "1.2.3.4:080"] {
-            assert!(parse_address(bad).is_err(), "{bad}");
-        }
-    }
 
     #[test]
     fn round_trip() {
@@ -146,12 +96,19 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { phone_address: Some("1.2.3.4:5".into()), relay_address: Some("https://relay.example.org".into()), invert_buttons: true, orientation: Some(Orientation::Landscape), text_size: 4, brightness: Some(40), warmth: Some(70) };
+        let s = Settings { invert_buttons: true, orientation: Some(Orientation::Landscape), text_size: 4, brightness: Some(40), warmth: Some(70) };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         std::fs::write(&path, br#"{"textSize": 99, "future": 1, "orientation": "portrait"}"#).unwrap();
         let s = Settings::load(&path);
         assert_eq!((s.text_size, s.orientation), (4, Some(Orientation::Portrait)));
+        // The typed addresses earlier versions kept are ignored, valid or not.
+        std::fs::write(&path, br#"{"phoneAddress": "192.168.1.40:47824", "relayAddress": "https://relay.example.org", "invertButtons": true}"#).unwrap();
+        assert_eq!(Settings::load(&path), Settings { invert_buttons: true, ..Default::default() });
+        std::fs::write(&path, br#"{"phoneAddress": 7, "relayAddress": ["x"], "textSize": 1}"#).unwrap();
+        assert_eq!(Settings::load(&path).text_size, 1);
+        Settings::load(&path).save(&path).unwrap();
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("Address"));
     }
 
     #[test]

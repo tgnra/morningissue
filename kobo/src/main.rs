@@ -79,7 +79,7 @@ fn main() -> ExitCode {
             match sync::sync(&store, &sync::Options::from_config(&config)) {
                 Ok(r) => {
                     println!(
-                        "synced with {}: {} events sent, editions fetched {:?}, removed {:?}, saved list {}, {} images fetched, {} not on the phone{}{}",
+                        "synced through {}: {} events sent, editions fetched {:?}, removed {:?}, saved list {}, {} images installed, {} not in the package{}",
                         r.address,
                         r.events_sent,
                         r.editions_fetched,
@@ -87,7 +87,6 @@ fn main() -> ExitCode {
                         if r.saved_fetched { "fetched" } else { "unchanged" },
                         r.images_fetched,
                         r.images_missing,
-                        if r.paired { ", paired" } else { "" },
                         if r.wiped { ", phone database changed: local data wiped" } else { "" }
                     );
                     ExitCode::SUCCESS

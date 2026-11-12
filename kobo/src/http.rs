@@ -1,6 +1,5 @@
-//! Just enough HTTP/1.1 for the phone and the relay: one request per connection,
-//! Content-Length or chunked bodies, no redirects. The phone is plain HTTP; a relay may be
-//! `http://` or `https://` (TLS through [`crate::tls`]).
+//! Just enough HTTP/1.1 for the relay: one request per connection, Content-Length or chunked
+//! bodies, no redirects. A relay may be `http://` or `https://` (TLS through [`crate::tls`]).
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -25,10 +24,6 @@ impl Response {
 const MAX_BODY: u64 = 64 << 20;
 /// A streamed body larger than this is refused (the relay's own package limit is 512 MiB).
 const MAX_STREAM: u64 = 2 << 30;
-
-pub fn resolve(address: &str) -> io::Result<SocketAddr> {
-    address.to_socket_addrs()?.next().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("bad address {address}")))
-}
 
 /// Where a relay is: `http://` or `https://`, a host, a port and an optional path prefix
 /// (`https://example.org/relay` puts every path under `/relay`).
@@ -136,15 +131,6 @@ impl Sink for Vec<u8> {
         self.clear();
         Ok(())
     }
-}
-
-/// A request to the phone at `host:port`, plain HTTP, with an optional bearer token.
-pub fn request(address: &str, method: &str, path: &str, token: Option<&str>, body: Option<&[u8]>, timeout: Duration) -> io::Result<Response> {
-    let addr = resolve(address)?;
-    let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
-    let headers: Vec<(&str, String)> = token.map(|t| ("Authorization", format!("Bearer {t}"))).into_iter().collect();
-    let call = Call { method, target: path, headers: &headers, body, content_type: "application/json; charset=utf-8" };
-    exchange(Box::new(stream_setup(stream, timeout)?), address, &call, None)
 }
 
 /// A request to a relay. With a sink, a `200` or `206` body is copied there instead of being

@@ -1,7 +1,6 @@
 //! The device order of `docs/relay-sync.md` against an in-process fake relay over a real
 //! socket, plain and TLS.
 
-mod fakephone;
 mod fakerelay;
 
 use fakerelay::{package, Edition, FakeRelay, Picture};
@@ -20,21 +19,7 @@ fn home(name: &str) -> PathBuf {
 }
 
 fn opts(relay: &str) -> Options {
-    Options {
-        beacon_wait: Duration::ZERO,
-        beacon_port: 1,
-        request_timeout: Duration::from_secs(5),
-        image_timeout: Duration::from_secs(5),
-        pair_timeout: Duration::from_secs(5),
-        deadline: Duration::from_secs(60),
-        configured_phone: None,
-        device_name: "Kobo Libra 2".into(),
-        manual_phone: None,
-        image_width: 1264,
-        image_workers: 3,
-        progress: None,
-        relay: Some(relay.into()),
-    }
+    Options { request_timeout: Duration::from_secs(5), deadline: Duration::from_secs(60), image_width: 1264, progress: None, relay: relay.into() }
 }
 
 /// A Kobo that has shown its pairing code: its store and its keys.
@@ -113,7 +98,7 @@ fn a_package_is_installed_and_events_stay_until_a_package_acknowledges_them() {
     relay.publish(&id(1), &package("db-A", &editions(), Some(("s1", saved())), &pictures(), json!({})), &[&keys]);
 
     let r = sync(&store, &opts(&relay.url())).unwrap();
-    assert!(r.via_relay);
+    assert_eq!(r.address, relay.url());
     assert_eq!((r.events_sent, r.editions_fetched.clone(), r.saved_fetched), (3, vec![2, 1], true));
     assert_eq!((r.images_fetched, r.images_missing), (2, 1));
     // The events went as one encrypted batch, with this Kobo's deviceId.
@@ -126,7 +111,7 @@ fn a_package_is_installed_and_events_stay_until_a_package_acknowledges_them() {
     // Not acknowledged yet: still kept, and still applied on top.
     assert_eq!(seqs(&store), vec![1, 2, 3]);
     assert_eq!((state.relay_uploaded_seq, state.relay_package.clone(), state.relay_fetched), (3, Some(id(1)), true));
-    assert!(state.last_via_relay && state.last_error.is_none() && state.relay_seen);
+    assert!(state.last_sync_at.is_some() && state.last_error.is_none() && state.relay_seen);
     assert_eq!(state.db_id.as_deref(), Some("db-A"));
     assert_eq!(state.edition_order, vec![2, 1]);
     assert_eq!(relay.with(|s| s.fetched.clone()), vec![(keys.kid.clone(), id(1))]);
@@ -276,7 +261,7 @@ fn asking_whether_the_phone_lists_this_kobo() {
     let (store, keys) = kobo("listed");
     store.append_event(&event(1)).unwrap();
     relay.publish(&id(1), &package("db-A", &editions(), None, &[], json!({})), &[&keys]);
-    let listed = |address: &str| morningissue::relay::listed(&store, &opts(address), address);
+    let listed = |address: &str| morningissue::relay::listed(&store, &opts(address));
     assert!(!listed(&relay.url()).unwrap());
     let state = store.load_state().unwrap();
     assert!(state.relay_unpaired && !state.relay_seen && state.last_error.is_none());
@@ -346,23 +331,24 @@ fn a_tampered_package_is_not_installed() {
     assert_eq!(sync(&store, &opts(&relay.url())).unwrap().editions_fetched, vec![2, 1]);
 }
 
+/// A Kobo that has never shown its pairing code has no secret: the sync says so and asks the
+/// relay nothing. A relay address that can't be used is reported too.
 #[test]
-fn the_phone_on_the_lan_is_used_when_the_relay_cannot_be_reached() {
-    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-    let (store, _) = kobo("fallback");
-    let phone = fakephone::FakePhone::start("db-A");
-    phone.with(|s| s.editions = vec![(5, "v".into(), bundle(5, "Fifth", &[]))]);
-    let mut o = opts(&format!("http://127.0.0.1:{closed}"));
-    o.manual_phone = Some(phone.address.clone());
-    let r = sync(&store, &o).unwrap();
-    assert!(!r.via_relay);
-    assert_eq!(r.editions_fetched, vec![5]);
-    assert!(!store.load_state().unwrap().last_via_relay);
-    // Without a relay secret the relay is not tried at all.
-    let plain = Store::new(home("no-secret"));
-    let mut o = opts("http://127.0.0.1:9");
-    o.manual_phone = Some(phone.address.clone());
-    assert!(!sync(&plain, &o).unwrap().via_relay);
+fn without_a_pairing_secret_nothing_is_asked() {
+    let relay = FakeRelay::start();
+    let store = Store::new(home("never-paired"));
+    match sync(&store, &opts(&relay.url())) {
+        Err(SyncError::NotPaired) => {}
+        other => panic!("{other:?}"),
+    }
+    assert!(store.load_state().unwrap().last_error.unwrap().starts_with("Not paired yet"));
+    assert!(relay.with(|s| s.requests.is_empty()));
+    let (store, _) = kobo("bad-address");
+    match sync(&store, &opts("ftp://x")) {
+        Err(SyncError::RelayAddress(_)) => {}
+        other => panic!("{other:?}"),
+    }
+    assert!(store.load_state().unwrap().last_error.unwrap().contains("config.json"));
 }
 
 /// A CA and a `localhost` certificate it signed, valid from `not_before` (year).

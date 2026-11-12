@@ -132,9 +132,6 @@ pub enum Action {
     /// Turns Wi-Fi on, syncs, and turns it off again.
     WifiAndSync,
     WifiOff,
-    PhoneAuto,
-    /// Opens the keypad for a typed phone address.
-    PhoneTyped,
     InvertButtons,
     /// Settings > Reset: shows the confirmation.
     Reset,
@@ -142,15 +139,7 @@ pub enum Action {
     /// Erases everything on the next start and exits now.
     ResetConfirm,
     SetOrientation(crate::settings::Orientation),
-    /// A key of the address keypad.
-    KeyChar(char),
-    KeyDelete,
-    KeyOk,
-    /// A key that types several characters at once ("https://").
-    KeyText(String),
-    /// Opens the keyboard for the relay's address.
-    RelayTyped,
-    /// Shows the relay pairing code.
+    /// Shows the pairing code.
     OpenPair,
 }
 

@@ -1,5 +1,6 @@
 //! The phone's golden fixtures (`docs/kobo-sync-fixtures/`, written by the app's
-//! `BundleExportTest`) parse here without losing anything, so the two sides agree on the wire.
+//! `BundleExportTest`) parse here without losing anything, so the two sides agree on the
+//! formats a relay package carries: the manifest, edition bundles and the saved shelf.
 
 use morningissue::model::{Block, Bundle, Manifest, SavedList};
 use serde_json::Value;
@@ -14,7 +15,7 @@ fn fixture(name: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// The phone's `GET /v1/saved` parses whole: every listed article is there with all its
+/// The phone's saved shelf parses whole: every listed article is there with all its
 /// blocks, and one whose text the phone could not get is marked summary-only.
 #[test]
 fn phone_saved_list_parses() {
