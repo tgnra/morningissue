@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,8 @@ const (
 	DefaultTTL = 48 * time.Hour
 	// DefaultMaxPackage is the default package size limit.
 	DefaultMaxPackage = 512 << 20
+	// DefaultMaxPart is the default size limit of one part of a package uploaded in parts.
+	DefaultMaxPart = 64 << 20
 	// MaxChanges is the size limit of one changes envelope.
 	MaxChanges = 4 << 20
 	// SweepInterval is how often the sweeper runs.
@@ -44,6 +47,7 @@ const (
 var (
 	blobID  = regexp.MustCompile(`^[A-Za-z0-9_-]{16,64}$`)
 	batchRe = regexp.MustCompile(`^(0|[1-9][0-9]*)-(0|[1-9][0-9]*)$`)
+	partRe  = regexp.MustCompile(`^(0|[1-9][0-9]{0,3})$`)
 )
 
 // Config configures a Server.
@@ -55,6 +59,9 @@ type Config struct {
 	TTL time.Duration
 	// MaxPackage is the package size limit in bytes. Defaults to DefaultMaxPackage.
 	MaxPackage int64
+	// MaxPart is the size limit of one part of a package uploaded in parts. Defaults to
+	// DefaultMaxPart.
+	MaxPart int64
 	// RegistrationToken, when set, is needed to create a group.
 	RegistrationToken string
 	// Replay remembers the signatures seen. Open it with auth.OpenReplayCache in the data
@@ -86,6 +93,9 @@ func New(cfg Config) *Server {
 	if cfg.MaxPackage <= 0 {
 		cfg.MaxPackage = DefaultMaxPackage
 	}
+	if cfg.MaxPart <= 0 {
+		cfg.MaxPart = DefaultMaxPart
+	}
 	cfg.BasePath = strings.TrimRight(cfg.BasePath, "/")
 	if cfg.Replay == nil {
 		cfg.Replay = auth.NewReplayCache()
@@ -97,6 +107,8 @@ func New(cfg Config) *Server {
 	m.HandleFunc("DELETE /v1/group", s.deleteGroup)
 	m.HandleFunc("PUT /v1/group/devices", s.putDevices)
 	m.HandleFunc("PUT /v1/group/packages/{packageId}", s.putPackage)
+	m.HandleFunc("PUT /v1/group/packages/{packageId}/parts/{n}", s.putPart)
+	m.HandleFunc("POST /v1/group/packages/{packageId}/complete", s.complete)
 	m.HandleFunc("POST /v1/group/packages/{packageId}/publish", s.publish)
 	m.HandleFunc("GET /v1/group/status", s.status)
 	m.HandleFunc("GET /v1/group/changes", s.listChanges)
@@ -235,6 +247,8 @@ func (s *Server) storeError(w http.ResponseWriter, err error, conflictCode strin
 		writeError(w, http.StatusConflict, conflictCode)
 	case errors.Is(err, store.ErrTooMany):
 		writeError(w, http.StatusTooManyRequests, "too_many")
+	case errors.Is(err, store.ErrTooLarge):
+		writeError(w, http.StatusRequestEntityTooLarge, "too_large")
 	default:
 		s.internal(w, err)
 	}
@@ -466,8 +480,9 @@ func (s *Server) receive(r *http.Request, limit int64) (*received, error) {
 }
 
 // authStream authenticates a request with a large body, streaming the body to disk first.
-// On success the caller must commit or remove the received file.
-func (s *Server) authStream(w http.ResponseWriter, r *http.Request, k kind, limit int64, valid func() bool) (*caller, *received, bool) {
+// With envelope set, the body must start as an MIR1 envelope does. On success the caller must
+// commit or remove the received file.
+func (s *Server) authStream(w http.ResponseWriter, r *http.Request, k kind, limit int64, envelope bool, valid func() bool) (*caller, *received, bool) {
 	c, ok := s.preauth(w, r, k)
 	if !ok {
 		return nil, nil, false
@@ -494,7 +509,7 @@ func (s *Server) authStream(w http.ResponseWriter, r *http.Request, k kind, limi
 		os.Remove(rc.path)
 		return nil, nil, false
 	}
-	if string(rc.head) != magic {
+	if envelope && string(rc.head) != magic {
 		os.Remove(rc.path)
 		writeError(w, http.StatusBadRequest, "not_mir1")
 		return nil, nil, false
@@ -618,7 +633,7 @@ func (s *Server) putDevices(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) putPackage(w http.ResponseWriter, r *http.Request) {
 	pid := r.PathValue("packageId")
-	c, rc, ok := s.authStream(w, r, ownerKind, s.cfg.MaxPackage, func() bool { return blobID.MatchString(pid) })
+	c, rc, ok := s.authStream(w, r, ownerKind, s.cfg.MaxPackage, true, func() bool { return blobID.MatchString(pid) })
 	if !ok {
 		return
 	}
@@ -628,6 +643,129 @@ func (s *Server) putPackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// putPart stores part n of a package uploaded in parts. Only part 0 starts an envelope.
+func (s *Server) putPart(w http.ResponseWriter, r *http.Request) {
+	pid, ns := r.PathValue("packageId"), r.PathValue("n")
+	n, _ := strconv.Atoi(ns)
+	valid := func() bool { return blobID.MatchString(pid) && partRe.MatchString(ns) && n < store.MaxParts }
+	c, rc, ok := s.authStream(w, r, ownerKind, s.cfg.MaxPart, n == 0, valid)
+	if !ok {
+		return
+	}
+	if err := s.cfg.Store.PutPart(c.gid, pid, n, rc.path, rc.size, s.cfg.MaxPackage, s.cfg.Now()); err != nil {
+		os.Remove(rc.path)
+		s.storeError(w, err, "uploaded")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// complete joins a package's parts, checks the result against the size and SHA-256 the phone
+// sends, and stores it as an upload, as PUT /v1/group/packages/{packageId} would. Asking
+// again once it is done (a lost response) succeeds if the size matches.
+func (s *Server) complete(w http.ResponseWriter, r *http.Request) {
+	c, body, ok := s.authSmall(w, r, ownerKind)
+	if !ok {
+		return
+	}
+	pid := r.PathValue("packageId")
+	var req struct {
+		Parts  int    `json:"parts"`
+		Size   int64  `json:"size"`
+		SHA256 string `json:"sha256"`
+	}
+	if !blobID.MatchString(pid) || json.Unmarshal(body, &req) != nil {
+		writeError(w, http.StatusBadRequest, "malformed")
+		return
+	}
+	want, err := hex.DecodeString(req.SHA256)
+	if err != nil || len(want) != sha256.Size || req.SHA256 != strings.ToLower(req.SHA256) || req.Parts < 1 || req.Parts > store.MaxParts || req.Size < int64(len(magic)) {
+		writeError(w, http.StatusBadRequest, "malformed")
+		return
+	}
+	if req.Size > s.cfg.MaxPackage {
+		writeError(w, http.StatusRequestEntityTooLarge, "too_large")
+		return
+	}
+	if size, done := s.cfg.Store.Uploaded(c.gid, pid); done {
+		if size != req.Size {
+			writeError(w, http.StatusConflict, "uploaded")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	paths, total, err := s.cfg.Store.PartPaths(c.gid, pid, req.Parts)
+	if err != nil {
+		s.storeError(w, err, "parts_missing")
+		return
+	}
+	if total != req.Size {
+		writeError(w, http.StatusConflict, "size_mismatch")
+		return
+	}
+	joined, err := s.join(paths)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	if subtle.ConstantTimeCompare(joined.hash, want) != 1 || joined.size != req.Size {
+		os.Remove(joined.path)
+		writeError(w, http.StatusConflict, "hash_mismatch")
+		return
+	}
+	if string(joined.head) != magic {
+		os.Remove(joined.path)
+		writeError(w, http.StatusBadRequest, "not_mir1")
+		return
+	}
+	if err := s.cfg.Store.CompleteParts(c.gid, pid, joined.path, joined.size, s.cfg.Now()); err != nil {
+		os.Remove(joined.path)
+		s.storeError(w, err, "uploaded")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// join copies the parts, in order, into one temporary file, hashing it.
+func (s *Server) join(paths []string) (*received, error) {
+	f, err := s.cfg.Store.TempFile()
+	if err != nil {
+		return nil, err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			f.Close()
+			os.Remove(f.Name())
+		}
+	}()
+	h := sha256.New()
+	head := &headWriter{}
+	out := io.MultiWriter(f, h, head)
+	var n int64
+	for _, p := range paths {
+		part, err := os.Open(p)
+		if err != nil {
+			return nil, err
+		}
+		m, err := io.Copy(out, part)
+		part.Close()
+		if err != nil {
+			return nil, err
+		}
+		n += m
+	}
+	if err := f.Sync(); err != nil {
+		return nil, err
+	}
+	if err := f.Close(); err != nil {
+		return nil, err
+	}
+	ok = true
+	return &received{path: f.Name(), size: n, hash: h.Sum(nil), head: head.b}, nil
 }
 
 func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
@@ -833,7 +971,7 @@ func validBatch(b string) bool {
 
 func (s *Server) putChanges(w http.ResponseWriter, r *http.Request) {
 	batch := r.PathValue("batch")
-	c, rc, ok := s.authStream(w, r, deviceKind, MaxChanges, func() bool { return validBatch(batch) })
+	c, rc, ok := s.authStream(w, r, deviceKind, MaxChanges, true, func() bool { return validBatch(batch) })
 	if !ok {
 		return
 	}

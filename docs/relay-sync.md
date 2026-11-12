@@ -154,6 +154,22 @@ Blob IDs are base64url and 16 to 64 characters long.
 - The package isn't offered to anyone until it is published. Unpublished uploads are deleted after 1 hour.
 - Response: `204`.
 
+**`PUT /v1/group/packages/{packageId}/parts/{n}`** uploads part `n` of a package sent in parts, which is how the phone sends every package: one request then never carries more than a part, so a proxy's request size limit (Cloudflare's is 100 MB) doesn't bound the package, and a dropped connection costs only a part.
+
+- `n` is `0`, `1`, … in decimal without leading zeros, below 1024. The parts may arrive in any order; sending a part again replaces it.
+- The body is streamed, up to the relay's part limit (default 64 MiB). Part `0` starts with the envelope's `MIR1`; the others are plain slices of it.
+- The parts together may not pass the package limit (`413`). A package that is already uploaded or current takes no parts (`409 "uploaded"`).
+- Parts are kept for 1 hour after the last one, then deleted if never completed.
+- Response: `204`.
+
+**`POST /v1/group/packages/{packageId}/complete`** joins the parts into the package.
+
+- Body: `{"parts": <count>, "size": <bytes>, "sha256": "<lowercase hex SHA-256 of the whole envelope>"}`.
+- The relay joins parts `0` to `count - 1` in order and checks them: `409 "parts_missing"` when one is missing or there are more, `409 "size_mismatch"` when they don't add up to `size`, `409 "hash_mismatch"` when the joined bytes don't match `sha256` (the parts are kept, so the wrong one can be sent again), `400 "not_mir1"` when they don't start an envelope.
+- The package is then an upload, exactly as after `PUT /v1/group/packages/{packageId}`, and the parts are deleted.
+- Completing again once it is done succeeds when `size` matches (`409 "uploaded"` otherwise), so a lost response can be retried.
+- Response: `204`.
+
 **`POST /v1/group/packages/{packageId}/publish`** makes the package current.
 
 - Body: `{"keys": {"<device kid>": "<base64url wrapped-key envelope>", …}}`.
@@ -247,7 +263,7 @@ Runs after the early build, when a relay is configured, and from **Publish** on 
 
 1. `PUT /v1/group` (only the first time, or after a `401`), then `PUT /v1/group/devices`.
 2. Build the package from the three latest released editions, the saved shelf and the images, exported and prepared as `docs/kobo-sync.md` describes.
-3. Encrypt it with a fresh package key and `PUT` it. Wrap the key for each device, then publish.
+3. Encrypt it with a fresh package key and upload it in parts of 32 MiB (`PUT …/parts/{n}`, each sent again up to 3 times after a network failure or a `5xx`), then `POST …/complete`. Wrap the key for each device, then publish.
 
 ### Device: sync
 

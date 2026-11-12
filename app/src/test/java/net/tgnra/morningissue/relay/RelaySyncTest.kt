@@ -118,6 +118,8 @@ class RelaySyncTest {
         clock = clock,
         allowLocalHttp = true,
         scope = scope,
+        // Small parts, so that every test's package is uploaded in several.
+        partBytes = PART_BYTES,
     )
 
     @After
@@ -366,6 +368,42 @@ class RelaySyncTest {
     }
 
     @Test
+    fun thePackageIsUploadedInPartsAndJoinedOnTheRelay() = runBlocking {
+        pairBoth()
+        val published = sync.publish() as RelayResult.Published
+        val id = relay.current!!
+        val parts = ((published.bytes + PART_BYTES - 1) / PART_BYTES).toInt()
+        assertTrue("several parts", parts > 1)
+        assertEquals((0 until parts).map { "$id/$it" }, relay.partRequests.toList())
+        assertEquals(published.bytes, relay.packages[id]!!.size.toLong())
+        assertTrue(relay.parts.isEmpty())
+        // What the Kobo gets reads whole.
+        assertTrue(download(libra).containsKey("manifest.json"))
+    }
+
+    @Test
+    fun aPartThatFailsIsSentAgain() = runBlocking {
+        pairBoth()
+        relay.failPartsOnce += 1
+        val published = sync.publish()
+        assertTrue(published.toString(), published is RelayResult.Published)
+        assertEquals(2, relay.partRequests.count { it.endsWith("/1") })
+        assertTrue(download(libra).containsKey("manifest.json"))
+    }
+
+    @Test
+    fun aPartThatKeepsFailingFailsThePublish() = runBlocking {
+        pairBoth()
+        relay.failPartAlways = 1
+        val result = sync.publish()
+        assertTrue(result.toString(), result is RelayResult.Failed)
+        assertEquals(RelayClient.PART_ATTEMPTS, relay.partRequests.count { it.endsWith("/1") })
+        // Nothing was completed or published.
+        assertTrue(relay.packages.isEmpty())
+        assertNull(relay.current)
+    }
+
+    @Test
     fun withNoDeviceThereIsNothingToPublish() = runBlocking {
         assertTrue(sync.publish() is RelayResult.NoDevices)
         assertNull(sync.doneIfConfigured())
@@ -386,5 +424,10 @@ class RelaySyncTest {
         assertEquals(setOf("b7e2", "c9f1"), sync.devicesWithLostKeys())
         assertTrue(sync.publish() is RelayResult.NoDevices)
         assertTrue(relay.devices.isEmpty())
+    }
+
+    private companion object {
+        /** The part size the tests upload in. */
+        const val PART_BYTES = 1024L
     }
 }

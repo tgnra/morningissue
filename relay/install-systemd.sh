@@ -10,12 +10,13 @@
 # RELAY_REGISTRATION_TOKEN in this script's environment, or a `morningissue-relay.env` file
 # next to it holding that line (the token built into the app), or else a new random one.
 #
-# RELAY_PORT (default 8737) and RELAY_MAX_PACKAGE (default 95MiB, under Cloudflare's 100 MB
-# request limit) can be set in the environment of this script.
+# RELAY_PORT (default 8737) and RELAY_MAX_PACKAGE (default 512MiB) can be set in the
+# environment of this script. The phone uploads packages in 32 MiB parts, and the relay's
+# part limit stays at its default 64 MiB, under Cloudflare's 100 MB request limit.
 set -eu
 
 PORT="${RELAY_PORT:-8737}"
-MAX_PACKAGE="${RELAY_MAX_PACKAGE:-95MiB}"
+MAX_PACKAGE="${RELAY_MAX_PACKAGE:-512MiB}"
 HERE=$(cd "$(dirname "$0")" && pwd)
 BIN=/usr/local/bin/morningissue-relay
 UNIT=/etc/systemd/system/morningissue-relay.service

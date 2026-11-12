@@ -68,6 +68,7 @@ func run(args []string) error {
 	token := fs.String("registration-token", env("RELAY_REGISTRATION_TOKEN", ""), "token needed to create a group; empty allows anyone [RELAY_REGISTRATION_TOKEN]")
 	ttlStr := fs.String("ttl", env("RELAY_TTL", server.DefaultTTL.String()), "how long packages and changes are kept [RELAY_TTL]")
 	maxStr := fs.String("max-package", env("RELAY_MAX_PACKAGE", "512MiB"), "package size limit, in bytes or with KiB/MiB/GiB [RELAY_MAX_PACKAGE]")
+	partStr := fs.String("max-part", env("RELAY_MAX_PART", "64MiB"), "size limit of one part of a package uploaded in parts [RELAY_MAX_PART]")
 	baseStr := fs.String("base-path", env("RELAY_BASE_PATH", ""), "serve the API under this path prefix, e.g. /morningissue [RELAY_BASE_PATH]")
 	quiet := fs.Bool("quiet", env("RELAY_QUIET", "") != "", "don't log each request [RELAY_QUIET]")
 	if err := fs.Parse(args); err != nil {
@@ -80,6 +81,10 @@ func run(args []string) error {
 	maxPackage, err := parseSize(*maxStr)
 	if err != nil {
 		return fmt.Errorf("-max-package: %w", err)
+	}
+	maxPart, err := parseSize(*partStr)
+	if err != nil {
+		return fmt.Errorf("-max-part: %w", err)
 	}
 	basePath, err := server.CleanBasePath(*baseStr)
 	if err != nil {
@@ -108,6 +113,7 @@ func run(args []string) error {
 		Replay:            replay,
 		TTL:               ttl,
 		MaxPackage:        maxPackage,
+		MaxPart:           maxPart,
 		RegistrationToken: *token,
 		BasePath:          basePath,
 		Log:               logger,
@@ -146,8 +152,8 @@ func run(args []string) error {
 		go func() { errc <- hs.ListenAndServeTLS(*tlsCert, *tlsKey) }()
 		logger.Printf("listening on %s (HTTPS)", *tlsAddr)
 	}
-	logger.Printf("data in %s, TTL %s, package limit %d bytes, registration token %s",
-		*dataDir, ttl, maxPackage, map[bool]string{true: "required", false: "not required"}[*token != ""])
+	logger.Printf("data in %s, TTL %s, package limit %d bytes, part limit %d bytes, registration token %s",
+		*dataDir, ttl, maxPackage, maxPart, map[bool]string{true: "required", false: "not required"}[*token != ""])
 	if basePath != "" {
 		logger.Printf("serving under %s/", basePath)
 	}

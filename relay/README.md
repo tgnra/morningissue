@@ -43,6 +43,7 @@ Every flag can also be set by the environment variable in brackets.
 | `-registration-token` [`RELAY_REGISTRATION_TOKEN`] | none | When set, a new group can only be created with this token (the phone sends it as `X-Relay-Registration`). Set one on any relay reachable from the internet, or anyone can use it. |
 | `-ttl` [`RELAY_TTL`] | `48h` | How long packages and changes are kept. |
 | `-max-package` [`RELAY_MAX_PACKAGE`] | `512MiB` | Largest package accepted, in bytes or with `KiB`, `MiB` or `GiB`. |
+| `-max-part` [`RELAY_MAX_PART`] | `64MiB` | Largest part of a package uploaded in parts. The phone sends 32 MiB parts, so behind a proxy with a request size limit (Cloudflare's 100 MB) keep this under that limit. |
 | `-base-path` [`RELAY_BASE_PATH`] | none | Serve the API under a path prefix such as `/morningissue`, for a relay that shares a site with other things. Everything outside it gets `404`. See [Under a path prefix](#under-a-path-prefix). |
 | `-quiet` [`RELAY_QUIET`] | off | Don't log each request. Errors are still logged. |
 

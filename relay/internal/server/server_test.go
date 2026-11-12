@@ -997,3 +997,173 @@ func TestConcurrentUploads(t *testing.T) {
 		t.Errorf("fetchedBy = %v", st.Package.FetchedBy)
 	}
 }
+
+// putParts uploads pkg in parts of size each, in the order given (all of them when nil), and
+// returns the number of parts.
+func (e *env) putParts(pid string, pkg []byte, size int, order []int) int {
+	e.t.Helper()
+	count := (len(pkg) + size - 1) / size
+	if order == nil {
+		for n := range count {
+			order = append(order, n)
+		}
+	}
+	for _, n := range order {
+		end := min((n+1)*size, len(pkg))
+		expect(e.t, e.do(e.owner, "PUT", fmt.Sprintf("/v1/group/packages/%s/parts/%d", pid, n), pkg[n*size:end], nil), 204)
+	}
+	return count
+}
+
+func sha256Hex(b []byte) string {
+	h := sha256.Sum256(b)
+	return fmt.Sprintf("%x", h)
+}
+
+func (e *env) complete(pid string, parts int, size int, sum string) resp {
+	e.t.Helper()
+	return e.doJSON(e.owner, "POST", "/v1/group/packages/"+pid+"/complete", map[string]any{"parts": parts, "size": size, "sha256": sum})
+}
+
+func TestUploadInParts(t *testing.T) {
+	e := newEnv(t)
+	d := randKey()
+	e.register(d)
+	pkg := envelope(1000)
+	pid := store.NewID()
+
+	// Out of order, and a part sent twice: the second replaces the first.
+	count := e.putParts(pid, pkg, 300, []int{3, 1, 0})
+	expect(t, e.do(e.owner, "PUT", "/v1/group/packages/"+pid+"/parts/2", envelope(300), nil), 204)
+	if r := e.complete(pid, count, len(pkg), sha256Hex(pkg)); r.status != 409 || r.errorCode(t) != "hash_mismatch" {
+		t.Fatalf("a wrong part: %d %s", r.status, r.body)
+	}
+	e.putParts(pid, pkg, 300, []int{2})
+	// Not published until completed.
+	expect(t, e.doJSON(e.owner, "POST", "/v1/group/packages/"+pid+"/publish", map[string]any{"keys": map[string]string{}}), 409)
+	expect(t, e.complete(pid, count, len(pkg), sha256Hex(pkg)), 204)
+	if e.files("parts") != 0 {
+		t.Fatal("parts left after completing")
+	}
+	// A lost response: completing again succeeds; with another size it doesn't.
+	expect(t, e.complete(pid, count, len(pkg), sha256Hex(pkg)), 204)
+	if r := e.complete(pid, count, len(pkg)+1, sha256Hex(pkg)); r.status != 409 || r.errorCode(t) != "uploaded" {
+		t.Fatalf("completing again with another size: %d %s", r.status, r.body)
+	}
+	// No more parts for an uploaded package.
+	if r := e.do(e.owner, "PUT", "/v1/group/packages/"+pid+"/parts/0", pkg[:300], nil); r.status != 409 {
+		t.Fatalf("a part for an uploaded package: %d %s", r.status, r.body)
+	}
+
+	keys := map[string]string{auth.Kid(d): b64(envelope(65))}
+	expect(t, e.doJSON(e.owner, "POST", "/v1/group/packages/"+pid+"/publish", map[string]any{"keys": keys}), 204)
+	r := e.do(d, "GET", "/v1/package", nil, nil)
+	expect(t, r, 200)
+	var meta struct {
+		ID   string
+		Size int64
+	}
+	r.json(t, &meta)
+	if meta.ID != pid || meta.Size != int64(len(pkg)) {
+		t.Fatalf("package %+v", meta)
+	}
+	got := e.do(d, "GET", "/v1/packages/"+pid, nil, nil)
+	expect(t, got, 200)
+	if !bytes.Equal(got.body, pkg) {
+		t.Fatal("the joined package differs from what was sent")
+	}
+	if r := e.do(e.owner, "PUT", "/v1/group/packages/"+pid+"/parts/0", pkg[:300], nil); r.status != 409 {
+		t.Fatalf("a part for the current package: %d %s", r.status, r.body)
+	}
+}
+
+func TestUploadInPartsRefusals(t *testing.T) {
+	e := newEnv(t, func(c *server.Config) { c.MaxPart = 400; c.MaxPackage = 1000 })
+	e.register()
+	pkg := envelope(900)
+
+	// Missing parts, a size that doesn't add up, a malformed request.
+	pid := store.NewID()
+	e.putParts(pid, pkg, 300, []int{0, 2})
+	if r := e.complete(pid, 3, len(pkg), sha256Hex(pkg)); r.status != 409 || r.errorCode(t) != "parts_missing" {
+		t.Fatalf("a missing part: %d %s", r.status, r.body)
+	}
+	if r := e.complete(pid, 2, len(pkg), sha256Hex(pkg)); r.status != 409 || r.errorCode(t) != "parts_missing" {
+		t.Fatalf("a part beyond the count: %d %s", r.status, r.body)
+	}
+	e.putParts(pid, pkg, 300, []int{1})
+	if r := e.complete(pid, 3, len(pkg)-1, sha256Hex(pkg)); r.status != 409 || r.errorCode(t) != "size_mismatch" {
+		t.Fatalf("a wrong size: %d %s", r.status, r.body)
+	}
+	for _, bad := range []map[string]any{
+		{"parts": 0, "size": 900, "sha256": sha256Hex(pkg)},
+		{"parts": 3, "size": 900, "sha256": "abc"},
+		{"parts": 3, "size": 900, "sha256": strings.ToUpper(sha256Hex(pkg))},
+		{"parts": 3, "size": 2},
+	} {
+		if r := e.doJSON(e.owner, "POST", "/v1/group/packages/"+pid+"/complete", bad); r.status != 400 {
+			t.Fatalf("%v: %d %s", bad, r.status, r.body)
+		}
+	}
+	expect(t, e.complete(pid, 3, len(pkg), sha256Hex(pkg)), 204)
+
+	// Part numbers.
+	pid = store.NewID()
+	for _, n := range []string{"01", "-1", "x", "1024", "10000"} {
+		if r := e.do(e.owner, "PUT", "/v1/group/packages/"+pid+"/parts/"+n, envelope(10), nil); r.status != 400 {
+			t.Fatalf("part %q: %d %s", n, r.status, r.body)
+		}
+	}
+	// Part 0 starts an envelope; the others needn't.
+	if r := e.do(e.owner, "PUT", "/v1/group/packages/"+pid+"/parts/0", []byte("not an envelope"), nil); r.status != 400 || r.errorCode(t) != "not_mir1" {
+		t.Fatalf("part 0 not MIR1: %d %s", r.status, r.body)
+	}
+	expect(t, e.do(e.owner, "PUT", "/v1/group/packages/"+pid+"/parts/1", []byte("anything"), nil), 204)
+
+	// Limits: one part, and the parts together.
+	if r := e.do(e.owner, "PUT", "/v1/group/packages/"+pid+"/parts/2", envelope(401), nil); r.status != 413 {
+		t.Fatalf("a part over the part limit: %d %s", r.status, r.body)
+	}
+	expect(t, e.do(e.owner, "PUT", "/v1/group/packages/"+pid+"/parts/2", envelope(400), nil), 204)
+	expect(t, e.do(e.owner, "PUT", "/v1/group/packages/"+pid+"/parts/3", envelope(400), nil), 204)
+	if r := e.do(e.owner, "PUT", "/v1/group/packages/"+pid+"/parts/4", envelope(400), nil); r.status != 413 {
+		t.Fatalf("parts over the package limit: %d %s", r.status, r.body)
+	}
+	if r := e.complete(pid, 5, 1200, sha256Hex(pkg)); r.status != 413 {
+		t.Fatalf("completing over the package limit: %d %s", r.status, r.body)
+	}
+}
+
+func TestPartsAcrossRestartAndSweep(t *testing.T) {
+	e := newEnv(t)
+	e.register()
+	pkg := envelope(1000)
+	pid := store.NewID()
+	count := e.putParts(pid, pkg, 400, []int{0, 1})
+	e.restart()
+	e.putParts(pid, pkg, 400, []int{2})
+	expect(t, e.complete(pid, count, len(pkg), sha256Hex(pkg)), 204)
+
+	// Parts left unfinished go an hour after the last one.
+	other := store.NewID()
+	e.putParts(other, pkg, 400, []int{0})
+	e.clk.Advance(50 * time.Minute)
+	e.putParts(other, pkg, 400, []int{1})
+	e.clk.Advance(50 * time.Minute)
+	if err := e.srv.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	if e.files("parts") != 1 {
+		t.Fatal("parts swept within an hour of the last one")
+	}
+	e.clk.Advance(11 * time.Minute)
+	if err := e.srv.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	if e.files("parts") != 0 {
+		t.Fatal("unfinished parts not swept")
+	}
+	if r := e.complete(other, 3, len(pkg), sha256Hex(pkg)); r.status != 409 || r.errorCode(t) != "parts_missing" {
+		t.Fatalf("completing swept parts: %d %s", r.status, r.body)
+	}
+}

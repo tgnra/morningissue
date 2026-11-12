@@ -151,6 +151,8 @@ class RelaySync(
     private val allowLocalHttp: Boolean,
     /** For work started from the screen, so that it carries on if the screen is left. */
     private val scope: CoroutineScope,
+    /** The size of each part the package is uploaded in (smaller in tests). */
+    private val partBytes: Long = RelayClient.PART_BYTES,
 ) {
     private val lock = Mutex()
     private val state = MutableStateFlow(RelayActivity())
@@ -436,7 +438,7 @@ class RelaySync(
         }
         return try {
             val owner = RelayCrypto.ownerKey(settings.ownerSecret())
-            val connection = Connection(address, RelayClient(address, owner, client(), clock), devices(), config.registrationToken)
+            val connection = Connection(address, RelayClient(address, owner, client(), clock, partBytes), devices(), config.registrationToken)
             block(connection) to null
         } catch (e: CancellationException) {
             throw e

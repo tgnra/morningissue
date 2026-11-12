@@ -1,7 +1,10 @@
 package net.tgnra.morningissue.relay
 
+import java.io.EOFException
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -21,9 +24,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
-import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okio.BufferedSink
 
 /** The relay answered with an error. [code] is its `{"error": …}`, when it sent one. */
 open class RelayHttpException(val status: Int, val code: String?) : IOException("relay answered $status${code?.let { " ($it)" } ?: ""}")
@@ -47,6 +50,9 @@ data class DevicesResponse(val devices: List<String> = emptyList())
 
 @Serializable
 data class PublishRequest(val keys: Map<String, String>)
+
+@Serializable
+data class CompleteRequest(val parts: Int, val size: Long, val sha256: String)
 
 @Serializable
 data class GroupStatus(
@@ -86,6 +92,8 @@ class RelayClient(
     private val ownerKey: ByteArray,
     client: OkHttpClient,
     private val clock: Clock,
+    /** The package is uploaded in parts of this many bytes (the last is shorter). */
+    private val partBytes: Long = PART_BYTES,
 ) {
     private val base: HttpUrl = baseUrl.trimEnd('/').toHttpUrl()
     private val http = client
@@ -113,10 +121,35 @@ class RelayClient(
         return send("PUT", "/v1/group/devices", body) { json.decodeFromString<DevicesResponse>(it.bodyText()).devices }
     }
 
-    /** `PUT /v1/group/packages/{id}`, streaming [envelope], whose SHA-256 is [sha256]. */
+    /**
+     * Uploads [envelope], whose SHA-256 is [sha256], in parts of [partBytes]: each one
+     * `PUT /v1/group/packages/{id}/parts/{n}`, then `POST …/complete`, which joins them on the
+     * relay. One request never carries more than a part, so a proxy's request size limit (such
+     * as Cloudflare's 100 MB) doesn't bound the package, and a dropped connection costs one part:
+     * a part is sent again up to [PART_ATTEMPTS] times after a network failure or a `5xx`.
+     */
     suspend fun uploadPackage(packageId: String, envelope: File, sha256: ByteArray) {
-        val path = "/v1/group/packages/$packageId"
-        sendBody("PUT", path, sha256, { envelope.asRequestBody(OCTET) }, uploadHttp) { }
+        val size = envelope.length()
+        val parts = maxOf(1L, (size + partBytes - 1) / partBytes).toInt()
+        for (n in 0 until parts) {
+            val offset = n * partBytes
+            val length = minOf(partBytes, size - offset)
+            val partSha = withContext(Dispatchers.IO) { sliceSha256(envelope, offset, length) }
+            val path = "/v1/group/packages/$packageId/parts/$n"
+            var attempt = 1
+            while (true) {
+                try {
+                    sendBody("PUT", path, partSha, { FileSlice(envelope, offset, length) }, uploadHttp) { }
+                    break
+                } catch (e: IOException) {
+                    val retryable = e !is RelayHttpException || e.status >= 500
+                    if (!retryable || attempt >= PART_ATTEMPTS) throw e
+                    attempt++
+                }
+            }
+        }
+        val body = json.encodeToString(CompleteRequest(parts, size, RelayCrypto.hex(sha256))).toByteArray()
+        send("POST", "/v1/group/packages/$packageId/complete", body, client = uploadHttp) { }
     }
 
     /** `POST /v1/group/packages/{id}/publish` with each device's wrapped package key, by kid. */
@@ -154,10 +187,17 @@ class RelayClient(
         send("DELETE", "/v1/group", null) { }
     }
 
-    private suspend fun <T> send(method: String, path: String, body: ByteArray?, extra: Map<String, String> = emptyMap(), read: (Response) -> T): T {
+    private suspend fun <T> send(
+        method: String,
+        path: String,
+        body: ByteArray?,
+        extra: Map<String, String> = emptyMap(),
+        client: OkHttpClient = http,
+        read: (Response) -> T,
+    ): T {
         val sha = body?.let(RelayCrypto::sha256) ?: RelaySigning.EMPTY_SHA256
         val requestBody: () -> RequestBody? = { body?.toRequestBody(JSON_TYPE) }
-        return sendBody(method, path, sha, requestBody, http, extra, read)
+        return sendBody(method, path, sha, requestBody, client, extra, read)
     }
 
     private suspend fun <T> sendBody(
@@ -238,9 +278,41 @@ class RelayClient(
 
     private fun Response.bodyText(): String = body.string()
 
-    private companion object {
-        val JSON_TYPE = "application/json; charset=utf-8".toMediaType()
-        val OCTET = "application/octet-stream".toMediaType()
+    /** [length] bytes of [file] from [offset], streamed as a request body. */
+    private class FileSlice(private val file: File, private val offset: Long, private val length: Long) : RequestBody() {
+        override fun contentType() = OCTET
+        override fun contentLength() = length
+        override fun writeTo(sink: BufferedSink) {
+            readSlice(file, offset, length) { buffer, n -> sink.write(buffer, 0, n) }
+        }
+    }
+
+    companion object {
+        /** 32 MiB: well under Cloudflare's 100 MB and the relay's default 64 MiB part limit. */
+        const val PART_BYTES: Long = 32L shl 20
+        const val PART_ATTEMPTS = 3
+        private val JSON_TYPE = "application/json; charset=utf-8".toMediaType()
+        private val OCTET = "application/octet-stream".toMediaType()
+
+        private fun readSlice(file: File, offset: Long, length: Long, use: (ByteArray, Int) -> Unit) {
+            RandomAccessFile(file, "r").use { raf ->
+                raf.seek(offset)
+                val buffer = ByteArray(64 * 1024)
+                var left = length
+                while (left > 0) {
+                    val n = raf.read(buffer, 0, minOf(buffer.size.toLong(), left).toInt())
+                    if (n < 0) throw EOFException("${file.name} ended before byte ${offset + length}")
+                    use(buffer, n)
+                    left -= n
+                }
+            }
+        }
+
+        internal fun sliceSha256(file: File, offset: Long, length: Long): ByteArray {
+            val digest = MessageDigest.getInstance("SHA-256")
+            readSlice(file, offset, length) { buffer, n -> digest.update(buffer, 0, n) }
+            return digest.digest()
+        }
     }
 }
 

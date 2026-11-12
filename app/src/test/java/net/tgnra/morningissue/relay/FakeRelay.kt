@@ -34,6 +34,14 @@ class FakeRelay(var registrationToken: String? = null) : Dispatcher() {
         private set
     val devices: MutableMap<String, ByteArray> = ConcurrentHashMap() // kid -> auth key
     val packages: MutableMap<String, ByteArray> = ConcurrentHashMap() // uploaded, by id
+    /** Parts of packages uploaded in parts and not yet completed: id -> part number -> bytes. */
+    val parts: MutableMap<String, MutableMap<Int, ByteArray>> = ConcurrentHashMap()
+    /** Every part request received, as "id/n", including ones answered with a failure. */
+    val partRequests = java.util.Collections.synchronizedList(mutableListOf<String>())
+    /** Part numbers whose next request is answered `500`, once each. */
+    val failPartsOnce: MutableSet<Int> = ConcurrentHashMap.newKeySet()
+    /** A part number whose every request is answered `500`. */
+    @Volatile var failPartAlways: Int? = null
     var current: String? = null
     var currentKeys: Map<String, String> = emptyMap()
     val fetchedBy: MutableSet<String> = ConcurrentHashMap.newKeySet()
@@ -119,6 +127,32 @@ class FakeRelay(var registrationToken: String? = null) : Dispatcher() {
                 synchronized(changes) { changes.removeAll { it.kid !in kids } }
                 keys.forEach { devices[RelayCrypto.kid(it)] = it }
                 json(200, buildJsonObject { put("devices", JsonArray(kids.map(::JsonPrimitive))) })
+            }
+            method == "PUT" && path.startsWith("/v1/group/packages/") && path.contains("/parts/") -> {
+                val id = path.removePrefix("/v1/group/packages/").substringBefore("/parts/")
+                val n = path.substringAfter("/parts/").toInt()
+                partRequests += "$id/$n"
+                if (failPartsOnce.remove(n) || failPartAlways == n) return error(500, "internal")
+                if (id == current || id in packages) return error(409, "uploaded")
+                if (n == 0 && !body.copyOfRange(0, minOf(4, body.size)).contentEquals("MIR1".toByteArray())) return error(400, "not_mir1")
+                parts.getOrPut(id) { ConcurrentHashMap() }[n] = body
+                empty(204)
+            }
+            method == "POST" && path.startsWith("/v1/group/packages/") && path.endsWith("/complete") -> {
+                val id = path.removePrefix("/v1/group/packages/").removeSuffix("/complete")
+                val request = RelayJson.json.parseToJsonElement(body.decodeToString()).jsonObject
+                val count = request["parts"]!!.jsonPrimitive.content.toInt()
+                val size = request["size"]!!.jsonPrimitive.content.toLong()
+                val sha = request["sha256"]!!.jsonPrimitive.content
+                packages[id]?.let { return if (it.size.toLong() == size) empty(204) else error(409, "uploaded") }
+                val got = parts[id]
+                if (got == null || got.size != count || (0 until count).any { it !in got }) return error(409, "parts_missing")
+                val joined = (0 until count).fold(ByteArray(0)) { acc, n -> acc + got[n]!! }
+                if (joined.size.toLong() != size) return error(409, "size_mismatch")
+                if (RelayCrypto.hex(RelayCrypto.sha256(joined)) != sha) return error(409, "hash_mismatch")
+                parts.remove(id)
+                packages[id] = joined
+                empty(204)
             }
             method == "PUT" && path.startsWith("/v1/group/packages/") -> {
                 val id = path.removePrefix("/v1/group/packages/")

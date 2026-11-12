@@ -5,6 +5,7 @@
 //	<dir>/groups/<gid>/group.json   metadata, written atomically (temp file + rename)
 //	<dir>/groups/<gid>/packages/<packageId>
 //	<dir>/groups/<gid>/changes/<changeId>
+//	<dir>/groups/<gid>/parts/<packageId>/<n>   parts of a package uploaded in parts
 //
 // Every change to a group is made on a copy, written to disk, and only then swapped in, so the
 // in-memory state never runs ahead of what would survive a restart. Files that a change drops
@@ -21,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -32,8 +34,11 @@ const (
 	MaxDevices = 32
 	// MaxPendingBatches is the most changes a device may have waiting.
 	MaxPendingBatches = 64
-	// UploadTTL is how long an unpublished package upload is kept.
+	// UploadTTL is how long an unpublished package upload is kept, and how long a package
+	// being uploaded in parts is kept after its last part.
 	UploadTTL = time.Hour
+	// MaxParts is the most parts one package may be uploaded in.
+	MaxParts = 1024
 	// IdleGroupTTL is how long a group is kept without a signed request from its owner.
 	IdleGroupTTL = 90 * 24 * time.Hour
 )
@@ -42,6 +47,7 @@ var (
 	ErrNotFound = errors.New("not found")
 	ErrConflict = errors.New("conflict")
 	ErrTooMany  = errors.New("too many")
+	ErrTooLarge = errors.New("too large")
 )
 
 // Device is one paired device in a group.
@@ -67,6 +73,20 @@ type Upload struct {
 	UploadedAt time.Time `json:"uploadedAt"`
 }
 
+// Partial is a package being uploaded in parts, not yet completed.
+type Partial struct {
+	Parts     map[string]int64 `json:"parts"` // part number, in decimal -> size
+	UpdatedAt time.Time        `json:"updatedAt"`
+}
+
+func (p *Partial) total() int64 {
+	var n int64
+	for _, size := range p.Parts {
+		n += size
+	}
+	return n
+}
+
 // Change is one pending changes envelope from a device.
 type Change struct {
 	ID         string    `json:"id"`
@@ -78,14 +98,15 @@ type Change struct {
 
 // Group is everything the relay holds for one phone.
 type Group struct {
-	ID          string             `json:"id"`
-	OwnerKey    []byte             `json:"ownerKey"`
-	CreatedAt   time.Time          `json:"createdAt"`
-	LastOwnerAt time.Time          `json:"lastOwnerAt"`
-	Devices     []Device           `json:"devices"`
-	Package     *Package           `json:"package,omitempty"`
-	Uploads     map[string]*Upload `json:"uploads,omitempty"`
-	Changes     []Change           `json:"changes"` // oldest first
+	ID          string              `json:"id"`
+	OwnerKey    []byte              `json:"ownerKey"`
+	CreatedAt   time.Time           `json:"createdAt"`
+	LastOwnerAt time.Time           `json:"lastOwnerAt"`
+	Devices     []Device            `json:"devices"`
+	Package     *Package            `json:"package,omitempty"`
+	Uploads     map[string]*Upload  `json:"uploads,omitempty"`
+	Partials    map[string]*Partial `json:"partials,omitempty"`
+	Changes     []Change            `json:"changes"` // oldest first
 }
 
 func (g *Group) device(kid string) *Device {
@@ -160,6 +181,21 @@ func (s *Store) packagePath(gid, pid string) string {
 func (s *Store) changePath(gid, id string) string {
 	return filepath.Join(s.groupDir(gid), "changes", id)
 }
+func (s *Store) partDir(gid, pid string) string {
+	return filepath.Join(s.groupDir(gid), "parts", pid)
+}
+func (s *Store) partPath(gid, pid string, n int) string {
+	return filepath.Join(s.partDir(gid, pid), strconv.Itoa(n))
+}
+
+// partFiles lists the files of a partial upload, then its directory, for mutate to remove.
+func (s *Store) partFiles(gid, pid string, p *Partial) []string {
+	var out []string
+	for n := range p.Parts {
+		out = append(out, filepath.Join(s.partDir(gid, pid), n))
+	}
+	return append(out, s.partDir(gid, pid))
+}
 
 // load reads one group and reconciles it with the files present: metadata pointing at a missing
 // file is dropped, and files no metadata points at are removed.
@@ -188,6 +224,18 @@ func (s *Store) load(name string) (*Group, error) {
 			dirty = true
 		}
 	}
+	for pid, p := range g.Partials {
+		for n := range p.Parts {
+			if !exists(filepath.Join(s.partDir(g.ID, pid), n)) {
+				delete(p.Parts, n)
+				dirty = true
+			}
+		}
+		if len(p.Parts) == 0 {
+			delete(g.Partials, pid)
+			dirty = true
+		}
+	}
 	kept := g.Changes[:0]
 	for _, c := range g.Changes {
 		if exists(s.changePath(g.ID, c.ID)) {
@@ -204,6 +252,16 @@ func (s *Store) load(name string) (*Group, error) {
 	removeUnlisted(filepath.Join(gdir, "changes"), func(n string) bool {
 		return slices.ContainsFunc(g.Changes, func(c Change) bool { return c.ID == n })
 	})
+	removeUnlisted(filepath.Join(gdir, "parts"), func(n string) bool {
+		_, ok := g.Partials[n]
+		return ok
+	})
+	for pid, p := range g.Partials {
+		removeUnlisted(s.partDir(g.ID, pid), func(n string) bool {
+			_, ok := p.Parts[n]
+			return ok
+		})
+	}
 	if dirty {
 		if err := s.save(&g); err != nil {
 			return nil, err
@@ -224,7 +282,7 @@ func removeUnlisted(dir string, listed func(string) bool) {
 // save writes group.json atomically.
 func (s *Store) save(g *Group) error {
 	gdir := s.groupDir(g.ID)
-	for _, d := range []string{gdir, filepath.Join(gdir, "packages"), filepath.Join(gdir, "changes")} {
+	for _, d := range []string{gdir, filepath.Join(gdir, "packages"), filepath.Join(gdir, "changes"), filepath.Join(gdir, "parts")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return err
 		}
@@ -486,6 +544,124 @@ func (s *Store) PutPackage(gid, pid, tmpPath string, size int64, now time.Time) 
 	return err
 }
 
+// PutPart moves part n of a package being uploaded in parts from tmpPath into place.
+// Uploading a part again replaces it. The parts together may not pass maxTotal bytes
+// (ErrTooLarge), nor number more than MaxParts (ErrTooMany). A package that is already
+// uploaded or current can't take parts (ErrConflict).
+func (s *Store) PutPart(gid, pid string, n int, tmpPath string, size, maxTotal int64, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var moved string
+	err := s.mutate(gid, func(g *Group) ([]string, error) {
+		if _, up := g.Uploads[pid]; up || (g.Package != nil && g.Package.ID == pid) {
+			return nil, ErrConflict
+		}
+		p := g.Partials[pid]
+		if p == nil {
+			p = &Partial{Parts: map[string]int64{}}
+		}
+		key := strconv.Itoa(n)
+		_, again := p.Parts[key]
+		if !again && len(p.Parts) >= MaxParts {
+			return nil, ErrTooMany
+		}
+		if p.total()-p.Parts[key]+size > maxTotal {
+			return nil, ErrTooLarge
+		}
+		if err := os.MkdirAll(s.partDir(gid, pid), 0o700); err != nil {
+			return nil, err
+		}
+		if err := os.Rename(tmpPath, s.partPath(gid, pid, n)); err != nil {
+			return nil, err
+		}
+		if !again {
+			moved = s.partPath(gid, pid, n)
+		}
+		p.Parts[key] = size
+		p.UpdatedAt = now.UTC()
+		if g.Partials == nil {
+			g.Partials = map[string]*Partial{}
+		}
+		g.Partials[pid] = p
+		return nil, nil
+	})
+	if err != nil && moved != "" {
+		_ = os.Remove(moved)
+	}
+	return err
+}
+
+// PartPaths returns the files of parts 0 to count-1 of a package being uploaded in parts, in
+// order, and their total size. Any part missing, or a part beyond count, is ErrConflict.
+func (s *Store) PartPaths(gid, pid string, count int) ([]string, int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g, ok := s.groups[gid]
+	if !ok {
+		return nil, 0, ErrNotFound
+	}
+	p := g.Partials[pid]
+	if p == nil || len(p.Parts) != count {
+		return nil, 0, ErrConflict
+	}
+	paths := make([]string, count)
+	for n := range count {
+		if _, ok := p.Parts[strconv.Itoa(n)]; !ok {
+			return nil, 0, ErrConflict
+		}
+		paths[n] = s.partPath(gid, pid, n)
+	}
+	return paths, p.total(), nil
+}
+
+// Uploaded reports the size of a package that is uploaded or current.
+func (s *Store) Uploaded(gid, pid string) (int64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g, ok := s.groups[gid]
+	if !ok {
+		return 0, false
+	}
+	if up, ok := g.Uploads[pid]; ok {
+		return up.Size, true
+	}
+	if g.Package != nil && g.Package.ID == pid {
+		return g.Package.Size, true
+	}
+	return 0, false
+}
+
+// CompleteParts moves the package joined from its parts, at tmpPath, into place as an
+// unpublished upload, and deletes the parts.
+func (s *Store) CompleteParts(gid, pid, tmpPath string, size int64, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	moved := false
+	err := s.mutate(gid, func(g *Group) ([]string, error) {
+		p := g.Partials[pid]
+		if _, up := g.Uploads[pid]; up || p == nil || (g.Package != nil && g.Package.ID == pid) {
+			return nil, ErrConflict
+		}
+		if err := os.MkdirAll(filepath.Dir(s.packagePath(gid, pid)), 0o700); err != nil {
+			return nil, err
+		}
+		if err := os.Rename(tmpPath, s.packagePath(gid, pid)); err != nil {
+			return nil, err
+		}
+		moved = true
+		if g.Uploads == nil {
+			g.Uploads = map[string]*Upload{}
+		}
+		g.Uploads[pid] = &Upload{Size: size, UploadedAt: now.UTC()}
+		delete(g.Partials, pid)
+		return s.partFiles(gid, pid, p), nil
+	})
+	if err != nil && moved {
+		_ = os.Remove(s.packagePath(gid, pid))
+	}
+	return err
+}
+
 // Publish makes an uploaded package current, with keys for the listed devices (keys for
 // devices not in the group are ignored). The previous package is deleted. Publishing the
 // current package again replaces its keys.
@@ -692,7 +868,8 @@ func (s *Store) PutChanges(kid, batch, tmpPath string, size int64, now time.Time
 }
 
 // Sweep deletes what has expired: packages and changes older than ttl, unpublished uploads
-// older than UploadTTL, and groups whose owner has been idle for IdleGroupTTL.
+// older than UploadTTL, packages being uploaded in parts whose last part is older than
+// UploadTTL, and groups whose owner has been idle for IdleGroupTTL.
 func (s *Store) Sweep(now time.Time, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -705,6 +882,9 @@ func (s *Store) Sweep(now time.Time, ttl time.Duration) error {
 		expired := g.Package != nil && now.Sub(g.Package.PublishedAt) > ttl
 		for _, u := range g.Uploads {
 			expired = expired || now.Sub(u.UploadedAt) > UploadTTL
+		}
+		for _, p := range g.Partials {
+			expired = expired || now.Sub(p.UpdatedAt) > UploadTTL
 		}
 		for _, c := range g.Changes {
 			expired = expired || now.Sub(c.ReceivedAt) > ttl
@@ -722,6 +902,12 @@ func (s *Store) Sweep(now time.Time, ttl time.Duration) error {
 				if now.Sub(u.UploadedAt) > UploadTTL {
 					remove = append(remove, s.packagePath(gid, pid))
 					delete(g.Uploads, pid)
+				}
+			}
+			for pid, p := range g.Partials {
+				if now.Sub(p.UpdatedAt) > UploadTTL {
+					remove = append(remove, s.partFiles(gid, pid, p)...)
+					delete(g.Partials, pid)
 				}
 			}
 			kept := g.Changes[:0]
