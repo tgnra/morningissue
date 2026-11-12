@@ -586,6 +586,16 @@ pub fn relay_note(state: &crate::store::State, address: Option<&str>) -> String 
     s.to_string()
 }
 
+/// The pairing screen's note while it asks the relay whether the phone has scanned the code.
+pub fn pair_waiting_note(state: &crate::store::State) -> String {
+    let s = if state.relay_seen && state.relay_unpaired {
+        "Not paired: the phone no longer accepts this Kobo. Scan this code again; the Kobo notices within a few seconds and syncs."
+    } else {
+        "Waiting for the phone. Once it has scanned this code, the Kobo notices within a few seconds and syncs."
+    };
+    s.to_string()
+}
+
 fn section(ctx: &Ctx, canvas: &mut Canvas, x: i32, y: &mut f32, w: i32, label: &str) {
     let l = ctx.line(label, ctx.ty.section.color(MUTED), w as f32, Align::Left);
     l.draw(ctx.fonts, canvas, x as f32, *y);

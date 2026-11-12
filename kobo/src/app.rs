@@ -71,7 +71,19 @@ const WAKE_TOUCH_GUARD_MS: u64 = 500;
 // PHONE_RETRY_MS (each try also listens for the beacon), and at once when an address is
 // typed, until one gets through or Turn Wi-Fi off is tapped. Sleep (including the idle
 // timeout) ends it as always, by turning Wi-Fi off.
+//
+// With a relay, a sync that got through the relay is a success even when it brought nothing.
+// A relay that can't be reached, or that is still waiting for the phone to list this Kobo,
+// counts as the phone not being found when the phone isn't on this Wi-Fi either; any other
+// answer from the relay turns Wi-Fi off like any other failure.
 const PHONE_RETRY_MS: u64 = 5_000;
+
+// While the pairing code is shown (and the Kobo is online, with a relay address, and not
+// paired already), the relay is asked every PAIR_POLL_MS whether the phone lists this Kobo
+// yet: one signed `GET /v1/package`, answered `401 unknown` until the phone has scanned the
+// code and sent the relay its device list. Once it is listed, the reader goes back to
+// Settings and syncs.
+const PAIR_POLL_MS: u64 = 5_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SleepStage {
@@ -160,12 +172,19 @@ enum Finish {
     Failed,
 }
 
+/// A relay error reaches here only when the phone was not found on the LAN either
+/// ([`sync::sync`]); with the phone found, its own outcome is the one returned.
 fn finish_of(r: &Result<sync::SyncReport, SyncError>) -> Finish {
     match r {
+        // Through the relay too, even with nothing new.
         Ok(_) => Finish::Ok,
-        // A relay that can't be reached, or that is waiting for the phone to list this
-        // Kobo, is worth trying again too.
-        Err(SyncError::NoPhone | SyncError::Network(_) | SyncError::Unauthorized | SyncError::Relay(_) | SyncError::RelayUnpaired { .. }) => Finish::PhoneNotFound,
+        Err(SyncError::NoPhone | SyncError::Network(_) | SyncError::Unauthorized) => Finish::PhoneNotFound,
+        // A relay that can't be reached (or broke off), and one that has not been told about
+        // this Kobo yet, which the phone does as soon as it scans the code.
+        Err(SyncError::Relay(_) | SyncError::RelayUnpaired { waiting: true }) => Finish::PhoneNotFound,
+        // The phone dropped this Kobo: it has to be paired again, which trying again doesn't
+        // do. Nor does it help with a relay that answers something unexpected, a certificate
+        // the clock can't check, or a package that fails its check.
         Err(_) => Finish::Failed,
     }
 }
@@ -232,6 +251,11 @@ pub struct App {
     looking: bool,
     /// Why turning Wi-Fi on did not lead to a connection, until the next try.
     wifi_error: Option<String>,
+    /// The pairing code is shown and the relay has not listed this Kobo: the next time to
+    /// ask it is due then (monotonic ms).
+    pair_poll_at: Option<u64>,
+    /// Asking the relay whether it lists this Kobo; true once it does.
+    pair_probe: Option<Receiver<bool>>,
     /// Settings > Reset was tapped and awaits Erase everything or Cancel.
     reset_armed: bool,
     /// The Settings page showing, and how many there are on this screen.
@@ -320,6 +344,8 @@ impl App {
             phone_retry_at: None,
             looking: false,
             wifi_error: None,
+            pair_poll_at: None,
+            pair_probe: None,
             reset_armed: false,
             settings_page: 0,
             settings_pages: 1,
@@ -596,7 +622,8 @@ impl App {
             View::RelayKeys { typed, error } => ui::draw_relay_keyboard(&ctx, &mut canvas, typed, error.as_deref()),
             View::Pair { uri } => {
                 let relay = self.relay_address();
-                ui::draw_pair(&ctx, &mut canvas, uri, relay.as_deref(), &ui::relay_note(&self.state, relay.as_deref()))
+                let note = if self.pair_polling() { ui::pair_waiting_note(&self.state) } else { ui::relay_note(&self.state, relay.as_deref()) };
+                ui::draw_pair(&ctx, &mut canvas, uri, relay.as_deref(), &note)
             }
             View::Saved { screens, pos } => {
                 let s = &screens[*pos];
@@ -1064,6 +1091,10 @@ impl App {
                         }
                         let (bw, bh) = self.display.base_size();
                         let uri = crate::relay::pair_uri(&secret, &self.state.device_id, &self.config.device_name(), bw.min(bh).max(1) as u32);
+                        if !(self.state.relay_seen && !self.state.relay_unpaired) {
+                            self.pair_poll_at = Some(self.clock.mono_ms() + PAIR_POLL_MS);
+                        }
+                        self.net = (self.network)();
                         self.push(View::Pair { uri })?;
                     }
                     Err(e) => eprintln!("relay: cannot make the pairing secret: {e}"),
@@ -1555,7 +1586,7 @@ impl App {
 
     fn retry_phone(&mut self) -> io::Result<()> {
         let Some(at) = self.phone_retry_at else { return Ok(()) };
-        if self.sync.is_some() || self.wifi_job.is_some() || self.clock.mono_ms() < at {
+        if self.sync.is_some() || self.wifi_job.is_some() || self.pair_probe.is_some() || self.clock.mono_ms() < at {
             return Ok(());
         }
         self.start_sync();
@@ -1566,6 +1597,81 @@ impl App {
             self.phone_retry_at = Some(self.clock.mono_ms() + PHONE_RETRY_MS);
         }
         Ok(())
+    }
+
+    /// While the pairing code is shown, asks the relay every PAIR_POLL_MS whether the phone
+    /// lists this Kobo yet. Once it does, or a sync meanwhile got through the relay, the
+    /// reader goes back to Settings, syncing (after a sync, it has synced already).
+    fn poll_pairing(&mut self) -> io::Result<()> {
+        let on_pair = matches!(self.top(), View::Pair { .. });
+        if let Some(rx) = &self.pair_probe {
+            let listed = match rx.try_recv() {
+                Ok(listed) => listed,
+                Err(mpsc::TryRecvError::Empty) => return Ok(()),
+                Err(mpsc::TryRecvError::Disconnected) => false,
+            };
+            self.pair_probe = None;
+            if let Ok(s) = self.store.load_state() {
+                self.state = s;
+            }
+            if listed && on_pair {
+                eprintln!("relay: the phone lists this Kobo now; syncing");
+                self.pair_poll_at = None;
+                self.back()?;
+                self.start_sync();
+                if self.sync.is_some() {
+                    self.show(Show::Update)?;
+                }
+                return Ok(());
+            }
+            if on_pair || matches!(self.top(), View::Settings) {
+                self.show(Show::Update)?;
+            }
+        }
+        if !on_pair {
+            self.pair_poll_at = None;
+            return Ok(());
+        }
+        let Some(at) = self.pair_poll_at else { return Ok(()) };
+        if self.sync.is_some() || self.wifi_job.is_some() {
+            return Ok(());
+        }
+        if self.state.relay_seen && !self.state.relay_unpaired {
+            eprintln!("relay: a sync got through the relay; the pairing code is done");
+            self.pair_poll_at = None;
+            return self.back();
+        }
+        let now = self.clock.mono_ms();
+        if now < at {
+            return Ok(());
+        }
+        self.pair_poll_at = Some(now + PAIR_POLL_MS);
+        self.net = (self.network)();
+        let Some(address) = self.relay_address().filter(|_| self.net.online()) else { return Ok(()) };
+        let (tx, rx) = mpsc::channel();
+        let home = self.store.home.clone();
+        let opts = sync::Options::from_config(&self.config);
+        let spawned = std::thread::Builder::new().name("pair".into()).spawn(move || {
+            let listed = match crate::relay::listed(&Store::new(&home), &opts, &address) {
+                Ok(listed) => listed,
+                Err(e) => {
+                    eprintln!("relay: cannot ask whether the phone lists this Kobo: {e}");
+                    false
+                }
+            };
+            let _ = tx.send(listed);
+        });
+        match spawned {
+            Ok(_) => self.pair_probe = Some(rx),
+            Err(e) => eprintln!("relay: cannot start asking: {e}"),
+        }
+        Ok(())
+    }
+
+    /// Whether the pairing code is waiting for the phone and the relay is being asked, for
+    /// the pairing screen.
+    fn pair_polling(&self) -> bool {
+        self.pair_poll_at.is_some() && self.net.online() && self.relay_address().is_some()
     }
 
     /// Whether the reader is turning Wi-Fi on or off, or waiting for the phone, for tests.
@@ -1692,7 +1798,7 @@ impl App {
         loop {
             let wait = match &self.sleep {
                 Some(s) => Duration::from_millis(s.at.saturating_sub(self.clock.mono_ms()).clamp(1, 1000)),
-                None if self.sync.is_some() || self.pending_flip.is_some() || self.wifi_job.is_some() || self.phone_retry_at.is_some() => Duration::from_millis(250),
+                None if self.sync.is_some() || self.pending_flip.is_some() || self.wifi_job.is_some() || self.phone_retry_at.is_some() || self.pair_poll_at.is_some() || self.pair_probe.is_some() => Duration::from_millis(250),
                 None => Duration::from_secs(1),
             };
             let ev = self.input.next(wait);
@@ -1753,6 +1859,7 @@ impl App {
             self.poll_wifi()?;
             self.poll_sync()?;
             self.retry_phone()?;
+            self.poll_pairing()?;
             let now = self.clock.mono_ms();
             if self.stale && now.saturating_sub(self.last_update) >= BATCH_MS {
                 self.show(Show::Update)?;

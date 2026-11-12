@@ -44,8 +44,11 @@ for the Kobo and the Kobo's encrypted changes for the phone. It never sees what 
    `config.json` instead.
 2. Tap **Pair through relay**. The Kobo shows a large QR code. Scan it with Morning Issue on
    the phone (Kobo settings). Scanning is the consent; nothing is asked on the Kobo.
-3. Tap **Sync now**. Until the phone has told the relay about the Kobo, Settings says
-   "Waiting for the phone". Once the phone has published a package, the Kobo installs it.
+3. While the code is shown and the Kobo is on Wi-Fi, it asks the relay every 5 seconds
+   whether the phone has told it about this Kobo. Once it has, the Kobo goes back to
+   Settings and syncs. (Offline, go back and tap **Turn on Wi-Fi and sync**; until the phone
+   has told the relay, Settings says "Waiting for the phone".) Once the phone has published
+   a package, the Kobo installs it.
 
 Reset erases the pairing secret with everything else; pair again afterwards.
 
@@ -75,7 +78,11 @@ change the screen mode.
   Wi-Fi off again. If the phone can't be found, Wi-Fi stays on and the sync is tried again
   every few seconds, and at once when an address is typed, until it gets through; **Turn
   Wi-Fi off** (beside the sync button whenever Wi-Fi is on) ends it, and so does sleep. If
-  no network is joined, Wi-Fi goes off again and the reader says so.
+  no network is joined, Wi-Fi goes off again and the reader says so. With a relay, a sync
+  through it counts as getting through, even with nothing new; a relay that can't be
+  reached, or that is still waiting for the phone to pair this Kobo, counts as the phone not
+  being found; and a Kobo the phone has dropped turns Wi-Fi off, since it has to be paired
+  again.
 - **Edition and article pages** fill the screen. Swipe down from the top edge (or tap the top
   strip) to show the header (back, title) and the footer (position, and in an article
   **Like**, **Save** and **Aa**). A tap on the page, or 7 seconds, hides them again. The
@@ -291,6 +298,8 @@ cd kobo && cargo test
   - a wrong clock put right from the `Date` header, and no signature ever sent twice;
   - tampered packages and wrongly wrapped keys installing nothing;
   - the phone on the LAN used when the relay can't be reached;
+  - asking whether the phone lists this Kobo yet, as the pairing screen does, without
+    uploading or installing anything;
   - an `https://` relay over TLS, and a certificate not yet valid blamed on the clock.
 - `tests/relay_interop.rs` does the same against the real relay (`relay/`, Go), with the test
   as the phone. It is ignored unless `MORNINGISSUE_RELAY_BIN` names a built relay:
@@ -312,7 +321,10 @@ cd kobo && cargo test
   and landscape, each upside down, a brief tilt ignored, no sensor, the old setting); and
   inverted buttons; and Turn on Wi-Fi and sync (Wi-Fi on, a sync, Wi-Fi off; staying on
   while the phone can't be found until an address is typed or Turn Wi-Fi off is tapped; a
-  network that can't be joined; sleep while Wi-Fi is coming on). It writes every screen, plus a `contact.png` sheet, to
+  network that can't be joined; sleep while Wi-Fi is coming on; through the relay, a sync with
+  nothing new and one with a package turning Wi-Fi off, an unreachable relay and one waiting
+  for the phone keeping it on, a dropped Kobo turning it off); and the pairing code noticing
+  the phone's scan and syncing, and asking nothing when left at once or offline. It writes every screen, plus a `contact.png` sheet, to
   `kobo/target/screens/<size>/<run>/`.
 - `tests/launch.rs` runs `launch/launch.sh` against a fake root with busybox-like stubs:
   Exit, a panic and a signal all bring Nickel back with its output on `/dev/null` and free
