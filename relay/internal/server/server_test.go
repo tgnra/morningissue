@@ -48,6 +48,8 @@ type env struct {
 	srv   *server.Server
 	ts    *httptest.Server
 	owner []byte
+	// prefix goes in front of every path the helpers send and sign, for a relay under a base path.
+	prefix string
 }
 
 func newEnv(t *testing.T, configure ...func(*server.Config)) *env {
@@ -128,7 +130,7 @@ func (r resp) errorCode(t *testing.T) string {
 // rawDo sends a request with the given Authorization header (none when empty).
 func (e *env) rawDo(method, path string, body []byte, authz string, hdr map[string]string) resp {
 	e.t.Helper()
-	req, err := http.NewRequest(method, e.ts.URL+path, bytes.NewReader(body))
+	req, err := http.NewRequest(method, e.ts.URL+e.prefix+path, bytes.NewReader(body))
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -158,7 +160,7 @@ func (e *env) rawDo(method, path string, body []byte, authz string, hdr map[stri
 func (e *env) do(key []byte, method, path string, body []byte, hdr map[string]string) resp {
 	e.t.Helper()
 	e.clk.Advance(time.Second)
-	return e.rawDo(method, path, body, auth.Header(key, method, path, e.clk.Now().Unix(), body), hdr)
+	return e.rawDo(method, path, body, auth.Header(key, method, e.prefix+path, e.clk.Now().Unix(), body), hdr)
 }
 
 func (e *env) doJSON(key []byte, method, path string, v any) resp {
@@ -866,6 +868,59 @@ func TestReplayAtTheEdgeOfSkew(t *testing.T) {
 	e.clk.Advance(time.Second)
 	if r := e.rawDo("GET", path, nil, h, nil); r.status != 401 || r.errorCode(t) != "skew" {
 		t.Fatalf("a second later: %d %s", r.status, r.body)
+	}
+}
+
+// Under a base path the relay routes on the path below it and checks signatures over the full
+// path as sent, as both clients sign it when the relay address has a path.
+func TestBasePath(t *testing.T) {
+	e := newEnv(t, func(c *server.Config) { c.BasePath = "/morningissue/" })
+	e.prefix = "/morningissue"
+	d := randKey()
+	e.register(d)
+	pkg := envelope(5000)
+	pid := e.publish(pkg, d)
+	r := e.do(d, "GET", "/v1/package", nil, nil)
+	expect(t, r, 200)
+	r = e.do(d, "GET", "/v1/packages/"+pid, nil, map[string]string{"Range": "bytes=100-"})
+	expect(t, r, 206)
+	if !bytes.Equal(r.body, pkg[100:]) {
+		t.Fatal("package differs")
+	}
+	expect(t, e.do(d, "PUT", "/v1/changes/1-3", envelope(30), nil), 204)
+	if ch := e.changes(); len(ch) != 1 || ch[0].Batch != "1-3" {
+		t.Fatalf("changes = %+v", ch)
+	}
+	expect(t, e.rawDo("GET", "/v1/health", nil, "", nil), 200)
+	expect(t, e.do(e.owner, "GET", "/v1/group/status?x=1", nil, nil), 200)
+
+	// Signed over the path without the base, as a proxy that strips it would pass it on.
+	now := e.clk.Now().Unix()
+	if r := e.rawDo("GET", "/v1/group/status", nil, auth.Header(e.owner, "GET", "/v1/group/status", now, nil), nil); r.status != 401 || r.errorCode(t) != "signature" {
+		t.Fatalf("signed without the base path: %d %s", r.status, r.body)
+	}
+
+	// Anything outside the base path is not found, signed or not.
+	e.prefix = ""
+	for _, p := range []string{"/v1/health", "/morningissue", "/morningissue/", "/morningissuex/v1/health", "/other/morningissue/v1/health"} {
+		if r := e.rawDo("GET", p, nil, "", nil); r.status != 404 {
+			t.Errorf("GET %s: %d, want 404", p, r.status)
+		}
+	}
+	h := auth.Header(e.owner, "GET", "/v1/group/status", e.clk.Now().Unix(), nil)
+	expect(t, e.rawDo("GET", "/v1/group/status", nil, h, nil), 404)
+}
+
+func TestCleanBasePath(t *testing.T) {
+	for in, want := range map[string]string{"": "", "/": "", "/morningissue": "/morningissue", "/morningissue/": "/morningissue", "/a/b-c_d.e/": "/a/b-c_d.e"} {
+		if got, err := server.CleanBasePath(in); err != nil || got != want {
+			t.Errorf("CleanBasePath(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"morningissue", "/a//b", "/a/../b", "/a/./b", "/a?b", "/a#b", "/a b", "/a%20b"} {
+		if got, err := server.CleanBasePath(in); err == nil {
+			t.Errorf("CleanBasePath(%q) = %q, want an error", in, got)
+		}
 	}
 }
 

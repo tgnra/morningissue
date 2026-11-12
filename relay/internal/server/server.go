@@ -7,14 +7,17 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tgnra/morningissue/relay/internal/auth"
@@ -57,6 +60,9 @@ type Config struct {
 	// Replay remembers the signatures seen. Open it with auth.OpenReplayCache in the data
 	// directory, so that a replay is caught across a restart. Nil means in memory only.
 	Replay *auth.ReplayCache
+	// BasePath serves the API under a path prefix such as "/morningissue" (see CleanBasePath).
+	// Requests outside it get 404. Empty means the API is at "/".
+	BasePath string
 	// Log receives errors, and one line per request when LogRequests is set. Nil means no logging.
 	Log         *log.Logger
 	LogRequests bool
@@ -80,6 +86,7 @@ func New(cfg Config) *Server {
 	if cfg.MaxPackage <= 0 {
 		cfg.MaxPackage = DefaultMaxPackage
 	}
+	cfg.BasePath = strings.TrimRight(cfg.BasePath, "/")
 	if cfg.Replay == nil {
 		cfg.Replay = auth.NewReplayCache()
 	}
@@ -103,15 +110,59 @@ func New(cfg Config) *Server {
 	return s
 }
 
-// ServeHTTP sets Date from the relay's clock on every response and logs the request.
+// CleanBasePath checks a base path such as "/morningissue" and returns it without a trailing
+// slash; "" and "/" mean none.
+func CleanBasePath(p string) (string, error) {
+	p = strings.TrimRight(p, "/")
+	if p == "" {
+		return "", nil
+	}
+	if p[0] != '/' || strings.ContainsAny(p, "?#% \t\r\n") || path.Clean(p) != p {
+		return "", fmt.Errorf("bad base path %q: it should look like /morningissue", p)
+	}
+	return p, nil
+}
+
+// ServeHTTP sets Date from the relay's clock on every response, routes on the path below the
+// base path, and logs the request. Signatures are still checked over the request target exactly
+// as sent, base path included.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	w.Header().Set("Date", s.cfg.Now().UTC().Format(http.TimeFormat))
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-	s.mux.ServeHTTP(rec, r)
+	if routed, ok := s.belowBase(r); ok {
+		s.mux.ServeHTTP(rec, routed)
+	} else {
+		writeError(rec, http.StatusNotFound, "not_found")
+	}
 	if s.cfg.Log != nil && s.cfg.LogRequests {
 		s.cfg.Log.Printf("%s %s %d %dB %s", r.Method, r.URL.Path, rec.status, rec.written, time.Since(start).Round(time.Millisecond))
 	}
+}
+
+// belowBase returns the request with the base path taken off its URL, leaving RequestURI as
+// sent. ok is false when the path isn't under the base path.
+func (s *Server) belowBase(r *http.Request) (*http.Request, bool) {
+	base := s.cfg.BasePath
+	if base == "" {
+		return r, true
+	}
+	p, ok := strings.CutPrefix(r.URL.Path, base)
+	if !ok || !strings.HasPrefix(p, "/") {
+		return nil, false
+	}
+	u := *r.URL
+	u.Path = p
+	// RawPath is only set when the path has escapes; the base path has none.
+	if rp, ok := strings.CutPrefix(u.RawPath, base); ok {
+		u.RawPath = rp
+	} else {
+		u.RawPath = ""
+	}
+	r2 := new(http.Request)
+	*r2 = *r
+	r2.URL = &u
+	return r2, true
 }
 
 type statusRecorder struct {

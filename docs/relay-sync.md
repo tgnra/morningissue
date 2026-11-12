@@ -115,6 +115,7 @@ No secret crosses the network. Signing and end-to-end encryption therefore prote
 - **The phone always uses `https://`**, because `PUT /v1/group` and `PUT /v1/group/devices` carry keys.
 - **The Kobo supports `https://`** (rustls with the ring provider and the webpki root store; clang compiles ring for the ARM build). It checks certificate validity against its clock corrected by the last `Date` offset, and never against a time earlier than its own build date. Plain `http://` remains allowed for relays without a certificate.
 - **The relay can serve both**: TLS directly or behind a reverse proxy, and plain HTTP on another port if wanted.
+- **The relay can sit under a path prefix** (`https://example.com/morningissue`). Clients put the address's path in front of every path in this document and sign the full path as sent; the relay, started with `-base-path`, routes on the path below the prefix (`relay/README.md`).
 
 ## Relay API
 

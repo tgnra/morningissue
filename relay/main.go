@@ -68,6 +68,7 @@ func run(args []string) error {
 	token := fs.String("registration-token", env("RELAY_REGISTRATION_TOKEN", ""), "token needed to create a group; empty allows anyone [RELAY_REGISTRATION_TOKEN]")
 	ttlStr := fs.String("ttl", env("RELAY_TTL", server.DefaultTTL.String()), "how long packages and changes are kept [RELAY_TTL]")
 	maxStr := fs.String("max-package", env("RELAY_MAX_PACKAGE", "512MiB"), "package size limit, in bytes or with KiB/MiB/GiB [RELAY_MAX_PACKAGE]")
+	baseStr := fs.String("base-path", env("RELAY_BASE_PATH", ""), "serve the API under this path prefix, e.g. /morningissue [RELAY_BASE_PATH]")
 	quiet := fs.Bool("quiet", env("RELAY_QUIET", "") != "", "don't log each request [RELAY_QUIET]")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -79,6 +80,10 @@ func run(args []string) error {
 	maxPackage, err := parseSize(*maxStr)
 	if err != nil {
 		return fmt.Errorf("-max-package: %w", err)
+	}
+	basePath, err := server.CleanBasePath(*baseStr)
+	if err != nil {
+		return fmt.Errorf("-base-path: %w", err)
 	}
 	if *addr == "" && *tlsAddr == "" {
 		return errors.New("nothing to listen on: set -addr or -tls-addr")
@@ -104,6 +109,7 @@ func run(args []string) error {
 		TTL:               ttl,
 		MaxPackage:        maxPackage,
 		RegistrationToken: *token,
+		BasePath:          basePath,
 		Log:               logger,
 		LogRequests:       !*quiet,
 	})
@@ -142,6 +148,9 @@ func run(args []string) error {
 	}
 	logger.Printf("data in %s, TTL %s, package limit %d bytes, registration token %s",
 		*dataDir, ttl, maxPackage, map[bool]string{true: "required", false: "not required"}[*token != ""])
+	if basePath != "" {
+		logger.Printf("serving under %s/", basePath)
+	}
 
 	var runErr error
 	select {

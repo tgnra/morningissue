@@ -226,7 +226,7 @@ The protocol is `docs/relay-sync.md` (relay/1), with test vectors in `docs/relay
 - [ ] **A test of all three together.** The Kobo has been tested against the real relay, the phone only against a mock. A test that runs the Go relay, the phone's Publish and Done, and the Kobo client in one go would catch any disagreement between the two clients.
 - [ ] **The Kobo's pairing screen doesn't notice the scan.** The reader goes back and taps Sync now.
 - [ ] **The relay address is typed on the Kobo.** The phone's screen shows the address it uses; if Kobos should use a plain-HTTP port, the reader has to know it.
-- [ ] **Path prefixes.** Both clients sign the full path as sent and the relay routes from `/`, so a relay under a path prefix only works behind a proxy that passes the path through unchanged.
+- [x] **Path prefixes.** `-base-path /morningissue` (`RELAY_BASE_PATH`) serves the relay under a prefix: it routes on the path below it and checks signatures over the full path as sent, so the proxy must pass the prefix on, not strip it.
 - [x] **The replay cache survives a restart.** Each signature is appended to `<data>/replay` and synced before its request is acted on, and the sweeper rewrites the file without the expired ones. A signature is also kept until its `ts` is out of skew, which closed a sub-second gap at 600 seconds.
 - [ ] **A very large package can outlast the Kobo's 600-second sync**; the download resumes at the next sync.
 - [ ] **A Kobo's changes reach the edition engine only at Done.** Events that arrive after the next build have already counted their stories as unopened (v1's limit).
