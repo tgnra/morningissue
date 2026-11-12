@@ -45,7 +45,7 @@ data class RelayChanges(val deviceId: String, val events: List<SyncEvent>)
 
 /** Why a relay task did not finish, in terms the screen can put plainly. */
 enum class RelayProblem {
-    /** No address is set. */
+    /** The build has no relay address. */
     NO_ADDRESS,
 
     /** The address is not `https://`. */
@@ -57,7 +57,7 @@ enum class RelayProblem {
     /** The relay could not be reached, or the connection broke. */
     NETWORK,
 
-    /** The relay wants a registration token, and the one set is missing or wrong (`403`). */
+    /** The relay wants a registration token, and the build's is missing or wrong (`403`). */
     REGISTRATION_REFUSED,
 
     /** The relay refused the phone's signature even after registering again (`401`). */
@@ -129,9 +129,9 @@ data class RelayGroupStatus(
  * The phone's side of relay sync (`docs/relay-sync.md`): pairing from a device's code, the
  * device list, Publish and Done. One task runs at a time.
  *
- * Merging goes through [KoboEventMerger], exactly as over the local network: per device, only
- * events above its `ackedSeq`, in one transaction that stores the new `ackedSeq` and relearns
- * affinity when what it learns from changed.
+ * Merging goes through [KoboEventMerger], as protocol v1 merged events: per device, only events
+ * above its `ackedSeq`, in one transaction that stores the new `ackedSeq` and relearns affinity
+ * when what it learns from changed.
  */
 class RelaySync(
     private val database: MorningIssueDatabase,
@@ -162,10 +162,7 @@ class RelaySync(
     private val peerDao = database.syncPeerDao()
     private val merger = KoboEventMerger(database, clock)
 
-    suspend fun setAddress(address: String) = settings.setAddress(address)
-
-    suspend fun setRegistrationToken(token: String) = settings.setRegistrationToken(token)
-
+    /** Reads [text] as requests to the relay would, for the screen to show the address in use. */
     fun parseAddress(text: String): RelayAddress.Parse = RelayAddress.parse(text, allowLocalHttp)
 
     // --- Tasks started from the screen -----------------------------------------------------
@@ -238,9 +235,9 @@ class RelaySync(
         return finish(RelayResult.Paired(clock.instant(), pairing.name, toldRelay = problem == null, problem = problem.takeIf { it != RelayProblem.NO_ADDRESS }))
     }
 
-    /** Forgets the relay pairing of [deviceId] and tells the relay, which deletes its pending changes. */
+    /** Forgets [deviceId] and tells the relay, which deletes its pending changes. */
     suspend fun forget(deviceId: String): RelayResult {
-        peerDao.forgetRelay(deviceId)
+        peerDao.forget(deviceId)
         val problem = if (settings.current().isConfigured) sendDevices() else null
         return finish(RelayResult.Forgotten(clock.instant(), toldRelay = problem == null && settings.current().isConfigured, problem = problem))
     }

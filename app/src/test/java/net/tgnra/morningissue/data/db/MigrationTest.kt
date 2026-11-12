@@ -416,14 +416,15 @@ class MigrationTest {
         helper.closeWhenFinished(db)
         val peers = db.syncPeerDao()
         assertTrue(peers.all().isEmpty())
-        peers.pair("b7e2", "Kobo Libra 2", "ab", Instant.ofEpochMilli(3_000))
+        peers.pairRelay("b7e2", "Kobo Libra 2", 1264, "auth", "enc", Instant.ofEpochMilli(3_000))
         peers.setAcked("b7e2", 41, Instant.ofEpochMilli(4_000))
-        // Pairing again replaces the token and keeps the acknowledged events.
-        peers.pair("b7e2", "Kobo Libra 2", "cd", Instant.ofEpochMilli(5_000))
+        // Pairing again replaces the keys and keeps the acknowledged events.
+        peers.pairRelay("b7e2", "Kobo Libra 2", 1264, "auth2", "enc2", Instant.ofEpochMilli(5_000))
         val peer = peers.get("b7e2")!!
-        assertEquals("cd", peer.tokenHash)
+        assertNull(peer.tokenHash)
+        assertEquals("auth2", peer.relayAuthKey)
         assertEquals(41L, peer.ackedSeq)
-        assertEquals(Instant.ofEpochMilli(5_000), peer.pairedAt)
+        assertEquals(Instant.ofEpochMilli(3_000), peer.pairedAt)
         assertTrue(peers.articleExists(1))
     }
 
@@ -474,13 +475,9 @@ class MigrationTest {
         helper.closeWhenFinished(db)
         val peers = db.syncPeerDao()
         peers.pairRelay("b7e2", "Kobo Libra 2", 1264, "auth", "enc", Instant.ofEpochMilli(6_000))
+        // A Kobo paired over the local network before keeps its row, and with it its ackedSeq.
         var peer = peers.get("b7e2")!!
-        assertTrue(peer.isLanPaired && peer.isRelayPaired)
-        assertEquals(41L, peer.ackedSeq)
-        // Forgetting one pairing keeps the other, and the row with its ackedSeq.
-        peers.forget("b7e2")
-        peer = peers.get("b7e2")!!
-        assertNull(peer.tokenHash)
+        assertEquals("ab", peer.tokenHash)
         assertTrue(peer.isRelayPaired)
         assertEquals(41L, peer.ackedSeq)
         assertEquals(listOf("b7e2"), peers.relayPeers().map { it.deviceId })
@@ -490,8 +487,8 @@ class MigrationTest {
         assertEquals("auth2", peer.relayAuthKey)
         assertEquals(1072, peer.relayWidth)
         assertEquals(41L, peer.ackedSeq)
-        // Unpaired both ways, the row goes.
-        peers.forgetRelay("b7e2")
+        // Forgotten, the row goes, the old token with it.
+        peers.forget("b7e2")
         assertNull(peers.get("b7e2"))
     }
 

@@ -48,8 +48,8 @@ class BuiltPackage(
  * file, in one pass: the zip is encrypted as it is written, so neither the plaintext nor the
  * whole package is ever held in memory or on disk.
  *
- * The zip holds `manifest.json` first, then the edition bundles and the saved shelf exactly as
- * LAN sync serves them, then each image at each width, then `images.json`. JSON is deflated;
+ * The zip holds `manifest.json` first, then the edition bundles and the saved shelf in protocol
+ * v1's formats, then each image at each width, then `images.json`. JSON is deflated;
  * images, already compressed, are stored.
  */
 class RelayPackageWriter(

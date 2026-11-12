@@ -23,8 +23,11 @@ import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.ReleaseChange
 import net.tgnra.morningissue.model.ThemeMode
 
-/** The app's single settings store. */
-val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+/** The app's single settings store. Keys of settings that are gone are removed on first read ([RetiredSettings]). */
+val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "settings",
+    produceMigrations = { listOf(RetiredSettings) },
+)
 
 class DataStoreSettingsRepository(
     private val dataStore: DataStore<Preferences>,

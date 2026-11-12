@@ -21,7 +21,6 @@ import net.tgnra.morningissue.ui.reader.ReaderScreen
 import net.tgnra.morningissue.ui.saved.SavedScreen
 import net.tgnra.morningissue.ui.search.SearchScreen
 import net.tgnra.morningissue.ui.settings.KoboSyncScreen
-import net.tgnra.morningissue.ui.settings.RelaySyncScreen
 import net.tgnra.morningissue.ui.settings.SettingsScreen
 import net.tgnra.morningissue.ui.sources.SourcePageScreen
 import net.tgnra.morningissue.ui.sources.SourcesScreen
@@ -147,10 +146,7 @@ fun MorningIssueNavHost(
             SettingsScreen(onBack = back, onOpenKoboSync = { navController.navigate(KoboSyncRoute) })
         }
         composable<KoboSyncRoute> {
-            KoboSyncScreen(onBack = back, onOpenRelay = { navController.navigate(RelaySyncRoute) })
-        }
-        composable<RelaySyncRoute> {
-            RelaySyncScreen(onBack = back)
+            KoboSyncScreen(onBack = back)
         }
     }
 }

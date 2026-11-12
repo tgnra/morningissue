@@ -32,7 +32,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The manifest and the edition bundle, as JSON, against `docs/kobo-sync.md`. */
+/** The manifest, the edition bundle and the saved list a relay package carries, as JSON, against `docs/kobo-sync.md`. */
 @RunWith(AndroidJUnit4::class)
 class BundleExportTest {
     private lateinit var db: MorningIssueDatabase
@@ -49,7 +49,14 @@ class BundleExportTest {
     @After
     fun tearDown() = db.close()
 
-    private suspend fun bundle(id: Long = ids.edition): JsonObject = Json.parseToJsonElement(exporter.edition(id)!!).jsonObject
+    private suspend fun snapshot(): KoboExporter.Snapshot = exporter.snapshot("3f0c")
+
+    /** The encoded bundle of [id] in a snapshot of [from], or null when it is not offered. */
+    private suspend fun encoded(id: Long, from: KoboExporter = exporter): String? = from.snapshot("3f0c").editions.toMap()[id]
+
+    private suspend fun bundle(id: Long = ids.edition): JsonObject = Json.parseToJsonElement(encoded(id)!!).jsonObject
+
+    private suspend fun manifest(): Manifest = snapshot().manifest
 
     @Test
     fun theBundleHasTheSpecsShape() = runTest {
@@ -132,12 +139,13 @@ class BundleExportTest {
 
     @Test
     fun theManifestOffersTheThreeNewestReleasedEditionsNewestFirst() = runTest {
-        val manifest = Json.parseToJsonElement(KoboProtocol.json.encodeToString(exporter.manifest("3f0c", 41))).jsonObject
+        val manifest = Json.parseToJsonElement(KoboProtocol.json.encodeToString(manifest())).jsonObject
         assertEquals(listOf("v", "dbId", "ackedSeq", "editions", "saved"), manifest.keys.toList())
         assertEquals(listOf("count", "version"), manifest.getValue("saved").jsonObject.keys.toList())
         assertEquals(0L, manifest.getValue("saved").jsonObject.getValue("count").jsonPrimitive.long)
         assertEquals(1L, manifest.getValue("v").jsonPrimitive.long)
-        assertEquals(41L, manifest.getValue("ackedSeq").jsonPrimitive.long)
+        // A relay package has one per device (`acked`), so a snapshot's is 0.
+        assertEquals(0L, manifest.getValue("ackedSeq").jsonPrimitive.long)
         val editions = manifest.getValue("editions").jsonArray.map { it.jsonObject }
         // Tomorrow's edition is built but not released: never offered.
         assertEquals(listOf(ids.edition, ids.older), editions.map { it.getValue("id").jsonPrimitive.long })
@@ -155,25 +163,25 @@ class BundleExportTest {
                 emptyList(),
             )
         }
-        val three = exporter.manifest("3f0c", 0).editions
+        val three = manifest().editions
         assertEquals(3, three.size)
         assertEquals(listOf("EXTRA", "EVENING", "MORNING"), three.map { it.kind })
     }
 
     @Test
     fun theVersionChangesExactlyWhenTheBundleDoes() = runTest {
-        val first = exporter.manifest("3f0c", 0).editions.first().version
-        assertEquals(first, exporter.manifest("3f0c", 0).editions.first().version)
+        val first = manifest().editions.first().version
+        assertEquals(first, manifest().editions.first().version)
         assertEquals(32, first.length)
         db.engagementDao().setSaved(ids.lead, RELEASE.plusSeconds(60))
-        val second = exporter.manifest("3f0c", 0).editions.first().version
+        val second = manifest().editions.first().version
         assertNotEquals(first, second)
-        assertEquals(BundleExport.version(exporter.edition(ids.edition)!!), second)
+        assertEquals(BundleExport.version(encoded(ids.edition)!!), second)
     }
 
     @Test
     fun theImagesAKoboFetchesAreEveryLeadAndBodyImageOnce() = runTest {
-        val bundle = KoboProtocol.json.decodeFromString<EditionBundle>(exporter.edition(ids.edition)!!)
+        val bundle = KoboProtocol.json.decodeFromString<EditionBundle>(encoded(ids.edition)!!)
         // The lead's own picture, then the one in its body; the other stories have none.
         assertEquals(
             listOf("https://garden.example/img/lead.jpg", "https://garden.example/img/frost.jpg"),
@@ -187,24 +195,23 @@ class BundleExportTest {
     @Test
     fun theSavedListIsVersionedByItsContent() = runTest {
         db.engagementDao().setSaved(ids.section, RELEASE.plusSeconds(60))
-        val saved = KoboProtocol.json.decodeFromString<SavedBundle>(exporter.saved())
+        val snapshot = snapshot()
+        val saved = KoboProtocol.json.decodeFromString<SavedBundle>(snapshot.saved)
         assertEquals(listOf(ids.section), saved.order)
         assertEquals(32, saved.version.length)
         assertEquals(BundleExport.version(KoboProtocol.json.encodeToString(saved.copy(version = ""))), saved.version)
-        assertEquals(ManifestSaved(1, saved.version), exporter.manifest("3f0c", 0).saved)
-        // Saving changes the edition's bundle too, since it carries the engagement.
-        val offered = exporter.offeredArticles()
-        assertEquals(5, offered.editions.size)
-        assertEquals(1, offered.saved.size)
+        assertEquals(ManifestSaved(1, saved.version), snapshot.manifest.saved)
+        // Every article of the offered editions, then the saved one again, for the pictures.
+        assertEquals(6, snapshot.articles.size)
     }
 
     @Test
     fun anUnreleasedOrMissingEditionIsNotExported() = runTest {
-        assertNull(exporter.edition(ids.unreleased))
-        assertNull(exporter.edition(999_999))
+        assertNull(encoded(ids.unreleased))
+        assertNull(encoded(999_999))
         // It is exported once its release time has passed.
         val tomorrow = KoboExporter(db, Clock.fixed(RELEASE.plusSeconds(86_400), ZoneOffset.UTC))
-        assertEquals(ids.unreleased, Json.parseToJsonElement(tomorrow.edition(ids.unreleased)!!).jsonObject.getValue("id").jsonPrimitive.long)
+        assertEquals(ids.unreleased, Json.parseToJsonElement(encoded(ids.unreleased, tomorrow)!!).jsonObject.getValue("id").jsonPrimitive.long)
     }
 }
 
@@ -244,9 +251,11 @@ class KoboFixturesTest {
             )!!
             db.engagementDao().setSaved(shed, RELEASE.plusSeconds(1_200))
             val exporter = KoboExporter(db, NOW_CLOCK)
-            val manifest = exporter.manifest("3f0c6f2e-6c55-4f7b-9d1e-0a6f2b9e5c11", 41)
-            val bundle = KoboProtocol.json.decodeFromString<EditionBundle>(exporter.edition(ids.edition)!!)
-            val saved = KoboProtocol.json.decodeFromString<SavedBundle>(exporter.saved())
+            val snapshot = exporter.snapshot("3f0c6f2e-6c55-4f7b-9d1e-0a6f2b9e5c11")
+            // v1's manifest went to one Kobo and carried its ackedSeq; the fixture keeps one.
+            val manifest = snapshot.manifest.copy(ackedSeq = 41)
+            val bundle = KoboProtocol.json.decodeFromString<EditionBundle>(snapshot.editions.toMap().getValue(ids.edition))
+            val saved = KoboProtocol.json.decodeFromString<SavedBundle>(snapshot.saved)
 
             // Tests run in app/; the fixtures live beside the spec.
             val dir = File("../docs/kobo-sync-fixtures").apply { mkdirs() }

@@ -30,7 +30,7 @@ import okhttp3.OkHttpClient
 
 /** Every number the Kobo's image preparation works to. */
 object KoboImageConfig {
-    /** The width when a request gives none: a Kobo Libra's short side. */
+    /** The width for a Kobo whose pairing code gives none: a Kobo Libra's short side. */
     const val DEFAULT_WIDTH = 1264
 
     /** `w` is held to this range: below it a picture is a smudge, above it no Kobo's screen. */
@@ -46,7 +46,7 @@ object KoboImageConfig {
     /** Quality of the greyscale JPEGs. E-ink shows 16 greys, so more buys nothing visible. */
     const val JPEG_QUALITY = 80
 
-    /** Downloads at a time, for the Kobo's requests and the pre-warm together. The Kobo asks for 3 at a time. */
+    /** Downloads at a time, however many pictures a package build prepares at once. */
     const val PARALLEL_FETCHES = 3
 
     /** Images decoded at a time; a large original decoded for a 1264-pixel width can take 60 MB. */
@@ -60,16 +60,16 @@ object KoboImageConfig {
 class PreparedImage(val bytes: ByteArray, val format: GreyFormat)
 
 /**
- * The phone's side of `GET /v1/images` (`docs/kobo-sync.md`): a source address turned into a
- * greyscale JPEG or PNG at most `w` pixels wide.
+ * A picture for a Kobo, as protocol v1's `GET /v1/images` defined it (`docs/kobo-sync.md`) and
+ * a relay package carries it: a source address turned into a greyscale JPEG or PNG at most `w`
+ * pixels wide.
  *
  * The source is the image store's file when it has one, then Coil's disk cache ([originals]),
  * then the internet with the store's client, size limit and timeout ([ImageDownload]).
  * Prepared images are kept in [cacheDirectory], named by address and width, up to
- * [maxCacheBytes]. Two requests for the same image at once (the pre-warm and a Kobo) share one
- * preparation, and an address that could not be got or decoded is remembered for the life of
- * this object, which `KoboSync` makes once per opening of the Sync screen, so the Kobo's later
- * request is answered 404 at once.
+ * [maxCacheBytes], so the next package finds them ready. Two requests for the same image at once
+ * share one preparation, and an address that could not be got or decoded is remembered for the
+ * life of this object, which relay sync makes once per package, so it is not tried again.
  *
  * What is tested how: the decisions and every step after decoding are pure ([GreyPlan],
  * [GreyImage], [GreyPng], [GreyJpeg]) and run on the JVM; decoding itself is Android's
@@ -97,7 +97,7 @@ class KoboImages(
     private val inFlight = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
     private val tempsCleared = AtomicBoolean(false)
 
-    /** The image for [url] at most [width] pixels wide, or null for a 404. Never throws except on cancellation. */
+    /** The image for [url] at most [width] pixels wide, or null when it cannot be had. Never throws except on cancellation. */
     suspend fun prepare(url: String, width: Int): PreparedImage? = prepare(url, listOf(width))[width]
 
     /**
@@ -248,7 +248,7 @@ class KoboImages(
 
 /** The pure parts of preparing an image for a Kobo. */
 object KoboImagePlan {
-    /** `w` from a request: absent or unreadable is [KoboImageConfig.DEFAULT_WIDTH], anything else is held to the allowed range. */
+    /** `w` from a pairing code: absent or unreadable is [KoboImageConfig.DEFAULT_WIDTH], anything else is held to the allowed range. */
     fun width(raw: String?): Int =
         (raw?.trim()?.toIntOrNull() ?: KoboImageConfig.DEFAULT_WIDTH).coerceIn(KoboImageConfig.MIN_WIDTH, KoboImageConfig.MAX_WIDTH)
 
