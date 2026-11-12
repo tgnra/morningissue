@@ -1,5 +1,5 @@
-# Runs the unit tests, the 180-day ranking simulation among them, and the Kobo reader's tests on
-# every push and pull request.
+# Runs the unit tests, the 180-day ranking simulation among them, the Kobo reader's tests and the
+# relay server's tests on every push and pull request.
 # The simulation's per-persona reports (how affinity and W moved) and the test reports are kept
 # as workflow artifacts, so a failing ranking check can be diagnosed from the run's page.
 name: Tests
@@ -82,3 +82,24 @@ jobs:
           name: kobo-screens
           path: kobo/target/screens/
           if-no-files-found: ignore
+
+  # The relay server's tests: the shared test vectors and the HTTP API, under the race detector.
+  relay-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: relay/go.mod
+          cache-dependency-path: relay/go.mod
+
+      - name: Run the relay tests
+        working-directory: relay
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go test -race ./...
