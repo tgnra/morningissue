@@ -117,6 +117,10 @@ enum View {
     Home,
     Settings,
     Keypad { typed: String, error: Option<String> },
+    /// The relay address keyboard.
+    RelayKeys { typed: String, error: Option<String> },
+    /// The relay pairing code, with the URI it shows.
+    Pair { uri: String },
     Saved { screens: Vec<Screen>, pos: usize },
     Edition(Ed),
     Article(Art),
@@ -159,7 +163,9 @@ enum Finish {
 fn finish_of(r: &Result<sync::SyncReport, SyncError>) -> Finish {
     match r {
         Ok(_) => Finish::Ok,
-        Err(SyncError::NoPhone | SyncError::Network(_) | SyncError::Unauthorized) => Finish::PhoneNotFound,
+        // A relay that can't be reached, or that is waiting for the phone to list this
+        // Kobo, is worth trying again too.
+        Err(SyncError::NoPhone | SyncError::Network(_) | SyncError::Unauthorized | SyncError::Relay(_) | SyncError::RelayUnpaired { .. }) => Finish::PhoneNotFound,
         Err(_) => Finish::Failed,
     }
 }
@@ -228,6 +234,9 @@ pub struct App {
     wifi_error: Option<String>,
     /// Settings > Reset was tapped and awaits Erase everything or Cancel.
     reset_armed: bool,
+    /// The Settings page showing, and how many there are on this screen.
+    settings_page: usize,
+    settings_pages: usize,
     /// Touches before this (monotonic ms) are dropped: they were made while waking.
     ignore_touches_until: u64,
     network: Box<dyn Fn() -> NetStatus>,
@@ -312,6 +321,8 @@ impl App {
             looking: false,
             wifi_error: None,
             reset_armed: false,
+            settings_page: 0,
+            settings_pages: 1,
             ignore_touches_until: 0,
             network: opts.network,
             net,
@@ -549,12 +560,14 @@ impl App {
         let ctx = Ctx::new(&self.fonts, m, &self.images);
         let mut chrome_hits = Vec::new();
         let mut popover_hits = Vec::new();
+        let mut settings_pages = self.settings_pages;
         let hits = match self.stack.last().unwrap() {
             View::Home => {
                 let (status, err) = self.status();
                 ui::draw_home(&ctx, &mut canvas, &ui::Home { editions: &self.editions, today: self.today(), status, status_is_error: err })
             }
             View::Settings => {
+                let relay = self.relay_address();
                 let (last, err) = ui::status_line(&self.state, self.clock.wall_ms(), None, true);
                 let view = ui::SettingsView {
                     wifi: self.net.describe(),
@@ -571,10 +584,20 @@ impl App {
                     orientation: self.orientation(),
                     sensor: self.follow_sensor,
                     reset_armed: self.reset_armed,
+                    relay_address: relay.as_deref(),
+                    relay_from_config: self.settings.relay_address.is_none(),
+                    relay_note: ui::relay_note(&self.state, relay.as_deref()),
                 };
-                ui::draw_settings(&ctx, &mut canvas, &view)
+                let (hits, pages) = ui::draw_settings(&ctx, &mut canvas, &view, self.settings_page);
+                settings_pages = pages;
+                hits
             }
             View::Keypad { typed, error } => ui::draw_keypad(&ctx, &mut canvas, typed, error.as_deref()),
+            View::RelayKeys { typed, error } => ui::draw_relay_keyboard(&ctx, &mut canvas, typed, error.as_deref()),
+            View::Pair { uri } => {
+                let relay = self.relay_address();
+                ui::draw_pair(&ctx, &mut canvas, uri, relay.as_deref(), &ui::relay_note(&self.state, relay.as_deref()))
+            }
             View::Saved { screens, pos } => {
                 let s = &screens[*pos];
                 layout::draw(&s.els, &self.fonts, &self.images, &mut canvas);
@@ -631,6 +654,8 @@ impl App {
             }
         };
         self.hits = hits;
+        self.settings_pages = settings_pages;
+        self.settings_page = self.settings_page.min(settings_pages.max(1) - 1);
         self.chrome_hits = chrome_hits;
         self.popover_hits = popover_hits;
         if let Some(probe) = &self.hit_probe {
@@ -802,6 +827,16 @@ impl App {
     }
 
     fn turn(&mut self, forward: bool) -> io::Result<()> {
+        if matches!(self.top(), View::Settings) {
+            let (mut page, pages) = (self.settings_page, self.settings_pages);
+            if step(&mut page, pages, forward) {
+                self.settings_page = page;
+                self.reset_armed = false;
+                // A whole new page of controls: flashed, as a change of screen is.
+                self.show(Show::Change)?;
+            }
+            return Ok(());
+        }
         let moved = match self.top_mut() {
             View::Edition(ed) => step(&mut ed.pos, ed.screens.len(), forward),
             View::Article(art) => step(&mut art.pos, art.screens.len(), forward),
@@ -863,6 +898,11 @@ impl App {
         self.show(Show::Change)
     }
 
+    /// The relay address in use: typed in Settings, else `relay` in `config.json`.
+    fn relay_address(&self) -> Option<String> {
+        self.settings.relay_address.clone().or_else(|| self.config.relay.as_deref().and_then(|a| crate::relay::parse_address(a).ok()))
+    }
+
     fn save_settings(&mut self) {
         if let Err(e) = self.settings.save(&self.store.settings_path()) {
             eprintln!("settings: {e}");
@@ -904,6 +944,7 @@ impl App {
             }
             Action::OpenSettings => {
                 self.reset_armed = false;
+                self.settings_page = 0;
                 self.net = (self.network)();
                 self.push(View::Settings)?;
             }
@@ -985,16 +1026,51 @@ impl App {
                 }
             }
             Action::KeyChar(c) => {
-                if let View::Keypad { typed, error } = self.top_mut() {
-                    if typed.len() < 21 {
-                        typed.push(c);
+                match self.top_mut() {
+                    View::Keypad { typed, error } => {
+                        if typed.len() < 21 {
+                            typed.push(c);
+                        }
+                        *error = None;
+                    }
+                    View::RelayKeys { typed, error } => {
+                        if typed.len() < 200 {
+                            typed.push(c);
+                        }
+                        *error = None;
+                    }
+                    _ => {}
+                }
+                self.show(Show::Touch)?;
+            }
+            Action::KeyText(t) => {
+                if let View::RelayKeys { typed, error } = self.top_mut() {
+                    if typed.len() + t.len() <= 200 {
+                        typed.push_str(&t);
                     }
                     *error = None;
                 }
                 self.show(Show::Touch)?;
             }
+            Action::RelayTyped => {
+                let typed = self.settings.relay_address.clone().unwrap_or_default();
+                self.push(View::RelayKeys { typed, error: None })?;
+            }
+            Action::OpenPair => {
+                match self.store.ensure_relay_secret() {
+                    Ok(secret) => {
+                        if let Ok(st) = self.store.load_state() {
+                            self.state = st;
+                        }
+                        let (bw, bh) = self.display.base_size();
+                        let uri = crate::relay::pair_uri(&secret, &self.state.device_id, &self.config.device_name(), bw.min(bh).max(1) as u32);
+                        self.push(View::Pair { uri })?;
+                    }
+                    Err(e) => eprintln!("relay: cannot make the pairing secret: {e}"),
+                }
+            }
             Action::KeyDelete => {
-                if let View::Keypad { typed, error } = self.top_mut() {
+                if let View::Keypad { typed, error } | View::RelayKeys { typed, error } = self.top_mut() {
                     typed.pop();
                     *error = None;
                 }
@@ -1003,6 +1079,25 @@ impl App {
             Action::KeyOk => {
                 let typed = match self.top() {
                     View::Keypad { typed, .. } => typed.clone(),
+                    View::RelayKeys { typed, .. } => {
+                        let typed = typed.trim().to_string();
+                        let parsed = if typed.is_empty() { Ok(None) } else { crate::relay::parse_address(&typed).map(Some) };
+                        match parsed {
+                            Ok(a) => {
+                                self.settings.relay_address = a;
+                                self.save_settings();
+                                self.retry_phone_now();
+                                self.back()?;
+                            }
+                            Err(e) => {
+                                if let View::RelayKeys { error, .. } = self.top_mut() {
+                                    *error = Some(e);
+                                }
+                                self.show(Show::Update)?;
+                            }
+                        }
+                        return Ok(false);
+                    }
                     _ => return Ok(false),
                 };
                 match settings::parse_address(&typed) {
@@ -1077,7 +1172,7 @@ impl App {
     fn gesture(&mut self, g: Gesture) -> io::Result<bool> {
         let m = self.metrics();
         let reading = self.top().reading();
-        let pages = reading || matches!(self.top(), View::Saved { .. });
+        let pages = reading || matches!(self.top(), View::Saved { .. } | View::Settings);
         match g {
             Gesture::Tap { x, y } => self.tap(x, y),
             // A swipe down from the top edge brings the chrome.
@@ -1304,6 +1399,7 @@ impl App {
         let (tx, rx) = mpsc::channel();
         let mut opts = sync::Options::from_config(&self.config);
         opts.manual_phone = self.settings.phone_address.clone();
+        opts.relay = self.relay_address();
         let (bw, bh) = self.display.base_size();
         opts.image_width = bw.min(bh).max(1) as u32;
         let ptx = tx.clone();

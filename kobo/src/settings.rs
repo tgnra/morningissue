@@ -50,6 +50,10 @@ fn lenient_orientation<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<
 pub struct Settings {
     /// `host:port` typed on the keypad; None finds the phone by its beacon.
     pub phone_address: Option<String>,
+    /// The relay's address typed on the keyboard (`http[s]://host[:port]`); None uses
+    /// `relay` in `config.json`, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relay_address: Option<String>,
     /// Swaps the two page-turn buttons.
     pub invert_buttons: bool,
     /// None until chosen: the reader starts in the orientation it finds the screen in.
@@ -65,7 +69,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { phone_address: None, invert_buttons: false, orientation: None, text_size: DEFAULT_TEXT_SIZE, brightness: None, warmth: None }
+        Settings { phone_address: None, relay_address: None, invert_buttons: false, orientation: None, text_size: DEFAULT_TEXT_SIZE, brightness: None, warmth: None }
     }
 }
 
@@ -77,6 +81,9 @@ impl Settings {
         s.warmth = s.warmth.map(|v| v.min(100));
         if let Some(a) = &s.phone_address {
             s.phone_address = parse_address(a).ok();
+        }
+        if let Some(a) = &s.relay_address {
+            s.relay_address = crate::relay::parse_address(a).ok();
         }
         s
     }
@@ -139,7 +146,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { phone_address: Some("1.2.3.4:5".into()), invert_buttons: true, orientation: Some(Orientation::Landscape), text_size: 4, brightness: Some(40), warmth: Some(70) };
+        let s = Settings { phone_address: Some("1.2.3.4:5".into()), relay_address: Some("https://relay.example.org".into()), invert_buttons: true, orientation: Some(Orientation::Landscape), text_size: 4, brightness: Some(40), warmth: Some(70) };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         std::fs::write(&path, br#"{"textSize": 99, "future": 1, "orientation": "portrait"}"#).unwrap();

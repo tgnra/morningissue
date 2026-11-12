@@ -566,6 +566,24 @@ pub struct SettingsView<'s> {
     pub sensor: bool,
     /// Reset was tapped: show what it erases, with Erase everything and Cancel.
     pub reset_armed: bool,
+    /// The relay address in use, typed or from `config.json`.
+    pub relay_address: Option<&'s str>,
+    /// It comes from `config.json`, not the keyboard.
+    pub relay_from_config: bool,
+    /// Where relay pairing stands, in a sentence ([`relay_note`]).
+    pub relay_note: String,
+}
+
+/// Where relay pairing stands, for Settings and the pairing screen.
+pub fn relay_note(state: &crate::store::State, address: Option<&str>) -> String {
+    let s = match (address.is_some(), state.relay_secret.is_some(), state.relay_seen, state.relay_unpaired) {
+        (false, _, _, _) => "Sync away from home: type the relay address the phone\u{2019}s Kobo settings show, then pair.",
+        (true, false, _, _) => "Not paired with the relay yet. Tap Pair through relay and scan the code with the phone.",
+        (true, true, true, true) => "Not paired: the phone no longer accepts this Kobo. Pair through relay again.",
+        (true, true, false, _) => "Waiting for the phone: scan the code under Pair through relay with Morning Issue, then sync.",
+        (true, true, true, false) => "Paired. Syncs through the relay, or with the phone on this Wi-Fi when the relay can\u{2019}t be reached.",
+    };
+    s.to_string()
 }
 
 fn section(ctx: &Ctx, canvas: &mut Canvas, x: i32, y: &mut f32, w: i32, label: &str) {
@@ -615,10 +633,80 @@ fn rule(ctx: &Ctx, canvas: &mut Canvas, x: i32, y: &mut f32, w: i32) {
     *y += ctx.m.pt(8.0);
 }
 
-pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
+/// Settings, page `page` of however many it takes on this screen (returned with the hits).
+/// The sections are laid out once, top to bottom, on a canvas as long as they need, and cut
+/// into pages between sections; when they don't all fit, the foot bar turns the pages.
+pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView, page: usize) -> (Hits, usize) {
     let m = &ctx.m;
     canvas.clear(WHITE);
-    let mut hits = top_bar(ctx, canvas, "Home", "Settings", None);
+    let mut tall = Canvas::new(m.w, m.h * 4);
+    tall.clear(WHITE);
+    let mut breaks = Vec::new();
+    let (body, end) = settings_body(ctx, &mut tall, s, &mut breaks);
+    let c = m.content();
+    let bottom_one = m.h as f32 - m.pt(10.0);
+    // Each page: the part of the long canvas it shows, [from, to).
+    let mut pages: Vec<(f32, f32)> = Vec::new();
+    if end <= bottom_one {
+        pages.push((0.0, end));
+    } else {
+        let avail = c.bottom() as f32 - c.y as f32 - m.pt(10.0);
+        let mut from = c.y as f32;
+        loop {
+            let limit = from + avail;
+            if end <= limit {
+                pages.push((from, end));
+                break;
+            }
+            match breaks.iter().rfind(|(e, _)| *e <= limit && *e > from + 1.0) {
+                Some(&(e, next)) => {
+                    pages.push((from, e));
+                    from = next;
+                }
+                None => {
+                    pages.push((from, limit));
+                    from = limit;
+                }
+            }
+        }
+    }
+    let page = page.min(pages.len() - 1);
+    let (from, to) = pages[page];
+    // Where the slice lands: in place on the first page, under the bar on the others.
+    let dest = if page == 0 { from } else { c.y as f32 + m.pt(10.0) };
+    let shift = (dest - from).round() as i32;
+    for y in from.max(0.0) as i32..(to.ceil() as i32).min(tall.h) {
+        let dy = y + shift;
+        if dy < 0 || dy >= canvas.h {
+            continue;
+        }
+        let (src, dst) = ((y * tall.w) as usize, (dy * canvas.w) as usize);
+        canvas.px[dst..dst + canvas.w as usize].copy_from_slice(&tall.px[src..src + tall.w as usize]);
+    }
+    let mut hits: Hits = body
+        .into_iter()
+        .filter(|(r, _)| (r.y + r.h / 2) as f32 >= from && ((r.y + r.h / 2) as f32) < to)
+        .map(|(r, a)| (Rect::new(r.x, r.y + shift, r.w, r.h), a))
+        .collect();
+    hits.extend(top_bar(ctx, canvas, "Home", "Settings", None));
+    if pages.len() > 1 {
+        let foot = Foot { position: format!("{} of {}", page + 1, pages.len()), progress: 0.0, toggles: None, nav: true };
+        hits.extend(bottom_bar(ctx, canvas, &foot));
+    }
+    (hits, pages.len())
+}
+
+/// The end of one section (above its rule) and the start of the next, where a page may end.
+fn section_break(ctx: &Ctx, canvas: &mut Canvas, x: i32, y: &mut f32, w: i32, breaks: &mut Vec<(f32, f32)>) {
+    let end = *y;
+    rule(ctx, canvas, x, y, w);
+    breaks.push((end, *y));
+}
+
+/// Every section of Settings from the top of `canvas`; returns the hits and where it ends.
+fn settings_body(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView, breaks: &mut Vec<(f32, f32)>) -> (Hits, f32) {
+    let m = &ctx.m;
+    let mut hits = Hits::new();
     let c = m.content();
     let (x, w) = (c.x, c.w);
     let mut y = c.y as f32 + m.pt(10.0);
@@ -640,7 +728,7 @@ pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
     let n = ctx.para(&text::plain(note, ctx.ty.caption.color(MUTED)), w as f32, Align::Left, 1.35, None);
     n.draw(ctx.fonts, canvas, x as f32, y);
     y += n.height();
-    rule(ctx, canvas, x, &mut y, w);
+    section_break(ctx, canvas, x, &mut y, w, breaks);
 
     section(ctx, canvas, x, &mut y, w, "PHONE");
     let r = choice(ctx, canvas, x, &mut y, w, "Find automatically", s.phone_address.is_none(), true);
@@ -651,10 +739,34 @@ pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
     };
     let r = choice(ctx, canvas, x, &mut y, w, &typed, s.phone_address.is_some(), true);
     hits.push((r, Action::PhoneTyped));
-    rule(ctx, canvas, x, &mut y, w);
+    section_break(ctx, canvas, x, &mut y, w, breaks);
+
+    section(ctx, canvas, x, &mut y, w, "RELAY");
+    let bh = (m.bar() * 0.82).round() as i32;
+    {
+        // Pair through relay, with the address beside it (tap it to type one).
+        let pw = button_w(ctx, "Pair through relay").min(w / 2);
+        let pr = Rect::new(x, y as i32, pw, bh);
+        button(ctx, canvas, pr, "Pair through relay", false, true);
+        hits.push((target(ctx, pr), Action::OpenPair));
+        let ax = x + pw + m.pt(12.0) as i32;
+        let aw = (x + w - ax).max(1);
+        let addr = match (s.relay_address, s.relay_from_config) {
+            (Some(a), false) => a.to_string(),
+            (Some(a), true) => format!("{a} (config.json)"),
+            (None, _) => "Type the relay address\u{2026}".to_string(),
+        };
+        let l = ctx.para(&text::plain(&addr, ctx.ty.label.color(if s.relay_address.is_some() { BLACK } else { MUTED })), aw as f32, Align::Left, 1.2, Some(2));
+        l.draw(ctx.fonts, canvas, ax as f32, y + (bh as f32 - l.height()) / 2.0);
+        hits.push((Rect::new(ax, y as i32, aw, bh), Action::RelayTyped));
+        y += bh as f32 + m.pt(4.0);
+        let n = ctx.para(&text::plain(&s.relay_note, ctx.ty.caption.color(MUTED)), w as f32, Align::Left, 1.35, Some(2));
+        n.draw(ctx.fonts, canvas, x as f32, y);
+        y += n.height();
+    }
+    section_break(ctx, canvas, x, &mut y, w, breaks);
 
     section(ctx, canvas, x, &mut y, w, "SYNC");
-    let bh = (m.bar() * 0.82).round() as i32;
     // Offline, the button turns Wi-Fi on first (and off again after).
     let wifi_first = !s.online || s.wifi_job.is_some();
     let (label, action) = match (s.wifi_job, s.syncing, wifi_first) {
@@ -697,12 +809,12 @@ pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
     let res = ctx.para(&text::plain(&s.last_result, st), w as f32, Align::Left, 1.35, Some(3));
     res.draw(ctx.fonts, canvas, x as f32, y);
     y += res.height();
-    rule(ctx, canvas, x, &mut y, w);
+    section_break(ctx, canvas, x, &mut y, w, breaks);
 
     section(ctx, canvas, x, &mut y, w, "PAGE-TURN BUTTONS");
     let r = choice(ctx, canvas, x, &mut y, w, "Invert the page-turn buttons", s.invert_buttons, false);
     hits.push((r, Action::InvertButtons));
-    rule(ctx, canvas, x, &mut y, w);
+    section_break(ctx, canvas, x, &mut y, w, breaks);
 
     section(ctx, canvas, x, &mut y, w, "ORIENTATION");
     let options = [("Portrait", Orientation::Portrait), ("Landscape", Orientation::Landscape)];
@@ -722,7 +834,7 @@ pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
         n.draw(ctx.fonts, canvas, x as f32, y);
         y += n.height();
     }
-    rule(ctx, canvas, x, &mut y, w);
+    section_break(ctx, canvas, x, &mut y, w, breaks);
 
     section(ctx, canvas, x, &mut y, w, "RESET");
     if s.reset_armed {
@@ -744,7 +856,7 @@ pub fn draw_settings(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView) -> Hits {
         button(ctx, canvas, rr, "Reset Morning Issue", false, true);
         hits.push((target(ctx, rr), Action::Reset));
     }
-    hits
+    (hits, y + bh as f32)
 }
 
 // --------------------------------------------------------------------------------------------
@@ -820,6 +932,138 @@ pub fn draw_keypad(ctx: &Ctx, canvas: &mut Canvas, typed: &str, error: Option<&s
             }
         }
     }
+    hits
+}
+
+// --------------------------------------------------------------------------------------------
+// The relay address keyboard
+
+/// Letters, digits and what an address needs; a key's label is what it types.
+pub const KEYBOARD: [&[&str]; 5] = [
+    &["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+    &["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+    &["a", "s", "d", "f", "g", "h", "j", "k", "l", "-"],
+    &["z", "x", "c", "v", "b", "n", "m", ".", ":", "/"],
+    &["https://", "http://", "\u{232b}", "OK"],
+];
+
+pub fn draw_relay_keyboard(ctx: &Ctx, canvas: &mut Canvas, typed: &str, error: Option<&str>) -> Hits {
+    let m = &ctx.m;
+    canvas.clear(WHITE);
+    let mut hits = top_bar(ctx, canvas, "Cancel", "Relay address", None);
+    let c = m.content();
+    let field_w = (m.inch(6.0) as i32).min(c.w);
+    let x = c.x + (c.w - field_w) / 2;
+    let mut y = c.y as f32 + m.pt(12.0);
+    let fh = (m.bar() * 1.05).round() as i32;
+    let field = Rect::new(x, y as i32, field_w, fh);
+    canvas.frame(field, ctx.hair() * 2, BLACK);
+    let st = ctx.ty.label.size(ctx.ty.label.size * 1.15);
+    let room = field_w as f32 - m.pt(24.0);
+    // The end of a long address, where the typing is.
+    let mut shown: &str = typed;
+    while !shown.is_empty() && ctx.fonts.width(shown, &st) > room {
+        let next = shown.char_indices().nth(1).map(|(i, _)| i).unwrap_or(shown.len());
+        shown = &shown[next..];
+    }
+    let t = ctx.line(if shown.is_empty() { " " } else { shown }, st, room, Align::Left);
+    let tx = field.x as f32 + m.pt(10.0);
+    t.draw(ctx.fonts, canvas, tx, field.y as f32 + (fh as f32 - t.height()) / 2.0);
+    let caret_x = tx + if shown.is_empty() { 0.0 } else { ctx.fonts.width(shown, &st) } + m.pt(2.0);
+    canvas.vline(caret_x as i32, field.y + fh / 5, fh * 3 / 5, dp(ctx, 1.5).round().max(2.0) as i32, BLACK);
+    y += fh as f32 + m.pt(6.0);
+    let hint = match error {
+        Some(e) => ctx.para(&text::plain(e, ctx.ty.caption.italic().color(BLACK)), field_w as f32, Align::Left, 1.35, Some(3)),
+        None => ctx.para(
+            &text::plain("The address is in the phone\u{2019}s Kobo settings. Without http:// or https://, a name gets https://. OK with nothing typed uses config.json\u{2019}s.", ctx.ty.caption.color(MUTED)),
+            field_w as f32,
+            Align::Left,
+            1.35,
+            Some(3),
+        ),
+    };
+    hint.draw(ctx.fonts, canvas, x as f32, y);
+    y += ctx.ty.caption.size * 1.35 * 3.0 + m.pt(8.0);
+
+    let gap = m.pt(5.0);
+    let cols = 10.0;
+    let kw = ((field_w as f32 - (cols - 1.0) * gap) / cols).floor();
+    let kh = ((c.bottom() as f32 - y - 4.0 * gap) / 5.0).min(m.inch(0.5)).max(m.bar() * 0.8).floor();
+    let key_style = ctx.ty.label.size(ctx.ty.label.size * 1.2);
+    for (ri, row) in KEYBOARD.iter().enumerate() {
+        let last = ri + 1 == KEYBOARD.len();
+        let mut kx = x as f32;
+        for k in row.iter() {
+            // The last row: the two schemes three keys wide, backspace two, OK two.
+            let span = if !last { 1.0 } else if k.contains("//") { 3.0 } else { 2.0 };
+            let r = Rect::new(kx as i32, (y + ri as f32 * (kh + gap)) as i32, (kw * span + gap * (span - 1.0)) as i32, kh as i32);
+            kx += kw * span + gap * span;
+            let ok = *k == "OK";
+            if ok {
+                canvas.fill(r, BLACK);
+            } else {
+                canvas.frame(r, ctx.hair() * 2, BLACK);
+            }
+            if *k == "\u{232b}" {
+                let cy = r.y as f32 + r.h as f32 / 2.0;
+                let cx = r.x as f32 + r.w as f32 / 2.0;
+                let s = key_style.size * 0.5;
+                canvas.chevron(cx - s * 0.6, cy, s * 1.4, -1.0, BLACK);
+                canvas.stroke(cx - s * 0.9, cy, cx + s * 1.1, cy, (s / 4.0).max(1.5), BLACK);
+                hits.push((r, Action::KeyDelete));
+                continue;
+            }
+            let style = if ok { ctx.ty.ui.color(WHITE) } else if k.len() > 1 { ctx.ty.ui } else { key_style };
+            let l = ctx.line(k, style, r.w as f32, Align::Center);
+            l.draw(ctx.fonts, canvas, r.x as f32, r.y as f32 + (r.h as f32 - l.height()) / 2.0);
+            let action = if ok {
+                Action::KeyOk
+            } else if k.len() > 1 {
+                Action::KeyText(k.to_string())
+            } else {
+                Action::KeyChar(k.chars().next().unwrap())
+            };
+            hits.push((r, action));
+        }
+    }
+    hits
+}
+
+// --------------------------------------------------------------------------------------------
+// The relay pairing code
+
+/// The pairing code full-screen, as large as fits with its quiet zone, and what to do with it.
+pub fn draw_pair(ctx: &Ctx, canvas: &mut Canvas, uri: &str, relay: Option<&str>, note: &str) -> Hits {
+    let m = &ctx.m;
+    canvas.clear(WHITE);
+    let hits = top_bar(ctx, canvas, "Settings", "Pair through relay", None);
+    let c = m.content();
+    let w = c.w as f32;
+    let how = ctx.para(
+        &text::plain("On the phone, open Morning Issue\u{2019}s Kobo settings and scan this code to pair this Kobo through the relay.", ctx.ty.standfirst),
+        w,
+        Align::Center,
+        1.35,
+        None,
+    );
+    let addr = match relay {
+        Some(a) => format!("Relay: {a}"),
+        None => "Then type the relay\u{2019}s address in Settings.".to_string(),
+    };
+    let addr = ctx.para(&text::plain(&addr, ctx.ty.caption.color(BLACK)), w, Align::Center, 1.35, Some(2));
+    let status = ctx.para(&text::plain(note, ctx.ty.caption.color(MUTED)), w, Align::Center, 1.35, Some(3));
+    let gap = m.pt(10.0);
+    let text_h = how.height() + addr.height() + status.height() + gap * 3.0;
+    let size = (c.w as f32).min(c.h as f32 - text_h - m.pt(8.0)).max(m.inch(1.0)) as i32;
+    let mut y = c.y as f32 + m.pt(8.0);
+    if let Some(r) = crate::qr::draw(canvas, uri, c.x + c.w / 2, y as i32, size) {
+        y = r.bottom() as f32 + gap;
+    }
+    how.draw(ctx.fonts, canvas, c.x as f32, y);
+    y += how.height() + gap;
+    addr.draw(ctx.fonts, canvas, c.x as f32, y);
+    y += addr.height() + gap;
+    status.draw(ctx.fonts, canvas, c.x as f32, y);
     hits
 }
 
@@ -979,6 +1223,7 @@ pub fn status_line(state: &crate::store::State, now_ms: i64, syncing: Option<&Sy
     }
     let when = state.last_sync_at.map(|t| time::relative(t, now_ms));
     let with = match (&state.phone_name, &state.last_address) {
+        _ if state.last_via_relay => " through the relay".to_string(),
         (Some(p), _) => format!(" with {p}"),
         (None, Some(a)) => format!(" with the phone at {}", a.split(':').next().unwrap_or(a)),
         _ => String::new(),

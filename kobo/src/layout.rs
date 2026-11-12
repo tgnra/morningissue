@@ -146,6 +146,12 @@ pub enum Action {
     KeyChar(char),
     KeyDelete,
     KeyOk,
+    /// A key that types several characters at once ("https://").
+    KeyText(String),
+    /// Opens the keyboard for the relay's address.
+    RelayTyped,
+    /// Shows the relay pairing code.
+    OpenPair,
 }
 
 #[derive(Clone, Debug)]

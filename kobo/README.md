@@ -2,14 +2,17 @@
 
 A native e-ink reader for Kobo e-readers. You open it from NickelMenu. It shows editions
 and saved articles on the bare framebuffer while Nickel (Kobo's own reader) is stopped, and
-syncs with the Morning Issue app on your phone in the background over the Kobo's Wi-Fi. The protocol, the files on the
-device and the launch flow are specified in [`docs/kobo-sync.md`](../docs/kobo-sync.md).
+syncs with the Morning Issue app on your phone in the background over the Kobo's Wi-Fi: with
+the phone on the same network, or through a relay server when it isn't. The protocol, the
+files on the device and the launch flow are specified in
+[`docs/kobo-sync.md`](../docs/kobo-sync.md), and relay sync in
+[`docs/relay-sync.md`](../docs/relay-sync.md).
 
 It is one static binary, `morningissue`, built for `armv7-unknown-linux-musleabihf`. It has
 five subcommands:
 
 - `read` runs the reader (and its background sync).
-- `sync` fetches from the phone once, from a shell.
+- `sync` fetches from the phone (or the relay) once, from a shell.
 - `check` names the device and fails if this version can't draw on it.
 - `wifi-off` and `wifi-on` power the Wi-Fi chip down and up for `wifi-off.sh` and
   `wifi-on.sh` (ntx_io ioctl 208).
@@ -28,6 +31,23 @@ firmware 4.6 or newer.
    network.
 5. On the Kobo, connect to Wi-Fi in Nickel, then open the main menu and tap
    **Morning Issue**. The phone asks you to allow the Kobo the first time.
+6. To sync away from home too, pair it through a relay (below).
+
+### Relay sync
+
+A relay is a small server, run by you or someone you trust, that holds encrypted packages
+for the Kobo and the Kobo's encrypted changes for the phone. It never sees what you read.
+
+1. On the Kobo, open **Settings** and tap the address beside **Pair through relay**. Type the
+   relay's address from the phone's Kobo settings (`https://relay.example.org`, or a plain
+   `http://` address with its port) and tap **OK**. You can set it as `"relay"` in
+   `config.json` instead.
+2. Tap **Pair through relay**. The Kobo shows a large QR code. Scan it with Morning Issue on
+   the phone (Kobo settings). Scanning is the consent; nothing is asked on the Kobo.
+3. Tap **Sync now**. Until the phone has told the relay about the Kobo, Settings says
+   "Waiting for the phone". Once the phone has published a package, the Kobo installs it.
+
+Reset erases the pairing secret with everything else; pair again afterwards.
 
 ### Update
 
@@ -73,8 +93,10 @@ change the screen mode.
   the top of the list at once, and unsaving takes it off at once; both are sent to the phone
   at the next sync.
 - **Settings:** the Wi-Fi state, how to find the phone (automatically, or a typed address
-  on a keypad; the port defaults to 47824), **Sync now**, inverting the page-turn buttons,
-  orientation (portrait or landscape), and the last sync's result. On a model with a
+  on a keypad; the port defaults to 47824), the relay (its address, typed on a keyboard, and
+  **Pair through relay**, with where pairing stands), **Sync now**, inverting the page-turn
+  buttons, orientation (portrait or landscape), Reset, and the last sync's result. When it
+  doesn't all fit on the screen, Settings has pages, turned like Saved's. On a model with a
   mapped orientation sensor, the sensor turns the page upside down within the chosen
   orientation to match how you hold it, once the reading has held for 1.5 s, with a full
   refresh. Until you choose, the reader keeps the orientation the screen was in when it
@@ -95,6 +117,25 @@ when the model has them.
 
 What you read is recorded in `data/events.jsonl` and sent on the next sync.
 
+### LAN and relay together
+
+Once a relay address is set and the pairing code has been shown, every sync tries the relay
+first. If that fails for any reason (no connection to the relay, not paired yet, a package
+that fails its check), the phone is looked for on the local network as before, and the
+relay's error is shown only if the phone isn't found either. Without a relay address, or
+before the code has been shown, only the LAN is used. Both kinds of sync send the same events
+under the same `deviceId`, and the phone skips the ones it has already merged, so they mix
+safely. Events sent to the relay stay on the Kobo until a package from the phone shows they
+were merged; if none does within the relay's 48 hours, they are sent again.
+
+`https://` relays are checked against the Mozilla root certificates. Since a Kobo's clock can
+be far off, the time used for that is the clock corrected by the last `Date` the phone or the
+relay sent, and never earlier than the date the binary was built. If a certificate still
+looks out of date, the reader says the Kobo's clock is wrong: sync once with the phone on the
+same Wi-Fi to correct it, or use the relay's `http://` address. Plain HTTP is safe for the
+contents (everything is encrypted end to end and every request is signed); TLS hides only the
+request paths and sizes.
+
 ## Configuration
 
 You can create `.adds/morningissue/config.json` yourself. Every field is optional:
@@ -102,6 +143,7 @@ You can create `.adds/morningissue/config.json` yourself. Every field is optiona
 ```json
 {
   "phone": "192.168.1.20:47824",
+  "relay": "https://relay.example.org",
   "name": "Kobo in the kitchen",
   "beaconSeconds": 10,
   "flashEvery": 6,
@@ -113,6 +155,8 @@ You can create `.adds/morningissue/config.json` yourself. Every field is optiona
 
 - `phone` is for networks that drop UDP broadcasts. An address typed in Settings is tried
   before it and before the beacon.
+- `relay` is the relay's address, `http[s]://host[:port]`. One typed in Settings comes first.
+  Without `http://` or `https://`, an IPv4 address gets `http://` and a name `https://`.
 - `touch` and `display` are escape hatches for a model whose profile turns out to be wrong.
 - `flashEvery` sets how many partial page turns pass before a full refresh.
 - Problems are logged to `.adds/morningissue/data/launch.log`.
@@ -193,9 +237,13 @@ was copied from them.
 VERSION=1.0.0 kobo/build.sh
 ```
 
-This needs Rust with the `armv7-unknown-linux-musleabihf` target. Without cargo on the PATH,
-the script runs rustup through `nix shell nixpkgs#rustup`. The binary is linked by
-`rust-lld` with musl's self-contained startup files, so no cross C toolchain is needed.
+This needs Rust with the `armv7-unknown-linux-musleabihf` target, and clang. Without cargo on
+the PATH, the script runs rustup through `nix shell nixpkgs#rustup`. The binary is linked by
+`rust-lld` with musl's self-contained startup files, so no GCC cross toolchain is needed; the
+only C and assembly in the build is ring's (TLS for relays), which clang compiles for the
+target (`kobo/.cargo/config.toml` sets `CC_armv7_unknown_linux_musleabihf=clang`). Every other
+crate is pure Rust. TLS, the relay crypto and the QR code add about 0.9 MB to the binary
+(2.4 MB to 3.3 MB).
 
 The script:
 
@@ -224,6 +272,27 @@ cd kobo && cargo test
   - `/v1/saved` fetched only when its version changes;
   - pictures asked for at the screen width, three at a time;
   - a typed address tried before the beacon.
+- `tests/relay_vectors.rs` reproduces every vector in `docs/relay-sync-fixtures/vectors.json`
+  (key derivation, kids, the envelopes including the exact-multiple and empty ones, the
+  wrapped key, the changes and both signatures) and checks that tampered, truncated and
+  reordered envelopes are refused.
+- `tests/relay.rs` runs `sync` against an in-process fake relay that checks signatures as the
+  real one does. It covers:
+  - installing a package (editions, saved shelf, pictures at this width or scaled down from a
+    wider one) and `fetched`;
+  - events uploaded as encrypted batches of up to 500, kept until a package's `acked` covers
+    them, and waiting when the relay already holds 64 batches;
+  - a dropped download resumed with `Range`;
+  - a `dbId` change wiping everything;
+  - "Waiting for the phone", then paired, then dropped ("Not paired"), with the events sent
+    again once paired again;
+  - a wrong clock put right from the `Date` header, and no signature ever sent twice;
+  - tampered packages and wrongly wrapped keys installing nothing;
+  - the phone on the LAN used when the relay can't be reached;
+  - an `https://` relay over TLS, and a certificate not yet valid blamed on the clock.
+- `tests/relay_interop.rs` does the same against the real relay (`relay/`, Go), with the test
+  as the phone. It is ignored unless `MORNINGISSUE_RELAY_BIN` names a built relay:
+  `(cd relay && go build -o /tmp/relay .) && MORNINGISSUE_RELAY_BIN=/tmp/relay cargo test --test relay_interop -- --ignored`.
 - `tests/screens.rs` drives the whole reader through the desktop backend with scripted taps,
   swipes and keys, at:
   - 600×800 at 167 dpi;
@@ -234,7 +303,8 @@ cd kobo && cargo test
   It covers the sleep screen at every size; sleeping and waking by the power button, the
   cover and the idle timeout, with touches made while asleep or waking ignored; a kernel
   that refuses to suspend; home with one, two and three editions, offline, syncing and after an error;
-  Settings and the keypad; Saved; the reader with its chrome hidden and shown; the Aa
+  Settings (on two pages where it doesn't fit), the keypad, the relay keyboard and the pairing
+  code (decoded from the screenshot at every size); Saved; the reader with its chrome hidden and shown; the Aa
   popover, with and without warmth; a background sync against the fake phone (a new
   edition and pictures arriving while reading); no sync attempt offline; orientation (portrait
   and landscape, each upside down, a brief tilt ignored, no sensor, the old setting); and
@@ -254,4 +324,6 @@ cd kobo && cargo test
 
 Morning Issue is MIT-licensed. Fraunces, Newsreader and Inter are under the SIL Open Font
 License. Their licences are installed next to the fonts in `.adds/morningissue/fonts/`, as
-`*-OFL.license`.
+`*-OFL.license`. The binary includes rustls (Apache-2.0, ISC or MIT), ring (Apache-2.0 and
+ISC), rustls-webpki (ISC) and webpki-roots, Mozilla's root certificates
+(CDLA-Permissive-2.0).
