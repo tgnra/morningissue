@@ -649,6 +649,23 @@ func TestLimits(t *testing.T) {
 	}
 }
 
+// A body the relay can't store, here because its tmp directory is gone, is the relay's failure
+// (500), not a malformed request (400) that a client would give up on.
+func TestStorageFailureIsInternal(t *testing.T) {
+	e := newEnv(t)
+	d := randKey()
+	e.register(d)
+	if err := os.RemoveAll(filepath.Join(e.dir, "tmp")); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.do(d, "PUT", "/v1/changes/1-1", envelope(10), nil); r.status != 500 || r.errorCode(t) != "internal" {
+		t.Fatalf("changes: %d %s", r.status, r.body)
+	}
+	if r := e.do(e.owner, "PUT", "/v1/group/packages/"+store.NewID(), envelope(10), nil); r.status != 500 {
+		t.Fatalf("package: %d %s", r.status, r.body)
+	}
+}
+
 func TestSweeper(t *testing.T) {
 	e := newEnv(t)
 	d := randKey()

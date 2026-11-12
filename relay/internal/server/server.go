@@ -407,8 +407,26 @@ func (h *headWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// errBody is a failure to read the request body, as when the client goes away.
+var errBody = errors.New("reading the body")
+
+// bodyReader keeps the error from reading the body, to tell it from a failure to write it.
+type bodyReader struct {
+	r   io.Reader
+	err error
+}
+
+func (b *bodyReader) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if err != nil && err != io.EOF {
+		b.err = err
+	}
+	return n, err
+}
+
 // receive streams the body to a temporary file, hashing it, up to limit bytes. On success the
-// caller owns the file at path.
+// caller owns the file at path. A failure to read the body is errBody; any other error is the
+// relay's own.
 func (s *Server) receive(r *http.Request, limit int64) (*received, error) {
 	if r.ContentLength > limit {
 		return nil, errTooLarge
@@ -426,7 +444,11 @@ func (s *Server) receive(r *http.Request, limit int64) (*received, error) {
 	}()
 	var h hash.Hash = sha256.New()
 	head := &headWriter{}
-	n, err := io.Copy(io.MultiWriter(f, h, head), io.LimitReader(r.Body, limit+1))
+	body := &bodyReader{r: r.Body}
+	n, err := io.Copy(io.MultiWriter(f, h, head), io.LimitReader(body, limit+1))
+	if body.err != nil {
+		return nil, fmt.Errorf("%w: %v", errBody, body.err)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -459,8 +481,13 @@ func (s *Server) authStream(w http.ResponseWriter, r *http.Request, k kind, limi
 		writeError(w, http.StatusRequestEntityTooLarge, "too_large")
 		return nil, nil, false
 	}
-	if err != nil {
+	if errors.Is(err, errBody) {
 		writeError(w, http.StatusBadRequest, "malformed")
+		return nil, nil, false
+	}
+	if err != nil {
+		// The relay's own failure, such as a full disk: not the client's fault.
+		s.internal(w, err)
 		return nil, nil, false
 	}
 	if !s.finish(w, r, c, k, rc.hash) {
