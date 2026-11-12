@@ -73,6 +73,8 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
           VERSION_CODE: ${{ steps.version.outputs.code }}
+          MORNINGISSUE_RELAY_ADDRESS: ${{ vars.MORNINGISSUE_RELAY_ADDRESS }}
+          MORNINGISSUE_RELAY_TOKEN: ${{ secrets.MORNINGISSUE_RELAY_TOKEN }}
         run: |
           ./gradlew assembleRelease \
             "-PappVersionName=$VERSION_NAME" \

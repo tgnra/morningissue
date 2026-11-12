@@ -15,6 +15,16 @@ val hasReleaseSigning = listOf(
     releaseKeystoreFile, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword
 ).none { it.isNullOrBlank() }
 
+// The relay Relay sync uses until the reader sets another, and its registration token. They
+// come from a Gradle property (-P, or ~/.gradle/gradle.properties) or the environment (CI
+// secrets) and are never kept in the repository: the token only keeps bots from creating
+// groups on the relay, and a public repository would hand it to them. Empty means none.
+fun buildSetting(property: String, variable: String): String =
+    providers.gradleProperty(property).orElse(providers.environmentVariable(variable)).getOrElse("").trim()
+val builtInRelayAddress = buildSetting("morningissue.relayAddress", "MORNINGISSUE_RELAY_ADDRESS")
+val builtInRelayToken = buildSetting("morningissue.relayToken", "MORNINGISSUE_RELAY_TOKEN")
+fun kotlinString(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$") + "\""
+
 android {
     namespace = "net.tgnra.morningissue"
     // Current AndroidX, Compose, Coil and OkHttp releases require compiling against API 37.
@@ -31,6 +41,9 @@ android {
         versionName = providers.gradleProperty("appVersionName").orNull ?: "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "RELAY_ADDRESS", kotlinString(builtInRelayAddress))
+        buildConfigField("String", "RELAY_TOKEN", kotlinString(builtInRelayToken))
     }
 
     signingConfigs {
@@ -82,6 +95,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     androidResources {
         // The embedding table (assets/embedding/*.bin) is memory-mapped out of the APK, which only

@@ -9,6 +9,7 @@ import java.time.Instant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import net.tgnra.morningissue.BuildConfig
 
 /** What the reader set for relay sync, and what the phone remembers about it. */
 data class RelayConfig(
@@ -26,12 +27,20 @@ data class RelayConfig(
 /**
  * Relay sync's part of the settings store: the address and registration token, the owner
  * secret `O`, made once per install, and which address the group was last registered at.
+ *
+ * The address and token start as the ones built into the app (`BuildConfig.RELAY_ADDRESS`
+ * and `RELAY_TOKEN`, from the build's properties; empty in a build without them) until the
+ * reader sets their own; setting a field empty turns it off.
  */
-class RelaySettings(private val dataStore: DataStore<Preferences>) {
+class RelaySettings(
+    private val dataStore: DataStore<Preferences>,
+    private val builtInAddress: String = BuildConfig.RELAY_ADDRESS,
+    private val builtInToken: String = BuildConfig.RELAY_TOKEN,
+) {
     val config: Flow<RelayConfig> = dataStore.data.map { prefs ->
         RelayConfig(
-            address = prefs[ADDRESS].orEmpty(),
-            registrationToken = prefs[TOKEN].orEmpty(),
+            address = prefs[ADDRESS] ?: builtInAddress,
+            registrationToken = prefs[TOKEN] ?: builtInToken,
             lastPublishedAt = prefs[LAST_PUBLISHED]?.let(Instant::ofEpochMilli),
             lastDoneAt = prefs[LAST_DONE]?.let(Instant::ofEpochMilli),
         )
