@@ -1,5 +1,5 @@
 # Pushing a tag that starts with "v" builds a signed APK and publishes it as a GitHub release,
-# then builds the Kobo reader zip and attaches it to the same release.
+# then builds the Kobo reader zip and the relay server binaries and attaches them to the same release.
 # Running the workflow by hand (Actions > Release > Run workflow) builds the same signed APK
 # and uploads it as a workflow artifact, without creating a release.
 name: Release
@@ -166,4 +166,67 @@ jobs:
           VERSION: ${{ steps.version.outputs.name }}
         run: |
           gh release upload "$GITHUB_REF_NAME" "kobo/dist/morningissue-kobo-$VERSION.zip" \
+            --repo "$GITHUB_REPOSITORY"
+
+  # The relay server (relay/): one static Go binary per architecture, for running on your own
+  # server. It waits for the release job so the release exists to attach to.
+  relay:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: relay/go.mod
+          cache-dependency-path: relay/go.mod
+
+      - name: Work out the version
+        id: version
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "name=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=0.0.0-dev.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run the relay tests
+        working-directory: relay
+        run: |
+          go vet ./...
+          go test -race ./...
+
+      - name: Build the relay binaries
+        working-directory: relay
+        env:
+          VERSION: ${{ steps.version.outputs.name }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="-s -w" \
+              -o "dist/morningissue-relay-$VERSION-linux-$arch" .
+          done
+          ls -l dist
+
+      - name: Upload the binaries as a workflow artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: morningissue-relay-${{ steps.version.outputs.name }}
+          path: relay/dist/
+          if-no-files-found: error
+
+      - name: Attach the binaries to the GitHub release
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.name }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "relay/dist/morningissue-relay-$VERSION-linux-amd64" \
+            "relay/dist/morningissue-relay-$VERSION-linux-arm64" \
             --repo "$GITHUB_REPOSITORY"
