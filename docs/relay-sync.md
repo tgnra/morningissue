@@ -110,9 +110,11 @@ canonical = "MIR1\n" + METHOD + "\n" + path-and-query exactly as sent + "\n" + t
 - **Clock:** every response carries `Date`. A device with an unreliable clock (a Kobo) sets `ts` from the offset to the last `Date` it saw. After a `401` it retries once with the offset from that response's `Date`.
 - **`401` body:** `{"error": "skew" | "unknown" | "signature" | "replay"}`, so a client can tell a clock problem from being unpaired.
 
-No secret crosses the network, so a device may use plain `http://`. An eavesdropper sees only encrypted blobs, their sizes and timing.
+No secret crosses the network. Signing and end-to-end encryption therefore protect everything even over plain `http://`, where an eavesdropper sees only encrypted blobs, their sizes and timing. TLS is extra protection on top, not a replacement.
 
-The phone always uses `https://`, because `PUT /v1/group` and `PUT /v1/group/devices` carry keys. The relay can serve both: plain HTTP for devices on one port, TLS on another or behind a reverse proxy.
+- **The phone always uses `https://`**, because `PUT /v1/group` and `PUT /v1/group/devices` carry keys.
+- **The Kobo supports `https://`** (rustls with the ring provider and the webpki root store; clang compiles ring for the ARM build). It checks certificate validity against its clock corrected by the last `Date` offset, and never against a time earlier than its own build date. Plain `http://` remains allowed for relays without a certificate.
+- **The relay can serve both**: TLS directly or behind a reverse proxy, and plain HTTP on another port if wanted.
 
 ## Relay API
 
@@ -278,4 +280,4 @@ Every implementation must have a test that reproduces every vector.
 
 - The relay address is typed on the device. The QR code can't carry it because the device shows the code, it doesn't read one.
 - A device's changes reach the edition engine only when the phone runs Done. Events that arrive after the next build have already counted their stories as unopened (v1's limit).
-- The relay sees group sizes, blob sizes and timing.
+- The relay sees group sizes, blob sizes and timing. Over plain HTTP, so does anyone on the network path.
