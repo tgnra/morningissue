@@ -186,7 +186,7 @@ class KoboSync(
     suspend fun prewarm(images: KoboImages) = coroutineScope {
         val exporter = KoboExporter(database, clock)
         val text = launch { fetchSavedText() }
-        val sizes = KoboImageWidths.toPrepare(database.syncPeerDao().all().map { it.deviceId }, widths.all())
+        val sizes = KoboImageWidths.toPrepare(database.syncPeerDao().all().filter { it.isLanPaired }.map { it.deviceId }, widths.all())
         val progress = Progress()
         val first = exporter.offeredArticles()
         val firstUrls = BundleExport.imageUrls(first.editions + first.saved)
