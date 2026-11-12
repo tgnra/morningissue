@@ -268,6 +268,34 @@ fn an_unlisted_kobo_waits_for_the_phone_and_sends_its_events_again_once_listed()
     assert_eq!(relay.changes_of(&keys).iter().map(|c| c.0.clone()).collect::<Vec<_>>(), vec!["1-2"]);
 }
 
+/// What the pairing screen asks: one signed `GET /v1/package`, false until the phone lists
+/// this Kobo. It uploads, downloads and installs nothing, and leaves the last sync's result.
+#[test]
+fn asking_whether_the_phone_lists_this_kobo() {
+    let relay = FakeRelay::start();
+    let (store, keys) = kobo("listed");
+    store.append_event(&event(1)).unwrap();
+    relay.publish(&id(1), &package("db-A", &editions(), None, &[], json!({})), &[&keys]);
+    let listed = |address: &str| morningissue::relay::listed(&store, &opts(address), address);
+    assert!(!listed(&relay.url()).unwrap());
+    let state = store.load_state().unwrap();
+    assert!(state.relay_unpaired && !state.relay_seen && state.last_error.is_none());
+
+    relay.list(&keys);
+    assert!(listed(&relay.url()).unwrap());
+    let state = store.load_state().unwrap();
+    assert!(!state.relay_unpaired && state.relay_seen && state.last_error.is_none());
+    assert!(state.relay_package.is_none() && state.editions.is_empty());
+    assert_eq!(relay.with(|s| s.requests.clone()), vec!["GET /v1/package", "GET /v1/package"]);
+    assert_eq!(seqs(&store), vec![1]);
+
+    // A relay that can't be reached is an error, not a "no".
+    match listed(&format!("http://{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap())) {
+        Err(SyncError::Relay(_)) => {}
+        other => panic!("{other:?}"),
+    }
+}
+
 #[test]
 fn a_wrong_clock_is_put_right_from_the_date_header_and_the_request_retried() {
     let relay = FakeRelay::start();

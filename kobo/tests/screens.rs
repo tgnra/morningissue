@@ -3,10 +3,13 @@
 //! sync started from the reader did, and what the light was told.
 
 mod fakephone;
+mod fakerelay;
 
 use fakephone::FakePhone;
+use fakerelay::FakeRelay;
 use morningissue::app::{self, App};
 use morningissue::config::Config;
+use morningissue::crypto::{self, DeviceKeys};
 use morningissue::desktop::{self, DesktopDisplay, DesktopPower, DesktopRadio, ScriptClock, ScriptInput, Shared, Step};
 use morningissue::device::{Key, Refresh};
 use morningissue::light::FakeLight;
@@ -165,12 +168,40 @@ struct Setup {
     wifi_no_network: bool,
     /// How long a sync listens for the phone's beacon.
     beacon_seconds: u64,
+    /// A relay address typed in Settings, with the pairing code shown once already (the state
+    /// holds [`RELAY_SECRET`]).
+    relay: Option<String>,
+    /// The relay has accepted this Kobo before (`relaySeen`).
+    relay_seen: bool,
 }
 
 impl Default for Setup {
     fn default() -> Setup {
-        Setup { editions: 3, saved: true, online: true, phone: None, sync_on_start: false, warmth: true, last_error: None, refuse_suspend: 0, refuse_prepare: 0, sensor: true, settings: None, wifi_no_network: false, beacon_seconds: 10 }
+        Setup {
+            editions: 3,
+            saved: true,
+            online: true,
+            phone: None,
+            sync_on_start: false,
+            warmth: true,
+            last_error: None,
+            refuse_suspend: 0,
+            refuse_prepare: 0,
+            sensor: true,
+            settings: None,
+            wifi_no_network: false,
+            beacon_seconds: 10,
+            relay: None,
+            relay_seen: false,
+        }
     }
+}
+
+/// The relay secret of a Kobo set up with [`Setup::relay`].
+const RELAY_SECRET: [u8; 32] = [7; 32];
+
+fn relay_keys() -> DeviceKeys {
+    DeviceKeys::from_secret(&RELAY_SECRET)
 }
 
 /// A home directory with editions, their pictures, saved articles and a sync twelve minutes ago.
@@ -193,10 +224,17 @@ fn setup(name: &str, now_ms: i64, s: &Setup) -> PathBuf {
         std::fs::write(store.saved_path(), serde_json::to_vec(&saved_list()).unwrap()).unwrap();
         state.saved_version = Some("s1".into());
     }
+    if s.relay.is_some() {
+        state.relay_secret = Some(crypto::b64url(&RELAY_SECRET));
+        state.relay_seen = s.relay_seen;
+    }
     store.save_state(&state).unwrap();
     let mut settings = s.settings.clone().unwrap_or_else(|| json!({}));
     if let Some(p) = &s.phone {
         settings["phoneAddress"] = json!(p);
+    }
+    if let Some(r) = &s.relay {
+        settings["relayAddress"] = json!(r);
     }
     if settings != json!({}) {
         std::fs::write(store.settings_path(), serde_json::to_vec(&settings).unwrap()).unwrap();
@@ -250,6 +288,12 @@ struct Outcome {
 }
 
 fn run(dir: &str, size: &Size, s: &Setup, script: Vec<Step>) -> Outcome {
+    run_with(dir, size, s, script, |_| {})
+}
+
+/// [`run`], with `at_mark` called at every mark by its name, so that something can happen
+/// at that point in the script (the phone scanning the pairing code, say).
+fn run_with(dir: &str, size: &Size, s: &Setup, script: Vec<Step>, mut at_mark: impl FnMut(&str) + 'static) -> Outcome {
     let now = time::parse_iso("2026-11-11T07:30:00Z").unwrap();
     let home = setup(dir, now, s);
     let shared = Rc::new(Shared::default());
@@ -265,6 +309,7 @@ fn run(dir: &str, size: &Size, s: &Setup, script: Vec<Step>) -> Outcome {
     let mut input = ScriptInput::new(script, (size.w, size.h), shared.clone());
     let (out2, shared2) = (out.clone(), shared.clone());
     input.on_mark = Some(Box::new(move |name| {
+        at_mark(name);
         // "name@panel" also saves the panel as it physically shows, in its base orientation.
         let (name, raw) = match name.strip_suffix("@panel") {
             Some(n) => (n, true),
@@ -648,6 +693,173 @@ fn wifi_that_cannot_connect_goes_off_again() {
     assert_eq!(o.radio, vec!["on stopped"]);
     assert!(o.power.iter().any(|p| p == "wifi-off"), "{:?}", o.power);
     assert_eq!(o.syncs_started, 0);
+}
+
+/// An address where nobody listens.
+fn nobody() -> String {
+    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().to_string()
+}
+
+/// A relay package holding editions 121 to 118, for this Kobo.
+fn publish_editions(relay: &FakeRelay) {
+    let editions: Vec<fakerelay::Edition> = [121, 120, 119, 118].into_iter().map(|id| (id, format!("v{id}"), edition(id))).collect();
+    relay.publish(&crypto::b64url(&[1; 16]), &fakerelay::package("db", &editions, None, &[], json!({})), &[&relay_keys()]);
+}
+
+/// Turn on Wi-Fi and sync with the phone away: a sync through the relay is a success, even
+/// with nothing new, and Wi-Fi goes off again after it.
+#[test]
+fn turn_on_wifi_sync_through_the_relay_and_turn_off() {
+    let size = &SIZES[2];
+    for (run_name, package) in [("wifi-relay-nothing-new", false), ("wifi-relay-package", true)] {
+        let relay = FakeRelay::start();
+        relay.list(&relay_keys());
+        if package {
+            publish_editions(&relay);
+        }
+        let setup = Setup { online: false, phone: Some(nobody()), beacon_seconds: 1, relay: Some(relay.url()), relay_seen: true, ..Default::default() };
+        let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
+        script.extend(sleep_steps(3000));
+        script.push(mark("01-settings-synced"));
+        script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
+        script.push(Step::Wait(10_000));
+        script.push(mark("02-settings-off"));
+        let o = run(run_name, size, &setup, script);
+        assert_eq!(o.radio, vec!["on", "off"], "{run_name}");
+        assert!(!o.wifi_left_on);
+        assert_eq!(o.syncs_started, 1, "{run_name}");
+        let state = Store::new(&o.home).load_state().unwrap();
+        assert!(state.last_via_relay && state.last_error.is_none(), "{run_name}: {:?}", state.last_error);
+        let expected: Vec<i64> = if package { vec![121, 120, 119, 118] } else { vec![120, 119, 118] };
+        assert_eq!(state.edition_order, expected, "{run_name}");
+        assert_eq!(relay.with(|s| s.fetched.len()), usize::from(package));
+    }
+}
+
+/// With the phone away and the relay unreachable, or not yet told about this Kobo, Wi-Fi
+/// stays on and the sync is tried again, as when the phone can't be found; once the phone
+/// lists this Kobo with the relay, the next try gets through and Wi-Fi goes off.
+#[test]
+fn wifi_stays_on_while_the_relay_cannot_help_yet() {
+    let size = &SIZES[2];
+    // Unreachable, until Turn Wi-Fi off.
+    let setup = Setup { online: false, phone: Some(nobody()), beacon_seconds: 1, relay: Some(format!("http://{}", nobody())), relay_seen: true, ..Default::default() };
+    let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
+    script.extend(sleep_steps(2500));
+    script.push(mark("01-settings-looking"));
+    script.push(Step::Wait(6000));
+    script.extend(sleep_steps(2500));
+    script.push(tap_on("WifiOff"));
+    script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
+    script.push(Step::Wait(10_000));
+    script.push(mark("02-off"));
+    let o = run("wifi-relay-unreachable", size, &setup, script);
+    assert!(o.syncs_started >= 2, "{}", o.syncs_started);
+    assert_eq!(o.radio, vec!["on", "off"]);
+    assert!(!o.wifi_left_on);
+    let state = Store::new(&o.home).load_state().unwrap();
+    assert_eq!(state.last_error.as_deref(), Some("The relay could not be reached."));
+
+    // Waiting for the phone to list this Kobo, which it does part way through.
+    let relay = FakeRelay::start();
+    publish_editions(&relay);
+    let setup = Setup { online: false, phone: Some(nobody()), beacon_seconds: 1, relay: Some(relay.url()), ..Default::default() };
+    let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
+    script.extend(sleep_steps(2500));
+    script.push(mark("01-settings-waiting"));
+    script.push(mark("phone-lists"));
+    script.push(Step::Wait(6000));
+    script.extend(sleep_steps(3000));
+    script.push(mark("02-settings-synced"));
+    script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
+    script.push(mark("03-settings-off"));
+    let r = relay.clone();
+    let o = run_with("wifi-relay-waiting", size, &setup, script, move |name| {
+        if name == "phone-lists" {
+            r.list(&relay_keys());
+        }
+    });
+    assert!(o.syncs_started >= 2, "{}", o.syncs_started);
+    assert_eq!(o.radio, vec!["on", "off"]);
+    assert!(!o.wifi_left_on);
+    assert!(relay.with(|s| s.refused.iter().any(|c| c == "unknown")));
+    assert_eq!(Store::new(&o.home).load_state().unwrap().edition_order, vec![121, 120, 119, 118]);
+}
+
+/// A Kobo the phone has dropped has to be paired again, which trying again doesn't do: Wi-Fi
+/// goes off after the first try and Settings says why.
+#[test]
+fn wifi_goes_off_when_the_phone_dropped_this_kobo() {
+    let relay = FakeRelay::start();
+    let size = &SIZES[2];
+    let setup = Setup { online: false, phone: Some(nobody()), beacon_seconds: 1, relay: Some(relay.url()), relay_seen: true, ..Default::default() };
+    let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
+    script.extend(sleep_steps(2500));
+    script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
+    script.push(Step::Wait(10_000));
+    script.push(mark("01-settings-not-paired"));
+    let o = run("wifi-relay-dropped", size, &setup, script);
+    assert_eq!(o.syncs_started, 1);
+    assert_eq!(o.radio, vec!["on", "off"]);
+    let state = Store::new(&o.home).load_state().unwrap();
+    assert!(state.relay_unpaired);
+    assert!(state.last_error.unwrap().starts_with("Not paired"));
+}
+
+/// The pairing code asks the relay every few seconds, while it is shown and online, whether
+/// the phone has scanned it; once the phone lists this Kobo, the reader goes back to Settings
+/// and syncs through the relay.
+#[test]
+fn the_pairing_screen_notices_the_scan_and_syncs() {
+    let relay = FakeRelay::start();
+    publish_editions(&relay);
+    let size = &SIZES[2];
+    let setup = Setup { phone: Some(nobody()), beacon_seconds: 1, relay: Some(relay.url()), ..Default::default() };
+    let mut script = vec![tap_on("OpenSettings"), tap_on("OpenPair"), mark("01-pair-waiting")];
+    // Asked once, and not listed yet.
+    script.push(Step::Wait(5500));
+    script.extend(sleep_steps(1000));
+    script.push(mark("02-pair-still-waiting"));
+    script.push(mark("phone-scans"));
+    script.push(Step::Wait(5500));
+    script.extend(sleep_steps(3000));
+    script.push(mark("03-settings-synced"));
+    // Back on Settings (only it has Pair through relay), and the code shown again asks
+    // nothing more: this Kobo is paired.
+    script.push(tap_on("OpenPair"));
+    script.push(mark("04-pair-paired"));
+    script.push(Step::Wait(12_000));
+    script.extend(sleep_steps(500));
+    let r = relay.clone();
+    let o = run_with("pair-notices", size, &setup, script, move |name| {
+        if name == "phone-scans" {
+            assert_eq!(r.count("GET /v1/package"), 1, "one question in the first 5.5 s");
+            r.list(&relay_keys());
+        }
+    });
+    assert_eq!(o.syncs_started, 1);
+    let state = Store::new(&o.home).load_state().unwrap();
+    assert!(state.relay_seen && !state.relay_unpaired && state.last_via_relay);
+    assert_eq!(state.edition_order, vec![121, 120, 119, 118]);
+    assert_eq!(relay.with(|s| s.fetched.len()), 1);
+    // Two questions, then the sync's own GET /v1/package and its one download.
+    assert_eq!(relay.with(|s| s.requests.iter().filter(|r| *r == "GET /v1/package").count()), 3);
+    assert_eq!(relay.count("GET /v1/packages/"), 1);
+
+    // Left at once, or shown offline, the code asks nothing.
+    let relay = FakeRelay::start();
+    for (name, online) in [("pair-left", true), ("pair-offline", false)] {
+        let setup = Setup { online, phone: Some(nobody()), relay: Some(relay.url()), ..Default::default() };
+        let mut script = vec![tap_on("OpenSettings"), tap_on("OpenPair")];
+        if online {
+            script.push(tap_on("Back"));
+        }
+        script.push(Step::Wait(20_000));
+        script.extend(sleep_steps(500));
+        let o = run(name, size, &setup, script);
+        assert_eq!(o.syncs_started, 0, "{name}");
+    }
+    assert!(relay.with(|s| s.requests.is_empty()));
 }
 
 /// While the phone takes its time, the home screen says it is syncing.

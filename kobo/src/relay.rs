@@ -537,8 +537,7 @@ fn sink_len(p: &Path) -> u64 {
     fs::metadata(p).map(|m| m.len()).unwrap_or(0)
 }
 
-/// Runs a relay sync. The outcome is saved in the state for the home screen and Settings.
-pub fn sync(store: &Store, opts: &Options, address: &str) -> Result<SyncReport, SyncError> {
+fn session<'a>(store: &'a Store, opts: &'a Options, address: &str) -> Result<Session<'a>, SyncError> {
     store.ensure_dirs()?;
     let state = store.load_state()?;
     let ep = Endpoint::parse(address).map_err(SyncError::RelayAddress)?;
@@ -546,22 +545,48 @@ pub fn sync(store: &Store, opts: &Options, address: &str) -> Result<SyncReport, 
     crate::tls::set_clock_offset(state.clock_offset_ms);
     let keys = DeviceKeys::from_secret(&secret);
     let report = SyncReport { address: ep.url(), via_relay: true, ..Default::default() };
-    let mut s = Session { store, opts, ep, keys, state, started: Instant::now(), report };
+    Ok(Session { store, opts, ep, keys, state, started: Instant::now(), report })
+}
+
+/// After `401 unknown`. The relay deleted this Kobo's pending changes when the phone dropped
+/// it (or never had them): they are sent again once it is paired.
+fn mark_unpaired(state: &mut State) {
+    state.relay_unpaired = true;
+    state.relay_uploaded_seq = state.relay_acked.min(state.relay_uploaded_seq);
+    state.relay_unacked_since = None;
+}
+
+/// Runs a relay sync. The outcome is saved in the state for the home screen and Settings.
+pub fn sync(store: &Store, opts: &Options, address: &str) -> Result<SyncReport, SyncError> {
+    let mut s = session(store, opts, address)?;
     let result = s.run();
     let mut state = s.state;
-    match &result {
-        Ok(()) => {}
-        Err(e) => {
-            if let SyncError::RelayUnpaired { .. } = e {
-                // The relay deleted this Kobo's pending changes when the phone dropped it (or
-                // never had them): send them again once paired.
-                state.relay_unpaired = true;
-                state.relay_uploaded_seq = state.relay_acked.min(state.relay_uploaded_seq);
-                state.relay_unacked_since = None;
-            }
-            state.last_error = Some(e.to_string());
+    if let Err(e) = &result {
+        if let SyncError::RelayUnpaired { .. } = e {
+            mark_unpaired(&mut state);
         }
+        state.last_error = Some(e.to_string());
     }
     store.save_state(&state)?;
     result.map(|()| s.report)
+}
+
+/// Whether the phone lists this Kobo with the relay yet, for the pairing screen: one signed
+/// `GET /v1/package`, which the relay answers `401 unknown` until the phone has sent it the
+/// device list after scanning the code. Nothing is uploaded, downloaded or installed, and the
+/// last sync's result is left alone; what the relay said is saved in the state as a sync
+/// saves it.
+pub fn listed(store: &Store, opts: &Options, address: &str) -> Result<bool, SyncError> {
+    let mut s = session(store, opts, address)?;
+    let result = match s.send("GET", "/v1/package", None, &[], None) {
+        Ok(r) if r.status == 200 || r.status == 204 => Ok(true),
+        Ok(r) => Err(SyncError::RelayProtocol(format!("package: HTTP {}", r.status))),
+        Err(SyncError::RelayUnpaired { .. }) => {
+            mark_unpaired(&mut s.state);
+            Ok(false)
+        }
+        Err(e) => Err(e),
+    };
+    store.save_state(&s.state)?;
+    result
 }

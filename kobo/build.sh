@@ -5,7 +5,7 @@
 #   kobo/dist/.adds/nm/morningissue           the NickelMenu entry
 #   kobo/dist/morningissue-kobo-$VERSION.zip  unzip at the root of the KOBOeReader drive
 #
-# VERSION defaults to "dev". Uses cargo from PATH, or rustup through nix when there is none.
+# VERSION defaults to "dev". Uses cargo and clang from PATH, or takes them from nix (see below).
 set -eu
 
 KOBO=$(cd "$(dirname "$0")" && pwd)
@@ -39,11 +39,24 @@ check_labels() {
 check_labels "$NM_CONFIG"
 
 cd "$KOBO"
-if command -v cargo >/dev/null 2>&1; then
-    rustup target add "$TARGET" >/dev/null 2>&1 || true
-    cargo build --release --target "$TARGET"
+# ring's C is compiled by clang for the target (.cargo/config.toml). Nix's wrapped clang adds
+# the host's glibc headers to every compile, which breaks that, so a wrapped or missing clang
+# is replaced by nixpkgs' unwrapped one. Without cargo, rustup comes through nix too.
+PKGS=""
+command -v cargo >/dev/null 2>&1 || PKGS="nixpkgs#rustup"
+if ! command -v clang >/dev/null 2>&1; then
+    PKGS="$PKGS nixpkgs#llvmPackages.clang-unwrapped"
 else
-    nix shell nixpkgs#rustup -c sh -c "rustup target add $TARGET >/dev/null && cargo build --release --target $TARGET"
+    case $(readlink -f "$(command -v clang)") in
+        */nix/store/*-clang-wrapper-*) PKGS="$PKGS nixpkgs#llvmPackages.clang-unwrapped" ;;
+    esac
+fi
+BUILD="(rustup target add $TARGET >/dev/null 2>&1 || true) && cargo build --release --target $TARGET"
+if [ -n "$PKGS" ]; then
+    # shellcheck disable=SC2086 # PKGS is a list of installables.
+    nix shell $PKGS -c sh -c "$BUILD"
+else
+    sh -c "$BUILD"
 fi
 
 rm -rf "$DIST"

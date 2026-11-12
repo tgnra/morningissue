@@ -57,6 +57,8 @@ Scanning is the consent: there is no extra Allow prompt.
 
 The phone stores the device: `deviceId`, name, `w`, auth key and enc key. It should keep the two keys wrapped with an Android Keystore key. It then sends the relay the new device list straight away (`PUT /v1/group/devices`). Until then the device's requests get `401`, and the device shows "Waiting for the phone".
 
+While it shows the code, a device may ask whether the phone has done so: a signed `GET /v1/package` answers `401 "unknown"` until the device is listed, and `200` or `204` after. The Kobo asks every 5 seconds while the code is on screen and it is online, and syncs as soon as it is listed. It takes nothing else from that answer.
+
 The device also needs the relay's address. The QR code can't carry it, so the reader types it on the Kobo, or it is set as `"relay"` in `config.json`. The phone's settings show the address to copy.
 
 **Unpairing:** the phone removes the device and sends the list again. The relay deletes that device's pending changes and its fetch record. Its requests get `401` from then on, and the device shows itself as unpaired.
