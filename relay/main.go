@@ -12,12 +12,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/tgnra/morningissue/relay/internal/auth"
 	"github.com/tgnra/morningissue/relay/internal/server"
 	"github.com/tgnra/morningissue/relay/internal/store"
 )
@@ -90,8 +92,15 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", *dataDir, err)
 	}
+	// Signatures seen in the last 10 minutes, kept on disk so a replay is caught across a restart.
+	replay, err := auth.OpenReplayCache(filepath.Join(*dataDir, "replay"), time.Now())
+	if err != nil {
+		return fmt.Errorf("opening the replay cache: %w", err)
+	}
+	defer replay.Close()
 	srv := server.New(server.Config{
 		Store:             st,
+		Replay:            replay,
 		TTL:               ttl,
 		MaxPackage:        maxPackage,
 		RegistrationToken: *token,

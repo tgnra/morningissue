@@ -63,12 +63,15 @@ The server's clock must be right. Requests are refused when their timestamp is m
 
 ```
 <data>/tmp/                       uploads being received
+<data>/replay                     signatures seen in the last 10 minutes
 <data>/groups/<group>/group.json  devices, the current package, pending changes
 <data>/groups/<group>/packages/   package envelopes
 <data>/groups/<group>/changes/    changes envelopes
 ```
 
 A sweeper runs every minute and deletes packages and changes older than the TTL, uploads that were never published after an hour, and groups whose phone hasn't been in touch for 90 days. The phone deletes changes as soon as it has merged them, and the package once every device has it. Deleting means removing the files.
+
+Every signed request is refused if its signature has been seen before. The relay appends each signature to `<data>/replay` before acting on the request, so a request replayed after a restart is still refused; the sweeper rewrites the file without the signatures whose timestamp the clock check would refuse anyway, which keeps it to about ten minutes of requests.
 
 Plan disk space for one package per phone (tens to hundreds of MB) plus a briefly overlapping upload when the phone publishes a new one.
 

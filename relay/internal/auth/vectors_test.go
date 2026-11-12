@@ -270,13 +270,21 @@ func TestSkewAndReplay(t *testing.T) {
 	}
 	r := NewReplayCache()
 	sig := []byte("sig")
-	if r.Seen("k", sig, now) {
+	seen := func(at time.Time) bool {
+		t.Helper()
+		s, err := r.Seen("k", sig, now.Unix(), at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if seen(now) {
 		t.Fatal("first use reported as replay")
 	}
-	if !r.Seen("k", sig, now.Add(599*time.Second)) {
+	if !seen(now.Add(599 * time.Second)) {
 		t.Fatal("replay within 600 s not caught")
 	}
-	if r.Seen("k", sig, now.Add(600*time.Second)) {
+	if seen(now.Add(600 * time.Second)) {
 		t.Fatal("signature still remembered after 600 s")
 	}
 	r.Prune(now.Add(2000 * time.Second))

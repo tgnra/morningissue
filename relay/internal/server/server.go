@@ -54,6 +54,9 @@ type Config struct {
 	MaxPackage int64
 	// RegistrationToken, when set, is needed to create a group.
 	RegistrationToken string
+	// Replay remembers the signatures seen. Open it with auth.OpenReplayCache in the data
+	// directory, so that a replay is caught across a restart. Nil means in memory only.
+	Replay *auth.ReplayCache
 	// Log receives errors, and one line per request when LogRequests is set. Nil means no logging.
 	Log         *log.Logger
 	LogRequests bool
@@ -77,7 +80,10 @@ func New(cfg Config) *Server {
 	if cfg.MaxPackage <= 0 {
 		cfg.MaxPackage = DefaultMaxPackage
 	}
-	s := &Server{cfg: cfg, replay: auth.NewReplayCache(), mux: http.NewServeMux()}
+	if cfg.Replay == nil {
+		cfg.Replay = auth.NewReplayCache()
+	}
+	s := &Server{cfg: cfg, replay: cfg.Replay, mux: http.NewServeMux()}
 	m := s.mux
 	m.HandleFunc("GET /v1/health", s.health)
 	m.HandleFunc("PUT /v1/group", s.putGroup)
@@ -125,8 +131,7 @@ func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter 
 // Sweep deletes expired data and forgets expired signatures.
 func (s *Server) Sweep() error {
 	now := s.cfg.Now()
-	s.replay.Prune(now)
-	return s.cfg.Store.Sweep(now, s.cfg.TTL)
+	return errors.Join(s.replay.Prune(now), s.cfg.Store.Sweep(now, s.cfg.TTL))
 }
 
 // RunSweeper calls Sweep every SweepInterval until ctx is done.
@@ -258,8 +263,7 @@ func (s *Server) finish(w http.ResponseWriter, r *http.Request, c *caller, k kin
 		return false
 	}
 	now := s.cfg.Now()
-	if s.replay.Seen(c.creds.Kid, c.creds.Sig, now) {
-		unauthorized(w, "replay")
+	if !s.checkReplay(w, c.creds, now) {
 		return false
 	}
 	var err error
@@ -271,6 +275,21 @@ func (s *Server) finish(w http.ResponseWriter, r *http.Request, c *caller, k kin
 	if errors.Is(err, store.ErrNotFound) {
 		// Removed between preauth and now.
 		unauthorized(w, "unknown")
+		return false
+	}
+	if err != nil {
+		s.internal(w, err)
+		return false
+	}
+	return true
+}
+
+// checkReplay records a verified signature and refuses it if it was seen before. It writes the
+// response itself when it fails.
+func (s *Server) checkReplay(w http.ResponseWriter, creds auth.Credentials, now time.Time) bool {
+	seen, err := s.replay.Seen(creds.Kid, creds.Sig, creds.TS, now)
+	if seen {
+		unauthorized(w, "replay")
 		return false
 	}
 	if err != nil {
@@ -451,8 +470,7 @@ func (s *Server) putGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.cfg.Now()
-	if s.replay.Seen(creds.Kid, creds.Sig, now) {
-		unauthorized(w, "replay")
+	if !s.checkReplay(w, creds, now) {
 		return
 	}
 	create := true

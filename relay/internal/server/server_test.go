@@ -57,7 +57,7 @@ func newEnv(t *testing.T, configure ...func(*server.Config)) *env {
 		f(&e.cfg)
 	}
 	e.start()
-	t.Cleanup(func() { e.ts.Close() })
+	t.Cleanup(func() { e.stop() })
 	return e
 }
 
@@ -67,16 +67,26 @@ func (e *env) start() {
 	if err != nil {
 		e.t.Fatal(err)
 	}
+	replay, err := auth.OpenReplayCache(filepath.Join(e.dir, "replay"), e.clk.Now())
+	if err != nil {
+		e.t.Fatal(err)
+	}
 	e.cfg.Store = st
+	e.cfg.Replay = replay
 	e.cfg.Now = e.clk.Now
 	e.srv = server.New(e.cfg)
 	e.ts = httptest.NewServer(e.srv)
 }
 
+func (e *env) stop() {
+	e.ts.Close()
+	e.cfg.Replay.Close()
+}
+
 // restart stops the server and starts a new one on the same data directory.
 func (e *env) restart() {
 	e.t.Helper()
-	e.ts.Close()
+	e.stop()
 	e.start()
 }
 
@@ -767,6 +777,95 @@ func TestRestartPersistence(t *testing.T) {
 	}
 	if m, _ := filepath.Glob(filepath.Join(e.dir, "tmp", "*")); len(m) != 0 {
 		t.Fatalf("tmp not cleared on start: %v", m)
+	}
+}
+
+// A request replayed after the relay restarts, within the window, is still refused.
+func TestReplayAcrossRestart(t *testing.T) {
+	e := newEnv(t)
+	d := randKey()
+	e.register(d)
+	type signed struct {
+		method, path string
+		body         []byte
+		authz        string
+	}
+	sign := func(key []byte, method, path string, body []byte) signed {
+		e.clk.Advance(time.Second)
+		return signed{method, path, body, auth.Header(key, method, path, e.clk.Now().Unix(), body)}
+	}
+	gb, _ := json.Marshal(map[string]string{"ownerKey": b64(e.owner)})
+	reqs := []signed{
+		sign(d, "PUT", "/v1/changes/1-5", envelope(40)),
+		sign(e.owner, "GET", "/v1/group/status", nil),
+		sign(e.owner, "PUT", "/v1/group", gb),
+	}
+	for _, q := range reqs {
+		if r := e.rawDo(q.method, q.path, q.body, q.authz, nil); r.status >= 300 {
+			t.Fatalf("%s %s: %d %s", q.method, q.path, r.status, r.body)
+		}
+	}
+	replays := func(want string) {
+		t.Helper()
+		for _, q := range reqs {
+			r := e.rawDo(q.method, q.path, q.body, q.authz, nil)
+			if r.status != 401 || r.errorCode(t) != want {
+				t.Fatalf("%s %s replayed: %d %s, want 401 %q", q.method, q.path, r.status, r.body, want)
+			}
+		}
+	}
+
+	// A crash: the replay file is never closed.
+	e.ts.Close()
+	e.start()
+	e.clk.Advance(100 * time.Second)
+	replays("replay")
+	// New requests are accepted straight away.
+	expect(t, e.do(d, "GET", "/v1/package", nil, nil), 204)
+
+	// A clean restart, after a sweep has rewritten the file.
+	if err := e.srv.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	e.restart()
+	e.clk.Advance(190 * time.Second)
+	replays("replay")
+	if n := len(e.changes()); n != 1 {
+		t.Fatalf("%d changes, want 1", n)
+	}
+
+	// Once out of skew, they fail on the clock, and the sweeper forgets them.
+	e.clk.Advance(20 * time.Second)
+	replays("skew")
+	e.clk.Advance(10 * time.Minute)
+	if err := e.srv.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(e.dir, "replay"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) != 0 {
+		t.Fatalf("replay file after the window:\n%s", b)
+	}
+}
+
+// A signature with ts 300 s ahead passes the skew check until 601 s after ts - 300, so it must be
+// remembered that long even when it was first seen part way through a second.
+func TestReplayAtTheEdgeOfSkew(t *testing.T) {
+	e := newEnv(t)
+	e.register()
+	e.clk.Advance(500 * time.Millisecond)
+	path := "/v1/group/status"
+	h := auth.Header(e.owner, "GET", path, e.clk.Now().Unix()+300, nil)
+	expect(t, e.rawDo("GET", path, nil, h, nil), 200)
+	e.clk.Advance(600*time.Second + 200*time.Millisecond)
+	if r := e.rawDo("GET", path, nil, h, nil); r.status != 401 || r.errorCode(t) != "replay" {
+		t.Fatalf("replay at the edge of skew: %d %s", r.status, r.body)
+	}
+	e.clk.Advance(time.Second)
+	if r := e.rawDo("GET", path, nil, h, nil); r.status != 401 || r.errorCode(t) != "skew" {
+		t.Fatalf("a second later: %d %s", r.status, r.body)
 	}
 }
 
