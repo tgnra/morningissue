@@ -259,6 +259,8 @@ Runs on the Kobo's sync, when a relay address is set and the device has a secret
    - check `dbId`, then install the editions, saved shelf and images (v1 steps 5 to 7, writing to temporary files and renaming them into place);
    - `POST …/fetched`.
 3. Delete events at or below `acked[deviceId]`.
+   - The relay may delete uploaded changes before the phone merges them: after the TTL, or when the phone drops the device. So a device uploads its unacknowledged events again after a `401 "unknown"`, and once an upload has gone 48 hours without being acknowledged. The phone skips events at or below `ackedSeq`, so this is harmless.
+   - A device must never send two requests with the same signature. If a new request would carry the same `ts` as one it sent before with the same method, path and body, it moves `ts` on by a second.
 4. `401` with `"unknown"` means the phone no longer accepts this device. Show "Not paired" and offer pairing again. Other `401`s follow the clock rule above.
 
 ### Phone: done
@@ -275,6 +277,8 @@ Runs from **Done** on the Sync screen, and from the periodic sync when a relay i
 `docs/relay-sync-fixtures/vectors.json` has HKDF outputs, kids, envelopes (several chunk sizes, an exact multiple, empty plaintext), a wrapped key, a changes envelope and two signatures, all from fixed inputs. `docs/relay-sync-fixtures/generate/` is the Go program that writes them (`go run .`). They have been checked against an independent Python implementation.
 
 Every implementation must have a test that reproduces every vector.
+
+Some vectors use 16-byte chunks so that a short plaintext still spans several chunks. That is below the 1 KiB that readers accept. Implementations keep the 1 KiB minimum in production and relax it only in the test that opens those vectors.
 
 ## Known limits of relay/1
 
