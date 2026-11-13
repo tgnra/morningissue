@@ -1,7 +1,8 @@
 {
     "v": 1,
+    "protocol": "server/1",
     "dbId": "3f0c6f2e-6c55-4f7b-9d1e-0a6f2b9e5c11",
-    "ackedSeq": 41,
+    "serverTime": "2026-11-11T07:00:00Z",
     "editions": [
         {
             "id": 2,
@@ -9,7 +10,7 @@
             "kind": "MORNING",
             "number": 120,
             "releaseAt": "2026-11-11T06:30:00Z",
-            "version": "a72604dc988e4bbcd29fae347f64c9cb"
+            "version": "29a6b142a7bf7b409d5c11ec2ea55bf739ea836ed3b86b9db4aa8faef07c3b8d"
         },
         {
             "id": 1,
@@ -17,11 +18,14 @@
             "kind": "MORNING",
             "number": 119,
             "releaseAt": "2026-11-10T06:30:00Z",
-            "version": "25c4931079567e9be25c1f12161003af"
+            "version": "8293de7f6478f8096a3ba268e268dd00ec872d3e0da43586d95b279fc320029c"
         }
     ],
     "saved": {
         "count": 2,
-        "version": "a9ea57399339f3af35ff22eaabb5aa65"
+        "version": "f843b6e6b9849176d0a7254ae06104f761077134c1e1a9e098868a3957832598"
+    },
+    "acked": {
+        "b7e2c1d4-0f8a-4d6e-9b3c-5a7e2f1c8d90": 41
     }
 }

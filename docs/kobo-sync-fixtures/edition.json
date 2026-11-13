@@ -173,7 +173,12 @@
                 "readAt": null,
                 "savedAt": null,
                 "likedAt": null
-            }
+            },
+            "feedId": 1,
+            "guid": "frost",
+            "firstSeenAt": "2026-11-11T05:30:00Z",
+            "feedWordCount": 0,
+            "contentSource": "FEED"
         },
         "2": {
             "feedTitle": "The Kitchen Garden",
@@ -191,7 +196,12 @@
                 "readAt": null,
                 "savedAt": "2026-11-11T06:45:00Z",
                 "likedAt": null
-            }
+            },
+            "feedId": 1,
+            "guid": "leeks",
+            "firstSeenAt": "2026-11-11T05:30:00Z",
+            "feedWordCount": 0,
+            "contentSource": null
         },
         "3": {
             "feedTitle": "The Kitchen Garden",
@@ -216,7 +226,12 @@
                 "readAt": null,
                 "savedAt": null,
                 "likedAt": null
-            }
+            },
+            "feedId": 1,
+            "guid": "seed",
+            "firstSeenAt": "2026-11-11T05:30:00Z",
+            "feedWordCount": 0,
+            "contentSource": "FEED"
         },
         "4": {
             "feedTitle": "The Kitchen Garden",
@@ -234,7 +249,33 @@
                 "readAt": null,
                 "savedAt": null,
                 "likedAt": null
-            }
+            },
+            "feedId": 1,
+            "guid": "compost",
+            "firstSeenAt": "2026-11-11T05:30:00Z",
+            "feedWordCount": 0,
+            "contentSource": null
         }
-    }
+    },
+    "cutoffAt": "2026-11-11T05:00:00Z",
+    "builtAt": "2026-11-11T05:00:00Z",
+    "openedAt": null,
+    "pageViewsTracked": true,
+    "pageViews": [
+        {
+            "page": 1,
+            "ms": 5000,
+            "firstSeenAt": "2026-11-11T06:35:00Z"
+        },
+        {
+            "page": 2,
+            "ms": 5000,
+            "firstSeenAt": "2026-11-11T06:35:00Z"
+        },
+        {
+            "page": 3,
+            "ms": 5000,
+            "firstSeenAt": "2026-11-11T06:35:00Z"
+        }
+    ]
 }
