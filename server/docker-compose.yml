@@ -1,0 +1,24 @@
+# An example: docker compose -f server/docker-compose.yml up -d
+# Put a TLS reverse proxy in front of it (docs/server.md); the server speaks plain HTTP.
+# The first start logs each new user's password (docker compose logs morningissue); it is also in
+# the volume under initial-passwords/.
+services:
+  morningissue:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    # Or a published image: ghcr.io/<owner>/morningissue-server:latest
+    image: morningissue-server
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8417:8417"
+    environment:
+      MORNINGISSUE_USERS: "tania,sam"
+      # The address Kobos and phones use, as the reverse proxy serves it.
+      MORNINGISSUE_PUBLIC_URL: "https://news.example.org"
+      JAVA_OPTS: "-Xmx512m"
+    volumes:
+      - morningissue-data:/data
+
+volumes:
+  morningissue-data:

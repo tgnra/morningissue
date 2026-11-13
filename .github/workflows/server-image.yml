@@ -1,0 +1,75 @@
+# Pushing a tag that starts with "v" builds the server's container image from server/Dockerfile
+# and pushes it to ghcr.io/<owner>/morningissue-server, tagged with the version and "latest".
+# Running it by hand builds the image without pushing it.
+name: Server image
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: server-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Work out the version and image name
+        id: meta
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0-dev.${GITHUB_RUN_NUMBER}"
+          fi
+          owner="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/$owner/morningissue-server" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the GitHub container registry
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build, and push on a tag
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/Dockerfile
+          build-args: SERVER_VERSION=${{ steps.meta.outputs.version }}
+          push: ${{ github.ref_type == 'tag' }}
+          load: ${{ github.ref_type != 'tag' }}
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+
+      - name: Check the image answers /api/v1/health
+        if: github.ref_type != 'tag'
+        run: |
+          docker run -d --name mi -p 8417:8417 -e MORNINGISSUE_USERS=ci "${{ steps.meta.outputs.image }}:latest"
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8417/api/v1/health; then exit 0; fi
+            sleep 1
+          done
+          docker logs mi
+          exit 1
