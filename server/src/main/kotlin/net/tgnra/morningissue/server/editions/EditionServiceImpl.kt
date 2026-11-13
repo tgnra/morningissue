@@ -30,6 +30,12 @@ class EditionServiceImpl(
     private val bundles: EditionBundles,
     private val settings: UserSettingsStore,
     private val clock: Clock,
+    /**
+     * How many of the user's feeds need attention now: the feeds service's count
+     * (`DefaultFeedService.needingAttention`), which also sees a move pending for this user.
+     * Null counts the stored flags alone.
+     */
+    private val needingAttention: (suspend (userId: Long) -> Int)? = null,
 ) : EditionService {
     private val editionDao = database.editionDao()
     private val engagementDao = database.engagementDao()
@@ -61,11 +67,16 @@ class EditionServiceImpl(
      * of the user's feeds needing attention, shown on one edition a month (the newest released
      * one when the month's first is asked for), claimed in `user_state`.
      */
-    override suspend fun deskNotice(userId: Long, editionId: Long): DeskNoticeResponse = database.withWriteTransaction {
+    override suspend fun deskNotice(userId: Long, editionId: Long): DeskNoticeResponse {
+        val counted = needingAttention?.invoke(userId)
+        return deskNotice(userId, editionId, counted)
+    }
+
+    private suspend fun deskNotice(userId: Long, editionId: Long, counted: Int?): DeskNoticeResponse = database.withWriteTransaction {
         val now = clock.instant()
         val edition = editionDao.getById(userId, editionId)?.takeIf { !it.releaseAt.isAfter(now) }
             ?: throw ApiFailure.notFound("No such edition")
-        val needing = articleDao.flags(userId).count { row ->
+        val needing = counted ?: articleDao.flags(userId).count { row ->
             FeedHealthRules.visibleFlag(row.flag, row.dismissedUntil, now)?.let(FeedHealthRules::needsAttention) == true
         }
         val latest = editionDao.getLatestReleased(userId, now)?.id == editionId

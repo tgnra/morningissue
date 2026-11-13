@@ -130,6 +130,10 @@ class UserScopedQueryTest {
             "SubscriptionDao.expiredDiscovered" to "discovery clean-up across users; each row names its user",
             "ArticleDao.unreferencedIds" to "global GC: posts no subscription, engagement or edition item refers to",
             "ArticleDao.feedBodiesSince" to "TeaserBackfill: posts of shared feeds anyone subscribes to",
+            "DeviceDao.byTokenHash" to "authentication: the token is what tells the server who the user is; hashes are unique",
+            "DeviceDao.byId" to "login and pairing take over a client's device ID whichever user held it; IDs are unique",
+            "DeviceDao.touch" to "last-seen time of a device the caller has just authenticated, by its unique ID",
+            "EditionDao.ownerOf" to "KoboImageService.prepare starts from an edition ID alone; the owner it returns scopes the rest",
         )
     }
 }

@@ -6,7 +6,6 @@ import io.ktor.server.engine.embeddedServer
 import java.io.File
 import java.io.PrintStream
 import java.lang.management.ManagementFactory
-import java.time.Clock
 import java.util.UUID
 import kotlin.system.exitProcess
 import kotlinx.coroutines.delay
@@ -14,8 +13,6 @@ import kotlinx.coroutines.runBlocking
 import net.tgnra.morningissue.api.ApiJson
 import net.tgnra.morningissue.api.ImportMode
 import net.tgnra.morningissue.api.JobState
-import net.tgnra.morningissue.server.auth.DbAuthService
-import net.tgnra.morningissue.server.auth.DbDeviceService
 import net.tgnra.morningissue.server.config.ConfigException
 import net.tgnra.morningissue.server.config.ConfigLoader
 import net.tgnra.morningissue.server.config.ServerConfig
@@ -35,11 +32,10 @@ import org.slf4j.LoggerFactory
  * morningissue-server [--config <file>] import [--merge] <user> <file.zip>
  * ```
  *
- * The real services are built by a [Container]; integration replaces [AccountsContainer] with
- * the full `ServerContainer` here.
+ * The services are built by [ServerContainer].
  */
 fun main(args: Array<String>) {
-    exitProcess(Cli(::AccountsContainer).run(args))
+    exitProcess(Cli(::ServerContainer).run(args))
 }
 
 /** The server's version, from the jar manifest; `dev` when run from classes. */
@@ -63,19 +59,6 @@ interface Container : AutoCloseable {
     override fun close() {
         database.close()
     }
-}
-
-/**
- * The container until the feed, edition and sync services are wired in: real accounts and
- * devices, `501 not_implemented` for the rest.
- */
-class AccountsContainer(override val config: ServerConfig) : Container {
-    private val clock: Clock = Clock.systemUTC()
-    override val database: ServerDatabase = ServerDatabase.open(config.databaseFile)
-    override val services: ServerServices = ServerServices(
-        auth = DbAuthService(database, config.initialPasswordsDir, clock),
-        devices = DbDeviceService(database, config.publicUrl, clock),
-    )
 }
 
 /** Parses the arguments and runs a command; returns the exit status. */

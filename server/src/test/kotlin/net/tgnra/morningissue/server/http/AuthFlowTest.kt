@@ -24,7 +24,7 @@ import net.tgnra.morningissue.api.ApiPaths
 import net.tgnra.morningissue.api.DevicesResponse
 import net.tgnra.morningissue.api.KoboHelloResponse
 import net.tgnra.morningissue.api.LoginResponse
-import net.tgnra.morningissue.server.AccountsContainer
+import net.tgnra.morningissue.server.ServerContainer
 import net.tgnra.morningissue.server.Cli
 import net.tgnra.morningissue.server.auth.DbAuthService
 import net.tgnra.morningissue.server.auth.DbDeviceService
@@ -160,16 +160,16 @@ class AuthFlowTest {
         val out = ByteArrayOutputStream()
         val env = mapOf("MORNINGISSUE_DATA_DIR" to dataDir.path, "MORNINGISSUE_USERS" to "bob")
         // Bootstrap bob through a container on a file database, as `serve` would.
-        AccountsContainer(net.tgnra.morningissue.server.config.ConfigLoader.load(null, env)).use { c ->
+        ServerContainer(net.tgnra.morningissue.server.config.ConfigLoader.load(null, env)).use { c ->
             runBlocking { c.services.auth.bootstrapUsers(listOf("bob")) }
         }
         val first = File(dataDir, "initial-passwords/bob.txt").readText().trim()
-        val status = Cli(::AccountsContainer, env, PrintStream(out), PrintStream(ByteArrayOutputStream())).run(arrayOf("reset-password", "bob"))
+        val status = Cli(::ServerContainer, env, PrintStream(out), PrintStream(ByteArrayOutputStream())).run(arrayOf("reset-password", "bob"))
         assertEquals(0, status)
         val fresh = File(dataDir, "initial-passwords/bob.txt").readText().trim()
         assertTrue(fresh != first)
         assertTrue(out.toString().contains(fresh))
-        assertEquals(1, Cli(::AccountsContainer, env, PrintStream(ByteArrayOutputStream()), PrintStream(ByteArrayOutputStream())).run(arrayOf("reset-password", "carol")))
-        assertEquals(2, Cli(::AccountsContainer, env, PrintStream(ByteArrayOutputStream()), PrintStream(ByteArrayOutputStream())).run(arrayOf("frobnicate")))
+        assertEquals(1, Cli(::ServerContainer, env, PrintStream(ByteArrayOutputStream()), PrintStream(ByteArrayOutputStream())).run(arrayOf("reset-password", "carol")))
+        assertEquals(2, Cli(::ServerContainer, env, PrintStream(ByteArrayOutputStream()), PrintStream(ByteArrayOutputStream())).run(arrayOf("frobnicate")))
     }
 }
