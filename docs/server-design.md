@@ -1061,3 +1061,35 @@ Phase 1 landed on `self-hosted` in four commits (core extraction, archive additi
 - `FeedRefresher.refresh` returns a `RefreshReport` (`reachedFeeds`). `reachedFeedsOf(userId)` replaces the pseudo-code's `lastReportCoversUserFeeds`.
 - `EditionService.bundle` and `saved` return DTOs. The manifest's `version` hashes their `ApiJson` encoding.
 - `KoboImageService.writeZip(userId, request, output)` streams the zip.
+
+## Phase 2 deviations (W-A)
+
+**Files and names.**
+- **The refresher's file.** It is `feeds/DefaultFeedRefresher.kt` (class `DefaultFeedRefresher`), not `feeds/FeedRefresher.kt`, so the name doesn't clash with the `service.FeedRefresher` interface.
+- **Row classes.** The per-user article rows in `ArticleDao` are named `UserArticleRow` and `UserSearchRow`, so they don't clash with anything W-B adds to `db/`.
+- **Fixtures.** The server tests read core's fixture files (`rss.xml`, `article.html`, the OPML files) from `../core/src/test/resources/sync/` by relative path, rather than changing the build. The test task runs in `server/`.
+
+**Feeds and subscriptions.**
+- **Feed titles.** `feed.title` always follows the feed document; every refresh rewrites it. A title given on `POST /feeds` (or by an OPML import) becomes that user's `subscription.title_override`, which the refresher never touches.
+- **What `maxAge` means.**
+  - `maxAge` of zero (or negative) means "fetch regardless".
+  - A fetch already in flight is joined whatever `maxAge` says.
+  - The 2-hour leeway itself is the scheduler's `prePrintMaxAgeMinutes`, passed in as `maxAge`.
+  - A failed attempt counts as an attempt.
+- **Signals upkeep after a batch.** `DefaultFeedRefresher` takes `afterBatch: suspend () -> Unit`. It runs after a refresh that stored new posts, and integration wires it to `SignalsUpkeep.run()`.
+- **`reachedFeedsOf(userId)`** answers from the latest refresh whose requested feeds covered all of that user's subscribed feeds. It is false until one has run.
+- **The first fetch** on `POST /feeds` happens only when the shared feed has never been tried (`last_attempt_at` is null). Adding a feed another user already has doesn't fetch it again. OPML import doesn't fetch the new feeds; the next refresh does.
+- **Moved per subscriber.** A move is pending for a user when `feed_status.moved_at` is after both their `subscription.added_at` and their `moved_acknowledged_at`. Someone who subscribes after a move is never shown it.
+- **Global GC.** It deletes the posts of feeds with no subscription rows, except posts some `edition_item` or a saved or Liked `engagement` refers to. Then it deletes those feeds left with no posts. A feed whose posts are still referenced stays until they are not.
+- **Discovery clean-up** works per discovered subscription: one expires 7 days after `discovered_at` unless the user saved or Liked one of its posts, or opened one within those days. Its posts then go with the next GC run, unless someone else subscribes. The app worked per post instead.
+- **Affinity relearn.** `Subscriptions` takes `onChanged: suspend (userId) -> Unit`. It runs after a change that shapes affinity (add, promote, remove, tags), outside the write transaction, so W-B's learner can relearn the user's affinities. The app did this inside the transaction.
+- **The desk notice.** W-A provides only the count, `DefaultFeedService.needingAttention(userId)`. Which edition carries the monthly notice is W-B's.
+
+**Discovery.**
+- **Where state lives.** The week's deck and the Undo records live in `user_state`, under `discovery.deck` and `discovery.undo.<urlKey>`, read and written through `DiscoveryDao`.
+- **Undo** restores what the verdict changed. It never undoes a DROPPED verdict, the one written on unsubscribe.
+- **Opening a headline.** `POST /discovery/open` answers 404 when the headline is in neither the catalogue nor the feed's live posts.
+- **Candidate cache.** `CandidateFetcher`'s in-memory cache never expires within a process (as in core); its file cache keeps the 24 hours.
+
+**The query guard.**
+- **Stricter than 2.3 asks.** `UserScopedQueryTest` requires `user_id = :userId`, or an insert of the user's own row, rather than any mention of `user_id`. It also checks `edition_item` and `edition_page_view`, which may instead be keyed by `:editionId`. It covers every `*Dao.kt` in `db/`, so other workstreams' DAOs are held to it.
