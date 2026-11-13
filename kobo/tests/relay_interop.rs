@@ -75,7 +75,7 @@ fn against_the_real_relay() {
     let opts = Options { request_timeout: Duration::from_secs(10), deadline: Duration::from_secs(120), image_width: 1264, progress: None, relay: url.clone() };
 
     // Before the phone lists it: waiting.
-    assert!(matches!(sync(&store, &opts), Err(SyncError::RelayUnpaired { waiting: true })));
+    assert!(matches!(sync(&store, &opts), Err(SyncError::RelayNotListed { waiting: true })));
 
     let owner_key = crypto::hkdf32(&[0x80; 32], "morningissue relay owner v1");
     let owner = Owner { ep, key: owner_key, kid: crypto::kid(&owner_key) };
@@ -124,5 +124,5 @@ fn against_the_real_relay() {
 
     // Dropped by the phone.
     owner.json("PUT", "/v1/group/devices", json!({"devices": []}));
-    assert!(matches!(sync(&store, &opts), Err(SyncError::RelayUnpaired { waiting: false })));
+    assert!(matches!(sync(&store, &opts), Err(SyncError::RelayNotListed { waiting: false })));
 }

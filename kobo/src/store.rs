@@ -37,23 +37,23 @@ pub struct State {
     /// Pair through relay is first opened, and never dropped by a state write; only Reset
     /// erases it.
     pub relay_secret: Option<String>,
-    /// The highest event `seq` uploaded to the relay as changes. Uploaded events stay in
-    /// `events.jsonl` until a package's `acked` covers them.
-    pub relay_uploaded_seq: i64,
-    /// When (true time, ms) the oldest upload that no package has acknowledged yet was made.
-    /// After the relay's 48 hours they are uploaded again.
-    pub relay_unacked_since: Option<i64>,
+    // Earlier versions kept `relayUploadedSeq` and `relayUnackedSince` here; every sync now
+    // uploads all unacknowledged events, so they are ignored when an old state.json loads.
     /// The ID of the package last installed.
     pub relay_package: Option<String>,
     /// `POST …/fetched` was answered for that package.
     pub relay_fetched: bool,
-    /// `acked[deviceId]` in that package's manifest.
+    /// `acked[deviceId]` in that package's manifest. Events stay in `events.jsonl` until it
+    /// covers them, and every sync uploads all of them above it.
     pub relay_acked: i64,
     /// A signed request to the relay has been accepted since the secret was made.
     pub relay_seen: bool,
-    /// The relay's last answer was `401 unknown`: the phone does not (or no longer) list
-    /// this Kobo.
-    pub relay_unpaired: bool,
+    /// The relay's last answer was `401 unknown`: this Kobo is not listed right now. Once it
+    /// has been seen, that is usually because no Sync session is open on the phone (the
+    /// relay group exists only during one), and only sometimes because the phone removed
+    /// this Kobo; the two look the same. Earlier versions saved it as `relayUnpaired`.
+    #[serde(alias = "relayUnpaired")]
+    pub relay_not_listed: bool,
 }
 
 /// One line of `events.jsonl`, in the shape a changes batch carries (`docs/relay-sync.md`).
@@ -226,7 +226,7 @@ impl Store {
         let secret = crate::crypto::b64url(&crate::crypto::random::<32>()?);
         state.relay_secret = Some(secret.clone());
         state.relay_seen = false;
-        state.relay_unpaired = false;
+        state.relay_not_listed = false;
         let bytes = serde_json::to_vec_pretty(&state).map_err(io::Error::other)?;
         atomic_write(&self.state_path(), &bytes)?;
         Ok(secret)

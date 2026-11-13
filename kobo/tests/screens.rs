@@ -736,10 +736,11 @@ fn wifi_stays_on_while_the_relay_cannot_help_yet() {
     assert_eq!(Store::new(&o.home).load_state().unwrap().edition_order, vec![121, 120, 119, 118]);
 }
 
-/// A Kobo the phone has dropped has to be paired again, which trying again doesn't do: Wi-Fi
-/// goes off after the first try and Settings says why.
+/// A Kobo listed before but not now (no Sync session open on the phone, or removed from it)
+/// waits on the user, which trying again doesn't help: Wi-Fi goes off after the first try and
+/// Settings says the phone isn't syncing, without calling the Kobo unpaired.
 #[test]
-fn wifi_goes_off_when_the_phone_dropped_this_kobo() {
+fn wifi_goes_off_when_the_phone_isnt_syncing() {
     let relay = FakeRelay::start();
     let size = &SIZES[2];
     let setup = Setup { online: false, relay: Some(relay.url()), paired: true, relay_seen: true, ..Default::default() };
@@ -747,13 +748,13 @@ fn wifi_goes_off_when_the_phone_dropped_this_kobo() {
     script.extend(sleep_steps(2500));
     script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
     script.push(Step::Wait(10_000));
-    script.push(mark("01-settings-not-paired"));
-    let o = run("wifi-relay-dropped", size, &setup, script);
+    script.push(mark("01-settings-phone-not-syncing"));
+    let o = run("wifi-relay-not-syncing", size, &setup, script);
     assert_eq!(o.syncs_started, 1);
     assert_eq!(o.radio, vec!["on", "off"]);
     let state = Store::new(&o.home).load_state().unwrap();
-    assert!(state.relay_unpaired);
-    assert!(state.last_error.unwrap().starts_with("Not paired"));
+    assert!(state.relay_not_listed);
+    assert!(state.last_error.unwrap().starts_with("The phone isn\u{2019}t syncing"));
 }
 
 /// The pairing code asks the relay every few seconds, while it is shown and online, whether
@@ -789,7 +790,7 @@ fn the_pairing_screen_notices_the_scan_and_syncs() {
     });
     assert_eq!(o.syncs_started, 1);
     let state = Store::new(&o.home).load_state().unwrap();
-    assert!(state.relay_seen && !state.relay_unpaired && state.last_error.is_none());
+    assert!(state.relay_seen && !state.relay_not_listed && state.last_error.is_none());
     assert_eq!(state.edition_order, vec![121, 120, 119, 118]);
     assert_eq!(relay.with(|s| s.fetched.len()), 1);
     // Two questions, then the sync's own GET /v1/package and its one download.

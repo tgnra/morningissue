@@ -144,6 +144,17 @@ impl FakeRelay {
         });
     }
 
+    /// What the phone does when its Sync session ends or is cancelled (`DELETE /v1/group`):
+    /// the device list, the package and every upload go.
+    pub fn end_session(&self) {
+        self.with(|s| {
+            s.devices.clear();
+            s.package = None;
+            s.changes.clear();
+            s.fetched.clear();
+        });
+    }
+
     /// Encrypts `zip` as a new package for these devices and publishes it.
     pub fn publish(&self, id: &str, zip: &[u8], devices: &[&DeviceKeys]) {
         let pkg_key: [u8; 32] = crypto::random().unwrap();

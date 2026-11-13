@@ -19,8 +19,10 @@ pub enum SyncError {
     /// The relay address in `config.json` cannot be used.
     RelayAddress(String),
     /// The relay answered `401 unknown`: the phone has not listed this Kobo yet (`waiting`,
-    /// it never has) or no longer does.
-    RelayUnpaired { waiting: bool },
+    /// it never has), or does not list it right now. The relay group exists only while a
+    /// Sync session is open on the phone, so between sessions every request gets this, just
+    /// as a Kobo the phone removed does; the Kobo can't tell the two apart.
+    RelayNotListed { waiting: bool },
     /// The relay could not be reached, or the connection broke.
     Relay(String),
     /// The relay answered something unexpected.
@@ -38,8 +40,8 @@ impl fmt::Display for SyncError {
             SyncError::TimedOut => write!(f, "Sync took too long and stopped."),
             SyncError::NotPaired => write!(f, "Not paired yet: tap Pair with phone in Settings and scan the code with Morning Issue on the phone."),
             SyncError::RelayAddress(e) => write!(f, "The relay address in config.json can\u{2019}t be used: {e}"),
-            SyncError::RelayUnpaired { waiting: true } => write!(f, "Waiting for the phone to publish: scan the code under Pair with phone in Settings with Morning Issue on the phone."),
-            SyncError::RelayUnpaired { waiting: false } => write!(f, "Not paired: the phone no longer accepts this Kobo. Pair with phone again in Settings."),
+            SyncError::RelayNotListed { waiting: true } => write!(f, "Waiting for the phone: scan the code under Pair with phone in Settings with Morning Issue, and keep the phone\u{2019}s Sync screen open."),
+            SyncError::RelayNotListed { waiting: false } => write!(f, "The phone isn\u{2019}t syncing. Press Start in Sync on the phone, then sync again. If this Kobo was removed from the phone, pair again in Settings."),
             SyncError::Relay(e) if e.contains("timed out") || e.contains("temporarily unavailable") => write!(f, "The relay took too long to answer."),
             SyncError::Relay(_) => write!(f, "Can\u{2019}t reach the relay."),
             SyncError::RelayProtocol(e) => write!(f, "The relay sent something unexpected ({e})."),

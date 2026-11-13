@@ -110,7 +110,7 @@ fn a_package_is_installed_and_events_stay_until_a_package_acknowledges_them() {
     assert_eq!(changes[0].1["events"].as_array().unwrap().iter().map(|e| e["seq"].as_i64().unwrap()).collect::<Vec<_>>(), vec![1, 2, 3]);
     // Not acknowledged yet: still kept, and still applied on top.
     assert_eq!(seqs(&store), vec![1, 2, 3]);
-    assert_eq!((state.relay_uploaded_seq, state.relay_package.clone(), state.relay_fetched), (3, Some(id(1)), true));
+    assert_eq!((state.relay_package.clone(), state.relay_fetched), (Some(id(1)), true));
     assert!(state.last_sync_at.is_some() && state.last_error.is_none() && state.relay_seen);
     assert_eq!(state.db_id.as_deref(), Some("db-A"));
     assert_eq!(state.edition_order, vec![2, 1]);
@@ -124,11 +124,13 @@ fn a_package_is_installed_and_events_stay_until_a_package_acknowledges_them() {
     // Nothing left of the download.
     assert_eq!(std::fs::read_dir(store.relay_dir()).unwrap().count(), 0);
 
-    // Nothing new: no upload, no download, the events stay.
+    // Nothing new: no download, and the unacknowledged events go again under the same name,
+    // replacing the batch (a cancelled session may have deleted it); they stay.
     let puts = relay.count("PUT /v1/changes/");
     let r = sync(&store, &opts(&relay.url())).unwrap();
-    assert_eq!((r.events_sent, r.editions_fetched.len()), (0, 0));
-    assert_eq!(relay.count("PUT /v1/changes/"), puts);
+    assert_eq!((r.events_sent, r.editions_fetched.len()), (3, 0));
+    assert_eq!(relay.count("PUT /v1/changes/"), puts + 1);
+    assert_eq!(relay.changes_of(&keys).iter().map(|c| c.0.clone()).collect::<Vec<_>>(), vec!["1-3"]);
     assert_eq!(relay.count("GET /v1/packages/"), 1);
     assert_eq!(seqs(&store), vec![1, 2, 3]);
 
@@ -137,12 +139,15 @@ fn a_package_is_installed_and_events_stay_until_a_package_acknowledges_them() {
     let mut eds = editions();
     eds[0].1 = "v2b".into();
     relay.publish(&id(2), &package("db-A", &eds, Some(("s1", saved())), &pictures(), json!({ state.device_id.clone(): 3 })), &[&keys]);
+    // Uploading comes before the package, so this sync still sends 1 to 4 (the phone skips
+    // what it has merged); the next sends only 4.
     let r = sync(&store, &opts(&relay.url())).unwrap();
-    assert_eq!((r.events_sent, r.editions_fetched.clone()), (1, vec![2]));
-    assert_eq!(relay.changes_of(&keys).iter().map(|c| c.0.clone()).collect::<Vec<_>>(), vec!["1-3", "4-4"]);
+    assert_eq!((r.events_sent, r.editions_fetched.clone()), (4, vec![2]));
     assert_eq!(seqs(&store), vec![4]);
+    assert_eq!(sync(&store, &opts(&relay.url())).unwrap().events_sent, 1);
+    assert_eq!(relay.changes_of(&keys).iter().map(|c| c.0.clone()).collect::<Vec<_>>(), vec!["1-3", "1-4", "4-4"]);
     let state = store.load_state().unwrap();
-    assert_eq!((state.relay_acked, state.relay_uploaded_seq), (3, 4));
+    assert_eq!(state.relay_acked, 3);
     assert!(store.next_seq(&state).unwrap() >= 5);
 }
 
@@ -157,10 +162,10 @@ fn events_go_in_batches_of_500_and_wait_when_the_relay_is_full() {
     relay.with(|s| s.max_pending = 1);
     let r = sync(&store, &opts(&relay.url())).unwrap();
     assert_eq!(r.events_sent, 500);
-    assert_eq!(store.load_state().unwrap().relay_uploaded_seq, 500);
     relay.with(|s| s.max_pending = 64);
+    // 1-500 again (replacing it), then 501-600.
     let r = sync(&store, &opts(&relay.url())).unwrap();
-    assert_eq!(r.events_sent, 100);
+    assert_eq!(r.events_sent, 600);
     let batches: Vec<(String, usize)> = relay.changes_of(&keys).iter().map(|(b, v)| (b.clone(), v["events"].as_array().unwrap().len())).collect();
     assert_eq!(batches, vec![("1-500".into(), 500), ("501-600".into(), 100)]);
     assert_eq!(seqs(&store).len(), 600);
@@ -221,29 +226,27 @@ fn an_unlisted_kobo_waits_for_the_phone_and_sends_its_events_again_once_listed()
     store.append_event(&event(2)).unwrap();
     // Scanned, but the phone has not sent the device list yet.
     match sync(&store, &opts(&relay.url())) {
-        Err(SyncError::RelayUnpaired { waiting: true }) => {}
+        Err(SyncError::RelayNotListed { waiting: true }) => {}
         other => panic!("{other:?}"),
     }
     let state = store.load_state().unwrap();
-    assert!(state.relay_unpaired && !state.relay_seen);
+    assert!(state.relay_not_listed && !state.relay_seen);
     assert!(state.last_error.unwrap().starts_with("Waiting for the phone"));
 
     relay.list(&keys);
     sync(&store, &opts(&relay.url())).unwrap();
     let state = store.load_state().unwrap();
-    assert!(!state.relay_unpaired && state.relay_seen);
-    assert_eq!(state.relay_uploaded_seq, 2);
+    assert!(!state.relay_not_listed && state.relay_seen);
 
     // The phone drops this Kobo, and the relay its pending changes.
     relay.unlist(&keys);
     match sync(&store, &opts(&relay.url())) {
-        Err(SyncError::RelayUnpaired { waiting: false }) => {}
+        Err(SyncError::RelayNotListed { waiting: false }) => {}
         other => panic!("{other:?}"),
     }
     let state = store.load_state().unwrap();
-    assert!(state.relay_unpaired);
-    assert!(state.last_error.unwrap().starts_with("Not paired"));
-    assert_eq!(state.relay_uploaded_seq, 0);
+    assert!(state.relay_not_listed);
+    assert!(state.last_error.unwrap().starts_with("The phone isn\u{2019}t syncing"));
     assert_eq!(seqs(&store), vec![1, 2]);
 
     // Paired again with the same code: the events go again.
@@ -251,6 +254,116 @@ fn an_unlisted_kobo_waits_for_the_phone_and_sends_its_events_again_once_listed()
     let r = sync(&store, &opts(&relay.url())).unwrap();
     assert_eq!(r.events_sent, 2);
     assert_eq!(relay.changes_of(&keys).iter().map(|c| c.0.clone()).collect::<Vec<_>>(), vec!["1-2"]);
+}
+
+/// The relay group exists only while a Sync session is open on the phone. Between sessions a
+/// listed Kobo gets `401 unknown` like a removed one; it says the phone isn't syncing rather
+/// than that it is unpaired, and sends again the events the deleted group took unmerged.
+#[test]
+fn between_sync_sessions_the_kobo_says_the_phone_isnt_syncing_and_sends_its_events_again() {
+    let relay = FakeRelay::start();
+    let (store, keys) = kobo("between-sessions");
+    store.append_event(&event(1)).unwrap();
+    store.append_event(&event(2)).unwrap();
+    relay.list(&keys);
+    relay.publish(&id(1), &package("db-A", &editions(), None, &[], json!({})), &[&keys]);
+    assert_eq!(sync(&store, &opts(&relay.url())).unwrap().events_sent, 2);
+
+    // The session is cancelled before the phone merged the upload.
+    relay.end_session();
+    let e = sync(&store, &opts(&relay.url())).unwrap_err();
+    assert!(matches!(e, SyncError::RelayNotListed { waiting: false }), "{e:?}");
+    assert_eq!(
+        e.to_string(),
+        "The phone isn\u{2019}t syncing. Press Start in Sync on the phone, then sync again. If this Kobo was removed from the phone, pair again in Settings."
+    );
+    assert!(!e.to_string().contains("not paired") && !e.to_string().contains("Not paired"));
+    let state = store.load_state().unwrap();
+    assert!(state.relay_seen && state.relay_not_listed);
+    assert_eq!(seqs(&store), vec![1, 2]);
+    // Settings doesn't call it unpaired either.
+    let note = morningissue::ui::relay_note(&state);
+    assert!(note.starts_with("The phone isn\u{2019}t syncing") && !note.contains("Not paired"), "{note}");
+
+    // The next session: listed again just before the package; the events go again.
+    relay.list(&keys);
+    relay.publish(&id(2), &package("db-A", &editions(), None, &[], json!({})), &[&keys]);
+    let r = sync(&store, &opts(&relay.url())).unwrap();
+    assert_eq!(r.events_sent, 2);
+    assert_eq!(relay.changes_of(&keys).iter().map(|c| c.0.clone()).collect::<Vec<_>>(), vec!["1-2"]);
+    let state = store.load_state().unwrap();
+    assert!(state.relay_seen && !state.relay_not_listed && state.last_error.is_none());
+}
+
+/// A session cancelled after this Kobo uploaded, and the next one opened before it syncs
+/// again: it never gets a `401`, yet its earlier upload is gone. Every sync sends all
+/// unacknowledged events, so they reach the phone anyway.
+#[test]
+fn events_uploaded_in_a_cancelled_session_go_again_in_the_next() {
+    let relay = FakeRelay::start();
+    let (store, keys) = kobo("cancelled-session");
+    store.append_event(&event(1)).unwrap();
+    store.append_event(&event(2)).unwrap();
+    relay.list(&keys);
+    relay.publish(&id(1), &package("db-A", &editions(), None, &[], json!({})), &[&keys]);
+    assert_eq!(sync(&store, &opts(&relay.url())).unwrap().events_sent, 2);
+
+    relay.end_session();
+    relay.list(&keys);
+    relay.publish(&id(2), &package("db-A", &editions(), None, &[], json!({})), &[&keys]);
+    store.append_event(&event(3)).unwrap();
+    let r = sync(&store, &opts(&relay.url())).unwrap();
+    assert_eq!(r.events_sent, 3);
+    assert_eq!(relay.changes_of(&keys).iter().map(|c| c.0.clone()).collect::<Vec<_>>(), vec!["1-3"]);
+    assert!(relay.with(|s| s.refused.is_empty()));
+
+    // Once a package acknowledges them, they go no more.
+    let device = store.load_state().unwrap().device_id;
+    relay.end_session();
+    relay.list(&keys);
+    relay.publish(&id(3), &package("db-A", &editions(), None, &[], json!({ device: 3 })), &[&keys]);
+    sync(&store, &opts(&relay.url())).unwrap();
+    assert!(store.read_events().unwrap().is_empty());
+    let puts = relay.count("PUT /v1/changes/");
+    assert_eq!(sync(&store, &opts(&relay.url())).unwrap().events_sent, 0);
+    assert_eq!(relay.count("PUT /v1/changes/"), puts);
+}
+
+/// More unacknowledged events than the relay's 64 pending batches hold: the oldest 64
+/// batches go, the rest wait.
+#[test]
+fn at_most_64_batches_go_at_once() {
+    let relay = FakeRelay::start();
+    let (store, keys) = kobo("64-batches");
+    relay.list(&keys);
+    let mut lines = String::new();
+    for s in 1..=(64 * 500 + 700) {
+        lines.push_str(&serde_json::to_string(&event(s)).unwrap());
+        lines.push('\n');
+    }
+    std::fs::write(store.events_path(), lines).unwrap();
+    let r = sync(&store, &opts(&relay.url())).unwrap();
+    assert_eq!(r.events_sent, 64 * 500);
+    assert_eq!(relay.count("PUT /v1/changes/"), 64);
+    let names: Vec<String> = relay.with(|s| s.changes.iter().map(|c| c.1.clone()).collect());
+    assert_eq!((names.first().unwrap().as_str(), names.last().unwrap().as_str()), ("1-500", "31501-32000"));
+    assert!(relay.with(|s| s.refused.is_empty()));
+}
+
+/// `state.json` from before the flag was renamed still loads: `relayUnpaired` is read as
+/// `relayNotListed`, which is what is written from then on, and the dropped
+/// `relayUploadedSeq` and `relayUnackedSince` are ignored.
+#[test]
+fn the_old_relay_unpaired_field_still_loads() {
+    let store = Store::new(home("old-state"));
+    store.ensure_dirs().unwrap();
+    std::fs::write(store.state_path(), br#"{"deviceId": "d", "nextSeq": 1, "relaySeen": true, "relayUnpaired": true, "relayUploadedSeq": 40, "relayUnackedSince": 1762900000000}"#).unwrap();
+    let state = store.load_state().unwrap();
+    assert!(state.relay_seen && state.relay_not_listed);
+    store.save_state(&state).unwrap();
+    let saved: Value = serde_json::from_slice(&std::fs::read(store.state_path()).unwrap()).unwrap();
+    assert_eq!(saved["relayNotListed"], json!(true));
+    assert!(saved.get("relayUnpaired").is_none() && saved.get("relayUploadedSeq").is_none() && saved.get("relayUnackedSince").is_none());
 }
 
 /// What the pairing screen asks: one signed `GET /v1/package`, false until the phone lists
@@ -264,15 +377,20 @@ fn asking_whether_the_phone_lists_this_kobo() {
     let listed = |address: &str| morningissue::relay::listed(&store, &opts(address));
     assert!(!listed(&relay.url()).unwrap());
     let state = store.load_state().unwrap();
-    assert!(state.relay_unpaired && !state.relay_seen && state.last_error.is_none());
+    assert!(state.relay_not_listed && !state.relay_seen && state.last_error.is_none());
 
     relay.list(&keys);
     assert!(listed(&relay.url()).unwrap());
     let state = store.load_state().unwrap();
-    assert!(!state.relay_unpaired && state.relay_seen && state.last_error.is_none());
+    assert!(!state.relay_not_listed && state.relay_seen && state.last_error.is_none());
     assert!(state.relay_package.is_none() && state.editions.is_empty());
     assert_eq!(relay.with(|s| s.requests.clone()), vec!["GET /v1/package", "GET /v1/package"]);
     assert_eq!(seqs(&store), vec![1]);
+
+    // Listed, but the phone hasn't published yet (204): not yet, so the pairing screen keeps polling.
+    let early = FakeRelay::start();
+    early.list(&keys);
+    assert!(!listed(&early.url()).unwrap());
 
     // A relay that can't be reached is an error, not a "no".
     match listed(&format!("http://{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap())) {

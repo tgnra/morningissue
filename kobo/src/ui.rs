@@ -576,17 +576,17 @@ pub struct SettingsView<'s> {
 pub enum Retry {
     /// The relay could not be reached, or the connection broke.
     Unreachable,
-    /// The relay doesn't list this Kobo yet: the phone hasn't published since it scanned the
-    /// code.
+    /// The relay doesn't list this Kobo yet: the phone lists it once it has scanned the code
+    /// and its Sync session has uploaded the package.
     Waiting,
 }
 
 /// Where pairing stands, for Settings and the pairing screen.
 pub fn relay_note(state: &crate::store::State) -> String {
-    let s = match (state.relay_secret.is_some(), state.relay_seen, state.relay_unpaired) {
+    let s = match (state.relay_secret.is_some(), state.relay_seen, state.relay_not_listed) {
         (false, _, _) => "Not paired yet. Tap Pair with phone and scan the code with Morning Issue on the phone.",
-        (true, true, true) => "Not paired: the phone no longer accepts this Kobo. Pair with phone again.",
-        (true, false, _) => "Waiting for the phone: scan the code under Pair with phone with Morning Issue, then sync.",
+        (true, true, true) => "The phone isn\u{2019}t syncing now: press Start in Sync on the phone. If it removed this Kobo, pair again.",
+        (true, false, _) => "Waiting for the phone: scan the code under Pair with phone with Morning Issue, and keep its Sync screen open.",
         (true, true, false) => "Paired. Syncs through the relay.",
     };
     s.to_string()
@@ -595,11 +595,12 @@ pub fn relay_note(state: &crate::store::State) -> String {
 /// The pairing screen's note: `asking` while it asks the relay whether the phone has scanned
 /// the code (online, and not paired yet).
 pub fn pair_note(state: &crate::store::State, asking: bool) -> String {
-    let dropped = state.relay_seen && state.relay_unpaired;
-    let s = match (asking, dropped) {
-        (true, true) => "Not paired: the phone no longer accepts this Kobo. Scan this code again; the Kobo notices within a few seconds and syncs.",
-        (true, false) => "Waiting for the phone. Once it has scanned this code, the Kobo notices within a few seconds and syncs.",
-        (false, _) if state.relay_seen && !dropped => "Paired. Syncs through the relay.",
+    // Listed before, but not now: usually no Sync session is open on the phone.
+    let idle = state.relay_seen && state.relay_not_listed;
+    let s = match (asking, idle) {
+        (true, true) => "Waiting for the phone\u{2026} press Start in Sync on the phone, or scan this code again if it removed this Kobo. The Kobo notices within a few seconds and syncs.",
+        (true, false) => "Waiting for the phone\u{2026} keep the phone\u{2019}s Sync screen open. Once it has scanned this code and uploaded, the Kobo notices within a few seconds and syncs.",
+        (false, _) if state.relay_seen && !idle => "Paired. Syncs through the relay.",
         (false, _) => "Offline. Once the phone has scanned this code, go back and tap Turn on Wi-Fi and sync.",
     };
     s.to_string()
@@ -739,7 +740,7 @@ fn settings_body(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView, breaks: &mut 
         (Some(true), _) => "Turning Wi-Fi on and joining a network saved in the Kobo\u{2019}s Wi-Fi settings\u{2026}",
         (Some(false), _) => "Turning Wi-Fi off\u{2026}",
         (None, true) if s.retrying == Some(Retry::Unreachable) => "Wi-Fi stays on until the relay answers. Turn Wi-Fi off to stop trying.",
-        (None, true) if s.retrying == Some(Retry::Waiting) => "Wi-Fi stays on until the phone has told the relay about this Kobo. Turn Wi-Fi off to stop trying.",
+        (None, true) if s.retrying == Some(Retry::Waiting) => "Wi-Fi stays on until the phone has told the relay about this Kobo, which it does once its upload is done. Turn Wi-Fi off to stop trying.",
         (None, true) if s.wifi_auto => "Wi-Fi turns off again when the sync is done.",
         (None, true) => "Turn Wi-Fi off to save the battery; Morning Issue can turn it on again to sync.",
         (None, false) if s.slept => "Wi-Fi was turned off when the Kobo went to sleep. Turn on Wi-Fi and sync turns it on, syncs, and turns it off again.",
@@ -1032,7 +1033,7 @@ pub const OFFLINE_SINCE_SLEEP: &str = "Offline since sleep. Turn on Wi-Fi and sy
 pub fn retry_status(why: Retry) -> &'static str {
     match why {
         Retry::Unreachable => "Wi-Fi on. Can\u{2019}t reach the relay; trying again every few seconds",
-        Retry::Waiting => "Wi-Fi on. Waiting for the phone to publish; trying again every few seconds",
+        Retry::Waiting => "Wi-Fi on. Waiting for the phone; trying again every few seconds",
     }
 }
 

@@ -31,9 +31,8 @@ use std::time::Instant;
 
 /// Events in one changes batch.
 pub const BATCH: usize = 500;
-/// After this long without a package acknowledging them, uploaded events are uploaded again:
-/// the relay deletes changes after 48 hours.
-const UPLOAD_TTL_MS: i64 = 48 * 3600 * 1000;
+/// Batches the relay keeps waiting per device; past it, a new batch is refused (`429`).
+const MAX_PENDING: usize = 64;
 
 /// The last signatures sent from this process, so none is sent twice.
 static SENT: std::sync::Mutex<std::collections::VecDeque<String>> = std::sync::Mutex::new(std::collections::VecDeque::new());
@@ -224,16 +223,16 @@ impl<'a> Session<'a> {
                 crate::tls::set_clock_offset(self.state.clock_offset_ms);
             }
             if r.status != 401 {
-                if !self.state.relay_seen || self.state.relay_unpaired {
+                if !self.state.relay_seen || self.state.relay_not_listed {
                     self.state.relay_seen = true;
-                    self.state.relay_unpaired = false;
+                    self.state.relay_not_listed = false;
                     self.save()?;
                 }
                 return Ok(r);
             }
             let code = serde_json::from_slice::<serde_json::Value>(&r.body).ok().and_then(|v| v["error"].as_str().map(str::to_owned)).unwrap_or_default();
             if code == "unknown" {
-                return Err(SyncError::RelayUnpaired { waiting: !self.state.relay_seen });
+                return Err(SyncError::RelayNotListed { waiting: !self.state.relay_seen });
             }
             eprintln!("relay: 401 {code} for {method} {path}; clock offset now {} ms", self.state.clock_offset_ms);
             if attempt == 1 {
@@ -252,43 +251,38 @@ impl<'a> Session<'a> {
         self.save()
     }
 
-    /// Step 1.
+    /// Step 1: every event no package has acknowledged yet, oldest first, in batches of
+    /// [`BATCH`], at most [`MAX_PENDING`] of them. They go at every sync, not only once: the
+    /// relay group exists only while a Sync session is open on the phone, and a session that
+    /// ends or is cancelled deletes the changes uploaded during it, merged or not. The phone
+    /// skips events at or below `acked`, and a batch sent again under the same name replaces
+    /// the earlier one, so sending twice is harmless.
     fn upload(&mut self) -> Result<(), SyncError> {
-        // Changes the relay will have deleted by now are sent again; the phone skips what it
-        // has merged.
-        if self.state.relay_unacked_since.is_some_and(|t| self.now_ms() - t > UPLOAD_TTL_MS) {
-            eprintln!("relay: uploads from more than 48 hours ago were never acknowledged; sending them again");
-            self.state.relay_uploaded_seq = self.state.relay_acked.min(self.state.relay_uploaded_seq);
-            self.state.relay_unacked_since = None;
+        let acked = self.state.relay_acked;
+        let mut events: Vec<Event> = self.store.read_events()?.into_iter().filter(|e| e.seq > acked).collect();
+        events.sort_by_key(|e| e.seq);
+        let batches: Vec<&[Event]> = events.chunks(BATCH).collect();
+        if batches.len() > MAX_PENDING {
+            eprintln!("relay: {} events unacknowledged; the oldest {} go now", events.len(), MAX_PENDING * BATCH);
         }
-        loop {
-            let mut events: Vec<Event> = self.store.read_events()?.into_iter().filter(|e| e.seq > self.state.relay_uploaded_seq).collect();
-            events.sort_by_key(|e| e.seq);
-            if events.is_empty() {
-                return Ok(());
-            }
-            let batch = &events[..events.len().min(BATCH)];
+        for batch in batches.into_iter().take(MAX_PENDING) {
             let name = format!("{}-{}", batch[0].seq, batch[batch.len() - 1].seq);
             let plain = serde_json::to_vec(&serde_json::json!({"deviceId": self.state.device_id, "events": batch})).map_err(|e| SyncError::Storage(e.to_string()))?;
             let envelope = crypto::seal(&self.keys.enc, KIND_CHANGES, &format!("changes|{}|{name}", self.keys.kid), &plain)?;
             let r = self.send("PUT", &format!("/v1/changes/{name}"), Some(&envelope), &[], None)?;
             match r.status {
-                200 | 204 => {
-                    self.state.relay_uploaded_seq = batch[batch.len() - 1].seq;
-                    if self.state.relay_unacked_since.is_none() {
-                        self.state.relay_unacked_since = Some(self.now_ms());
-                    }
-                    self.save()?;
-                    self.report.events_sent += batch.len();
-                }
+                200 | 204 => self.report.events_sent += batch.len(),
                 429 => {
-                    // The phone has not collected the earlier batches yet; these go next time.
-                    eprintln!("relay: 64 batches waiting already; {} events wait for the next sync", events.len());
+                    // Batches from earlier in this session the phone hasn't collected yet (cut
+                    // differently, as the events acknowledged since moved the start); the rest
+                    // go at the next sync.
+                    eprintln!("relay: {MAX_PENDING} batches waiting already; events from {name} on wait for the next sync");
                     return Ok(());
                 }
                 s => return Err(SyncError::RelayProtocol(format!("changes: HTTP {s}"))),
             }
         }
+        Ok(())
     }
 
     /// Step 2.
@@ -524,11 +518,6 @@ impl<'a> Session<'a> {
             self.save()?;
             self.store.drop_events_through(acked)?;
         }
-        let unacked = self.store.read_events()?.iter().any(|e| e.seq <= self.state.relay_uploaded_seq);
-        if !unacked && self.state.relay_unacked_since.is_some() {
-            self.state.relay_unacked_since = None;
-            self.save()?;
-        }
         Ok(())
     }
 }
@@ -548,12 +537,10 @@ fn session<'a>(store: &'a Store, opts: &'a Options) -> Result<Session<'a>, SyncE
     Ok(Session { store, opts, ep, keys, state, started: Instant::now(), report })
 }
 
-/// After `401 unknown`. The relay deleted this Kobo's pending changes when the phone dropped
-/// it (or never had them): they are sent again once it is paired.
-fn mark_unpaired(state: &mut State) {
-    state.relay_unpaired = true;
-    state.relay_uploaded_seq = state.relay_acked.min(state.relay_uploaded_seq);
-    state.relay_unacked_since = None;
+/// After `401 unknown`: this Kobo is not listed right now. (What it uploaded may be gone
+/// unmerged, but every sync sends all unacknowledged events again anyway; see `upload`.)
+fn mark_not_listed(state: &mut State) {
+    state.relay_not_listed = true;
 }
 
 /// Runs a relay sync. The outcome is saved in the state for the home screen and Settings.
@@ -570,8 +557,8 @@ pub fn sync(store: &Store, opts: &Options) -> Result<SyncReport, SyncError> {
     let result = s.run();
     let mut state = s.state;
     if let Err(e) = &result {
-        if let SyncError::RelayUnpaired { .. } = e {
-            mark_unpaired(&mut state);
+        if let SyncError::RelayNotListed { .. } = e {
+            mark_not_listed(&mut state);
         }
         state.last_error = Some(e.to_string());
     }
@@ -581,16 +568,19 @@ pub fn sync(store: &Store, opts: &Options) -> Result<SyncReport, SyncError> {
 
 /// Whether the phone lists this Kobo with the relay yet, for the pairing screen: one signed
 /// `GET /v1/package`, which the relay answers `401 unknown` until the phone has sent it the
-/// device list after scanning the code. Nothing is uploaded, downloaded or installed, and the
-/// last sync's result is left alone; what the relay said is saved in the state as a sync
-/// saves it.
+/// device list in a Sync session (just before it publishes the package). A `204` means the
+/// Kobo is listed but the package isn't published yet, the moment between the two: it counts
+/// as not yet, so the next poll syncs once there is something to fetch. Nothing is uploaded,
+/// downloaded or installed, and the last sync's result is left alone; what the relay said is
+/// saved in the state as a sync saves it.
 pub fn listed(store: &Store, opts: &Options) -> Result<bool, SyncError> {
     let mut s = session(store, opts)?;
     let result = match s.send("GET", "/v1/package", None, &[], None) {
-        Ok(r) if r.status == 200 || r.status == 204 => Ok(true),
+        Ok(r) if r.status == 200 => Ok(true),
+        Ok(r) if r.status == 204 => Ok(false),
         Ok(r) => Err(SyncError::RelayProtocol(format!("package: HTTP {}", r.status))),
-        Err(SyncError::RelayUnpaired { .. }) => {
-            mark_unpaired(&mut s.state);
+        Err(SyncError::RelayNotListed { .. }) => {
+            mark_not_listed(&mut s.state);
             Ok(false)
         }
         Err(e) => Err(e),

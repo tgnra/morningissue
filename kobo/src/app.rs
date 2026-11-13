@@ -77,7 +77,8 @@ const RETRY_MS: u64 = 5_000;
 // While the pairing code is shown (and the Kobo is online, and not paired already), the
 // relay is asked every PAIR_POLL_MS whether the phone lists this Kobo yet: one signed
 // `GET /v1/package`, answered `401 unknown` until the phone has scanned the code and sent the
-// relay its device list. Once it is listed, the reader goes back to Settings and syncs.
+// relay its device list, which it does in a Sync session just before publishing the package
+// (so this can last through the phone's upload). Once it is listed, the reader goes back to Settings and syncs.
 const PAIR_POLL_MS: u64 = 5_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -171,9 +172,10 @@ fn finish_of(r: &Result<sync::SyncReport, SyncError>) -> Finish {
         Err(SyncError::Relay(_)) => Finish::Retry(Retry::Unreachable),
         // One that has not been told about this Kobo yet, which the phone does as soon as it
         // has scanned the code (or at its next publish, if it couldn't reach the relay then).
-        Err(SyncError::RelayUnpaired { waiting: true }) => Finish::Retry(Retry::Waiting),
-        // Never paired, or the phone dropped this Kobo: it has to be paired, which trying
-        // again doesn't do. Nor does it help with a relay that answers something unexpected,
+        Err(SyncError::RelayNotListed { waiting: true }) => Finish::Retry(Retry::Waiting),
+        // Never paired, or listed before but not now: the phone has no Sync session open (or
+        // removed this Kobo), and the user has to press Start there (or pair again), which
+        // trying again doesn't do. Nor does it help with a relay that answers something unexpected,
         // a certificate the clock can't check, or a package that fails its check.
         Err(_) => Finish::Failed,
     }
@@ -925,7 +927,7 @@ impl App {
                 }
                 let (bw, bh) = self.display.base_size();
                 let uri = crate::relay::pair_uri(&secret, &self.state.device_id, &self.config.device_name(), bw.min(bh).max(1) as u32);
-                if !(self.state.relay_seen && !self.state.relay_unpaired) {
+                if !(self.state.relay_seen && !self.state.relay_not_listed) {
                     self.pair_poll_at = Some(self.clock.mono_ms() + PAIR_POLL_MS);
                 }
                 self.net = (self.network)();
@@ -1532,7 +1534,7 @@ impl App {
         if self.sync.is_some() || self.wifi_job.is_some() {
             return Ok(());
         }
-        if self.state.relay_seen && !self.state.relay_unpaired {
+        if self.state.relay_seen && !self.state.relay_not_listed {
             eprintln!("relay: a sync got through the relay; the pairing code is done");
             self.pair_poll_at = None;
             return self.back();
