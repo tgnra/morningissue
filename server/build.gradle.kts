@@ -84,4 +84,6 @@ tasks.test {
     val tmp = layout.buildDirectory.dir("tmp/test-jvm").get().asFile
     systemProperty("java.io.tmpdir", tmp.absolutePath)
     doFirst { tmp.mkdirs() }
+    // `-PsimulationReport[=dir]` writes the ranking simulation's reports (SimulationReport).
+    project.findProperty("simulationReport")?.let { dir -> systemProperty("morningissue.simulation.report", dir) }
 }
