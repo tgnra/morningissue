@@ -1,0 +1,37 @@
+The file embedding/potion-base-8m.bin is a converted copy (8-bit vectors and the word-piece
+vocabulary) of the static embedding model "potion-base-8M" by The Minish Lab (Stephan Tulkens
+and Thomas van Dongen):
+
+  https://huggingface.co/minishlab/potion-base-8M
+  revision bf8b056651a2c21b8d2565580b8569da283cab23
+
+The model card gives its licence as MIT. The model repository carries no licence file of its
+own; the text below is the MIT licence as published with the authors' Model2Vec project
+(https://github.com/MinishLab/model2vec), with which the model was made.
+
+potion-base-8M is distilled from BAAI/bge-base-en-v1.5 (https://huggingface.co/BAAI/bge-base-en-v1.5),
+also MIT-licensed, Copyright (c) 2022 staoxiao, and uses the vocabulary of BERT base uncased.
+
+-----------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2024 Thomas van Dongen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

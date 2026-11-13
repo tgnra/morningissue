@@ -1,0 +1,14 @@
+<configuration>
+    <!-- One line per event on stderr; the systemd journal and Docker add their own timestamps. -->
+    <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.err</target>
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{20} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    <logger name="io.ktor" level="INFO"/>
+    <logger name="io.netty" level="WARN"/>
+    <root level="INFO">
+        <appender-ref ref="STDERR"/>
+    </root>
+</configuration>
