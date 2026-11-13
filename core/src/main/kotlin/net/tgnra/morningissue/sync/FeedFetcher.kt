@@ -175,6 +175,6 @@ class FeedFetcher(client: OkHttpClient) {
 
         private const val CLEARTEXT_BLOCKED = "Insecure http addresses are not allowed"
         private const val CALL_TIMEOUT_SECONDS = 45L
-        private const val USER_AGENT = "MorningIssue/1.0 (Android; RSS reader)"
+        private const val USER_AGENT = "MorningIssue/1.0 (RSS reader; +https://github.com/tgnra/morningissue)"
     }
 }
