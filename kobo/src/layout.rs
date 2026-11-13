@@ -141,6 +141,14 @@ pub enum Action {
     SetOrientation(crate::settings::Orientation),
     /// Shows the pairing code.
     OpenPair,
+    /// Opens the keyboard for the server's address.
+    ServerTyped,
+    /// A key of the address keyboard.
+    KeyChar(char),
+    /// A key that types several characters at once ("https://").
+    KeyText(String),
+    KeyDelete,
+    KeyOk,
 }
 
 #[derive(Clone, Debug)]
@@ -341,14 +349,17 @@ fn paginate_inner(pieces: &[Piece], area: Rect, break_before: Option<usize>) -> 
     out
 }
 
+/// Reads a stored picture by its URL.
+pub type Loader = Box<dyn Fn(&str) -> Option<Vec<u8>>>;
+
 /// Decoded pictures, kept for a few screens.
 pub struct ImageCache {
-    load: Box<dyn Fn(&str) -> Option<Vec<u8>>>,
+    load: Loader,
     decoded: RefCell<HashMap<String, Option<Rc<GrayImage>>>>,
     dims: RefCell<HashMap<String, Option<(u32, u32)>>>,
     /// A sync is running, so a picture not stored yet may still arrive.
     pub syncing: Cell<bool>,
-    /// Pictures the phone said it does not have, during this sync.
+    /// Pictures the server said it does not have, during this sync.
     pub missing: RefCell<HashSet<String>>,
 }
 
@@ -356,7 +367,7 @@ pub struct ImageCache {
 pub const UNKNOWN_ASPECT: (u32, u32) = (1500, 1000);
 
 impl ImageCache {
-    pub fn new(load: Box<dyn Fn(&str) -> Option<Vec<u8>>>) -> ImageCache {
+    pub fn new(load: Loader) -> ImageCache {
         ImageCache { load, decoded: RefCell::new(HashMap::new()), dims: RefCell::new(HashMap::new()), syncing: Cell::new(false), missing: RefCell::new(HashSet::new()) }
     }
 

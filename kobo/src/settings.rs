@@ -47,6 +47,10 @@ fn lenient_orientation<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    /// The server's address as typed on the keyboard in Settings, written out in full
+    /// (`http[s]://host[:port][/prefix]`). `server` in `config.json` overrides it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
     /// Swaps the two page-turn buttons.
     pub invert_buttons: bool,
     /// None until chosen: the reader starts in the orientation it finds the screen in.
@@ -62,7 +66,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { invert_buttons: false, orientation: None, text_size: DEFAULT_TEXT_SIZE, brightness: None, warmth: None }
+        Settings { server: None, invert_buttons: false, orientation: None, text_size: DEFAULT_TEXT_SIZE, brightness: None, warmth: None }
     }
 }
 
@@ -72,6 +76,8 @@ impl Settings {
         s.text_size = s.text_size.min(TEXT_SIZES.len() - 1);
         s.brightness = s.brightness.map(|v| v.min(100));
         s.warmth = s.warmth.map(|v| v.min(100));
+        // Only an address that can be used; anything else is as if none were typed.
+        s.server = s.server.and_then(|a| crate::server::parse_address(&a).ok());
         s
     }
 
@@ -96,7 +102,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { invert_buttons: true, orientation: Some(Orientation::Landscape), text_size: 4, brightness: Some(40), warmth: Some(70) };
+        let s = Settings { server: Some("https://news.example.org".into()), invert_buttons: true, orientation: Some(Orientation::Landscape), text_size: 4, brightness: Some(40), warmth: Some(70) };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         std::fs::write(&path, br#"{"textSize": 99, "future": 1, "orientation": "portrait"}"#).unwrap();
@@ -109,6 +115,11 @@ mod tests {
         assert_eq!(Settings::load(&path).text_size, 1);
         Settings::load(&path).save(&path).unwrap();
         assert!(!std::fs::read_to_string(&path).unwrap().contains("Address"));
+        // A typed server address that can't be used counts as none.
+        std::fs::write(&path, br#"{"server": "ftp://x"}"#).unwrap();
+        assert_eq!(Settings::load(&path).server, None);
+        std::fs::write(&path, br#"{"server": "news.example.org"}"#).unwrap();
+        assert_eq!(Settings::load(&path).server.as_deref(), Some("https://news.example.org"));
     }
 
     #[test]

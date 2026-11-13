@@ -93,9 +93,65 @@ pub fn draw_into(canvas: &mut Canvas, img: &GrayImage, r: Rect, mode: Fit) -> Re
     Rect::new(x, y, w, h)
 }
 
+/// One line of a picture zip's `images.json` (`POST /api/v1/kobo/images`): the source URL,
+/// the zip entry holding it, its type and its size in pixels.
+#[derive(Clone, Debug, serde::Deserialize, PartialEq)]
+pub struct ImageEntry {
+    pub url: String,
+    pub file: String,
+    #[serde(default, rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
+}
+
+/// The picture to take for a device `width` wide: one exactly that wide, else the nearest
+/// wider one (to be scaled down), else the widest there is. The server prepares each picture
+/// at the width asked for, or narrower when the source is, so there is usually one.
+pub fn pick_image<'a>(entries: &'a [ImageEntry], url: &str, width: u32) -> Option<&'a ImageEntry> {
+    let of: Vec<&ImageEntry> = entries.iter().filter(|e| e.url == url).collect();
+    of.iter().find(|e| e.width == width).or_else(|| of.iter().filter(|e| e.width > width).min_by_key(|e| e.width)).or_else(|| of.iter().max_by_key(|e| e.width)).copied()
+}
+
+/// A picture prepared for a wider screen, scaled down to `width` (never up) and encoded
+/// again as the same type. One that does not decode is kept as it is.
+pub fn scale_down(bytes: Vec<u8>, kind: &str, width: u32) -> Vec<u8> {
+    let Ok(img) = image::load_from_memory(&bytes) else { return bytes };
+    if img.width() <= width || width == 0 {
+        return bytes;
+    }
+    let h = ((img.height() as u64 * width as u64) / img.width() as u64).max(1) as u32;
+    let small = img.resize_exact(width, h, FilterType::CatmullRom).to_luma8();
+    let mut out = Vec::new();
+    let ok = if kind.contains("png") {
+        small.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).is_ok()
+    } else {
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85).encode_image(&small).is_ok()
+    };
+    if ok {
+        out
+    } else {
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn picks_this_width_else_a_wider_one_else_the_widest() {
+        let e = |url: &str, width: u32| ImageEntry { url: url.into(), file: format!("{url}-{width}"), kind: "image/png".into(), width, height: width / 2 };
+        let all = vec![e("a", 600), e("a", 1264), e("a", 1600), e("b", 1072), e("b", 1404), e("c", 800)];
+        assert_eq!(pick_image(&all, "a", 1264).unwrap().width, 1264);
+        assert_eq!(pick_image(&all, "b", 1264).unwrap().width, 1404);
+        assert_eq!(pick_image(&all, "c", 1264).unwrap().width, 800);
+        assert!(pick_image(&all, "d", 1264).is_none());
+        let parsed: Vec<ImageEntry> = serde_json::from_str(r#"[{"url":"u","file":"images/x.jpg","type":"image/jpeg","width":1264,"height":700,"extra":1}]"#).unwrap();
+        assert_eq!(parsed[0], ImageEntry { url: "u".into(), file: "images/x.jpg".into(), kind: "image/jpeg".into(), width: 1264, height: 700 });
+    }
 
     #[test]
     fn decodes_webp_png_and_dithers_to_16_levels() {

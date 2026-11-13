@@ -1,4 +1,4 @@
-//! QR codes for relay pairing, drawn on the canvas in whole pixels per module with the
+//! QR codes for pairing, drawn on the canvas in whole pixels per module with the
 //! standard four-module quiet zone, so the phone's camera can read them off e-ink.
 
 use crate::canvas::{Canvas, Rect, BLACK, WHITE};
@@ -40,7 +40,7 @@ mod tests {
 
     #[test]
     fn a_pairing_uri_fits_a_small_code() {
-        let uri = crate::relay::pair_uri(&"A".repeat(43), "b7e2c0de-0000-4000-8000-000000000000", "Kobo Libra 2", 1264);
+        let uri = crate::server::pair_uri(&"A".repeat(43), "b7e2c0de-0000-4000-8000-000000000000", "Kobo Libra 2", 1264);
         let m = modules(&uri).unwrap();
         // Version 7 or less (45 modules): big modules even on a 6-inch screen.
         assert!(m.len() <= 45, "{}", m.len());

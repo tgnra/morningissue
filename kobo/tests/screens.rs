@@ -2,12 +2,12 @@
 //! each step to `target/screens/<size>/`. Also checks the events the session recorded, what a
 //! sync started from the reader did, and what the light was told.
 
-mod fakerelay;
+mod fakeserver;
 
-use fakerelay::FakeRelay;
+use fakeserver::FakeServer;
 use morningissue::app::{self, App};
 use morningissue::config::Config;
-use morningissue::crypto::{self, DeviceKeys};
+use morningissue::crypto;
 use morningissue::desktop::{self, DesktopDisplay, DesktopPower, DesktopRadio, ScriptClock, ScriptInput, Shared, Step};
 use morningissue::device::{Key, Refresh};
 use morningissue::light::FakeLight;
@@ -162,13 +162,14 @@ struct Setup {
     settings: Option<Value>,
     /// Turning Wi-Fi on joins no network.
     wifi_no_network: bool,
-    /// The relay, as `relay` in `config.json`. None gives one where nobody listens, so a
-    /// test never reaches the real default relay.
-    relay: Option<String>,
-    /// The pairing code has been shown once already: the state holds [`RELAY_SECRET`].
+    /// The server, as `server` in `config.json`. None gives one where nobody listens.
+    server: Option<String>,
+    /// No `server` in `config.json` at all: the address is typed in Settings, or missing.
+    no_config_server: bool,
+    /// The pairing code has been shown once already: the state holds [`SECRET`].
     paired: bool,
-    /// The relay has accepted this Kobo before (`relaySeen`).
-    relay_seen: bool,
+    /// The server has accepted this Kobo before (`serverSeen`).
+    server_seen: bool,
 }
 
 impl Default for Setup {
@@ -185,18 +186,20 @@ impl Default for Setup {
             sensor: true,
             settings: None,
             wifi_no_network: false,
-            relay: None,
+            server: None,
+            no_config_server: false,
             paired: false,
-            relay_seen: false,
+            server_seen: false,
         }
     }
 }
 
-/// The relay secret of a Kobo set up with [`Setup::paired`].
-const RELAY_SECRET: [u8; 32] = [7; 32];
+/// The secret of a Kobo set up with [`Setup::paired`].
+const SECRET: [u8; 32] = [7; 32];
 
-fn relay_keys() -> DeviceKeys {
-    DeviceKeys::from_secret(&RELAY_SECRET)
+/// What the phone does when it scans that Kobo's code.
+fn pair(server: &FakeServer) {
+    server.pair_secret(&SECRET, "test-device");
 }
 
 /// A home directory with editions, their pictures, saved articles and a sync twelve minutes ago.
@@ -205,7 +208,7 @@ fn setup(name: &str, now_ms: i64, s: &Setup) -> PathBuf {
     let _ = std::fs::remove_dir_all(&home);
     let store = Store::new(&home);
     store.ensure_dirs().unwrap();
-    let mut state = State { device_id: "test-device".into(), db_id: Some("db".into()), next_seq: 1, last_sync_at: Some(now_ms - 12 * 60_000), ..Default::default() };
+    let mut state = State { device_id: "test-device".into(), db_id: Some("db".into()), db_protocol: Some("server/1".into()), next_seq: 1, last_sync_at: Some(now_ms - 12 * 60_000), ..Default::default() };
     if let Some(e) = s.last_error {
         state.last_sync_at = None;
         state.last_error = Some(e.into());
@@ -220,8 +223,8 @@ fn setup(name: &str, now_ms: i64, s: &Setup) -> PathBuf {
         state.saved_version = Some("s1".into());
     }
     if s.paired {
-        state.relay_secret = Some(crypto::b64url(&RELAY_SECRET));
-        state.relay_seen = s.relay_seen;
+        state.secret = Some(crypto::b64url(&SECRET));
+        state.server_seen = s.server_seen;
     }
     store.save_state(&state).unwrap();
     if let Some(settings) = &s.settings {
@@ -328,7 +331,7 @@ fn run_with(dir: &str, size: &Size, s: &Setup, script: Vec<Step>, mut at_mark: i
         sync_on_start: s.sync_on_start,
         hit_probe: Some(Box::new(move |hits| *shared3.hits.borrow_mut() = hits.to_vec())),
     };
-    let mut app = App::new(Box::new(display), Box::new(input), Box::new(ScriptClock(shared.clone())), Store::new(&home), Config { relay: Some(s.relay.clone().unwrap_or_else(|| format!("http://{}", nobody()))), ..Config::default() }, &fonts_dir(), opts).unwrap();
+    let mut app = App::new(Box::new(display), Box::new(input), Box::new(ScriptClock(shared.clone())), Store::new(&home), Config { server: if s.no_config_server { None } else { Some(s.server.clone().unwrap_or_else(|| format!("http://{}", nobody()))) }, ..Config::default() }, &fonts_dir(), opts).unwrap();
     app.run().unwrap();
     contact_sheet(&out);
     let events: Vec<Value> = std::fs::read_to_string(home.join("data/events.jsonl")).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
@@ -479,14 +482,14 @@ fn screens_at_every_size() {
         // The pairing code drawn so a camera can read it.
         let store = Store::new(&o.home);
         let state = store.load_state().unwrap();
-        let secret = state.relay_secret.clone().expect("the secret is made for the code");
+        let secret = state.secret.clone().expect("the secret is made for the code");
         let shot = image::open(o.out.join("47-pair.png")).unwrap().to_luma8();
         let mut prepared = rqrr::PreparedImage::prepare(shot);
         let grids = prepared.detect_grids();
         assert_eq!(grids.len(), 1, "one code on the pairing screen");
         let (_, text) = grids[0].decode().unwrap();
         let w = size.w.min(size.h);
-        assert_eq!(text, morningissue::relay::pair_uri(&secret, &state.device_id, &Config::default().device_name(), w as u32));
+        assert_eq!(text, morningissue::server::pair_uri(&secret, &state.device_id, &Config::default().device_name(), w as u32));
         // The first frame and every change of screen flash; page turns mostly don't.
         assert_eq!(o.refreshes[0].0, Refresh::Full);
         assert!(o.refreshes.iter().filter(|r| r.0 == Refresh::Partial).count() >= 6, "{:?}", o.refreshes);
@@ -535,7 +538,7 @@ fn home_screens() {
             ("home-1", Setup { editions: 1, ..Default::default() }),
             ("home-2", Setup { editions: 2, ..Default::default() }),
             ("home-offline", Setup { online: false, sync_on_start: true, ..Default::default() }),
-            ("home-error", Setup { editions: 0, saved: false, last_error: Some("Can\u{2019}t reach the relay."), ..Default::default() }),
+            ("home-error", Setup { editions: 0, saved: false, last_error: Some("Can\u{2019}t reach the server."), ..Default::default() }),
         ] {
             let mut script = vec![mark(name)];
             if name == "home-offline" {
@@ -560,15 +563,15 @@ fn settings_in_pages() {
     assert!(o.out.join("03-reset-armed.png").exists());
 }
 
-/// Starting with Wi-Fi off never reaches for the relay, even paired.
+/// Starting with Wi-Fi off never reaches for the server, even paired.
 #[test]
 fn offline_never_tries_to_sync() {
-    let relay = FakeRelay::start();
-    relay.list(&relay_keys());
-    let setup = Setup { online: false, sync_on_start: true, relay: Some(relay.url()), paired: true, relay_seen: true, ..Default::default() };
+    let server = FakeServer::start();
+    pair(&server);
+    let setup = Setup { online: false, sync_on_start: true, server: Some(server.url()), paired: true, server_seen: true, ..Default::default() };
     let o = run("offline", &SIZES[2], &setup, vec![Step::Sleep(500), tap_on("OpenSettings"), mark("settings"), Step::Sleep(300)]);
     assert_eq!(o.syncs_started, 0);
-    assert!(relay.with(|s| s.requests.is_empty()));
+    assert!(server.with(|s| s.requests.is_empty()));
 }
 
 /// Real time for a sync thread to finish, in steps the reader can poll between.
@@ -576,15 +579,15 @@ fn sleep_steps(ms: u64) -> Vec<Step> {
     (0..ms / 100).map(|_| Step::Sleep(100)).collect()
 }
 
-/// Offline, Turn on Wi-Fi and sync turns Wi-Fi on, syncs through the relay, and turns it off
+/// Offline, Turn on Wi-Fi and sync turns Wi-Fi on, syncs with the server, and turns it off
 /// again; the home screen says so at each step.
 #[test]
 fn turn_on_wifi_sync_and_turn_off() {
-    let relay = FakeRelay::start();
-    relay.list(&relay_keys());
-    publish_editions(&relay);
+    let server = FakeServer::start();
+    pair(&server);
+    publish_editions(&server);
     let size = &SIZES[2];
-    let setup = Setup { online: false, sync_on_start: true, relay: Some(relay.url()), paired: true, relay_seen: true, ..Default::default() };
+    let setup = Setup { online: false, sync_on_start: true, server: Some(server.url()), paired: true, server_seen: true, ..Default::default() };
     let mut script = vec![Step::Sleep(300), mark("01-home-offline"), tap_on("OpenSettings"), mark("02-settings-offline"), tap_on("WifiAndSync"), mark("03-settings-turning-on")];
     script.push(Step::Wait(desktop::RADIO_ON_MS + 500));
     script.extend(sleep_steps(3000));
@@ -597,7 +600,7 @@ fn turn_on_wifi_sync_and_turn_off() {
     assert_eq!(o.radio, vec!["on", "off"]);
     assert!(!o.wifi_left_on);
     assert_eq!(o.syncs_started, 1);
-    assert_eq!(Store::new(&o.home).load_state().unwrap().edition_order, vec![121, 120, 119, 118]);
+    assert_eq!(Store::new(&o.home).load_state().unwrap().edition_order, vec![121, 120, 119]);
 }
 
 /// A Kobo that has never shown its pairing code can't sync: Turn on Wi-Fi and sync (offline)
@@ -613,7 +616,7 @@ fn never_paired_opens_the_pairing_code() {
         assert_eq!(o.syncs_started, 0, "{name}");
         assert_eq!(o.wifi_left_on, online, "{name}");
         // The code was made and shown.
-        assert!(Store::new(&o.home).load_state().unwrap().relay_secret.is_some(), "{name}");
+        assert!(Store::new(&o.home).load_state().unwrap().secret.is_some(), "{name}");
         let shot = image::open(o.out.join("02-pair.png")).unwrap().to_luma8();
         assert_eq!(rqrr::PreparedImage::prepare(shot).detect_grids().len(), 1, "{name}");
     }
@@ -643,24 +646,26 @@ fn nobody() -> String {
     std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().to_string()
 }
 
-/// A relay package holding editions 121 to 118, for this Kobo.
-fn publish_editions(relay: &FakeRelay) {
-    let editions: Vec<fakerelay::Edition> = [121, 120, 119, 118].into_iter().map(|id| (id, format!("v{id}"), edition(id))).collect();
-    relay.publish(&crypto::b64url(&[1; 16]), &fakerelay::package("db", &editions, None, &[], json!({})), &[&relay_keys()]);
+/// Editions 121 to 118 on the server (the manifest lists the newest three).
+fn publish_editions(server: &FakeServer) {
+    server.with(|s| s.editions = [121, 120, 119, 118].into_iter().map(|id| (id, format!("v{id}"), edition(id))).collect());
 }
 
-/// Turn on Wi-Fi and sync: a sync through the relay is a success, even with nothing new, and
-/// Wi-Fi goes off again after it.
+/// Turn on Wi-Fi and sync: a sync that gets through to the server is a success, even with
+/// nothing new, and Wi-Fi goes off again after it.
 #[test]
-fn turn_on_wifi_sync_through_the_relay_and_turn_off() {
+fn turn_on_wifi_sync_with_the_server_and_turn_off() {
     let size = &SIZES[2];
-    for (run_name, package) in [("wifi-relay-nothing-new", false), ("wifi-relay-package", true)] {
-        let relay = FakeRelay::start();
-        relay.list(&relay_keys());
-        if package {
-            publish_editions(&relay);
+    for (run_name, new) in [("wifi-server-nothing-new", false), ("wifi-server-new-edition", true)] {
+        let server = FakeServer::start();
+        pair(&server);
+        if new {
+            publish_editions(&server);
+        } else {
+            // What the Kobo has already.
+            server.with(|s| s.editions = [120, 119, 118].into_iter().map(|id| (id, format!("v{id}"), edition(id))).collect());
         }
-        let setup = Setup { online: false, relay: Some(relay.url()), paired: true, relay_seen: true, ..Default::default() };
+        let setup = Setup { online: false, server: Some(server.url()), paired: true, server_seen: true, ..Default::default() };
         let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
         script.extend(sleep_steps(3000));
         script.push(mark("01-settings-synced"));
@@ -673,20 +678,20 @@ fn turn_on_wifi_sync_through_the_relay_and_turn_off() {
         assert_eq!(o.syncs_started, 1, "{run_name}");
         let state = Store::new(&o.home).load_state().unwrap();
         assert!(state.last_error.is_none(), "{run_name}: {:?}", state.last_error);
-        let expected: Vec<i64> = if package { vec![121, 120, 119, 118] } else { vec![120, 119, 118] };
+        let expected: Vec<i64> = if new { vec![121, 120, 119] } else { vec![120, 119, 118] };
         assert_eq!(state.edition_order, expected, "{run_name}");
-        assert_eq!(relay.with(|s| s.fetched.len()), usize::from(package));
+        assert_eq!(server.count("GET /api/v1/editions/"), usize::from(new), "{run_name}");
     }
 }
 
-/// With the relay unreachable, or not yet told about this Kobo, Wi-Fi stays on and the sync is
-/// tried again, until Turn Wi-Fi off; once the phone lists this Kobo with the relay, the next
-/// try gets through and Wi-Fi goes off.
+/// With the server unreachable, or not yet told about this Kobo by the phone, Wi-Fi stays on
+/// and the sync is tried again, until Turn Wi-Fi off; once the phone has registered this
+/// Kobo, the next try gets through and Wi-Fi goes off.
 #[test]
-fn wifi_stays_on_while_the_relay_cannot_help_yet() {
+fn wifi_stays_on_while_the_server_cannot_help_yet() {
     let size = &SIZES[2];
     // Unreachable, until Turn Wi-Fi off.
-    let setup = Setup { online: false, relay: Some(format!("http://{}", nobody())), paired: true, relay_seen: true, ..Default::default() };
+    let setup = Setup { online: false, server: Some(format!("http://{}", nobody())), paired: true, server_seen: true, ..Default::default() };
     let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
     script.extend(sleep_steps(2500));
     script.push(mark("01-settings-unreachable"));
@@ -699,75 +704,76 @@ fn wifi_stays_on_while_the_relay_cannot_help_yet() {
     script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
     script.push(Step::Wait(10_000));
     script.push(mark("03-off"));
-    let o = run("wifi-relay-unreachable", size, &setup, script);
+    let o = run("wifi-server-unreachable", size, &setup, script);
     let tries = o.syncs_started;
     assert!(tries >= 2, "{tries}");
     assert_eq!(o.radio, vec!["on", "off"]);
     assert!(!o.wifi_left_on);
     let state = Store::new(&o.home).load_state().unwrap();
-    assert_eq!(state.last_error.as_deref(), Some("Can\u{2019}t reach the relay."));
+    assert_eq!(state.last_error.as_deref(), Some("Can\u{2019}t reach the server."));
 
-    // Waiting for the phone to list this Kobo, which it does part way through.
-    let relay = FakeRelay::start();
-    publish_editions(&relay);
-    let setup = Setup { online: false, relay: Some(relay.url()), paired: true, ..Default::default() };
+    // Waiting for the phone to register this Kobo, which it does part way through.
+    let server = FakeServer::start();
+    publish_editions(&server);
+    let setup = Setup { online: false, server: Some(server.url()), paired: true, ..Default::default() };
     let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
     script.extend(sleep_steps(2500));
     script.push(mark("01-settings-waiting"));
     script.push(Step::Key(Key::Home));
     script.push(mark("01-home-waiting"));
     script.push(tap_on("OpenSettings"));
-    script.push(mark("phone-lists"));
+    script.push(mark("phone-scans"));
     script.push(Step::Wait(6000));
     script.extend(sleep_steps(3000));
     script.push(mark("02-settings-synced"));
     script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
     script.push(mark("03-settings-off"));
-    let r = relay.clone();
-    let o = run_with("wifi-relay-waiting", size, &setup, script, move |name| {
-        if name == "phone-lists" {
-            r.list(&relay_keys());
+    let r = server.clone();
+    let o = run_with("wifi-server-waiting", size, &setup, script, move |name| {
+        if name == "phone-scans" {
+            pair(&r);
         }
     });
     assert!(o.syncs_started >= 2, "{}", o.syncs_started);
     assert_eq!(o.radio, vec!["on", "off"]);
     assert!(!o.wifi_left_on);
-    assert!(relay.with(|s| s.refused.iter().any(|c| c == "unknown")));
-    assert_eq!(Store::new(&o.home).load_state().unwrap().edition_order, vec![121, 120, 119, 118]);
+    assert!(server.with(|s| s.refused.iter().any(|c| c == "unknown")));
+    assert_eq!(Store::new(&o.home).load_state().unwrap().edition_order, vec![121, 120, 119]);
 }
 
-/// A Kobo listed before but not now (no Sync session open on the phone, or removed from it)
-/// waits on the user, which trying again doesn't help: Wi-Fi goes off after the first try and
-/// Settings says the phone isn't syncing, without calling the Kobo unpaired.
+/// A Kobo the server accepted before but not now was removed from the account; trying again
+/// doesn't help, so Wi-Fi goes off after the first try and Settings says to pair again.
 #[test]
-fn wifi_goes_off_when_the_phone_isnt_syncing() {
-    let relay = FakeRelay::start();
+fn wifi_goes_off_when_this_kobo_was_removed() {
+    let server = FakeServer::start();
     let size = &SIZES[2];
-    let setup = Setup { online: false, relay: Some(relay.url()), paired: true, relay_seen: true, ..Default::default() };
+    let setup = Setup { online: false, server: Some(server.url()), paired: true, server_seen: true, ..Default::default() };
     let mut script = vec![tap_on("OpenSettings"), tap_on("WifiAndSync"), Step::Wait(desktop::RADIO_ON_MS + 500)];
     script.extend(sleep_steps(2500));
     script.push(Step::Wait(desktop::RADIO_OFF_MS + 500));
     script.push(Step::Wait(10_000));
-    script.push(mark("01-settings-phone-not-syncing"));
-    let o = run("wifi-relay-not-syncing", size, &setup, script);
+    script.push(mark("01-settings-removed"));
+    script.push(tap_on("OpenPair"));
+    script.push(mark("02-pair-removed"));
+    let o = run("wifi-server-removed", size, &setup, script);
     assert_eq!(o.syncs_started, 1);
     assert_eq!(o.radio, vec!["on", "off"]);
     let state = Store::new(&o.home).load_state().unwrap();
-    assert!(state.relay_not_listed);
-    assert!(state.last_error.unwrap().starts_with("The phone isn\u{2019}t syncing"));
+    assert!(state.server_not_listed);
+    assert_eq!(state.last_error.as_deref(), Some("This Kobo was removed from your account; pair again."));
 }
 
-/// The pairing code asks the relay every few seconds, while it is shown and online, whether
-/// the phone has scanned it; once the phone lists this Kobo, the reader goes back to Settings
-/// and syncs through the relay.
+/// The pairing code asks the server every few seconds, while it is shown and online, whether
+/// it knows this Kobo; once the phone has registered it, the reader goes back to Settings and
+/// syncs. The phone needn't stay open.
 #[test]
 fn the_pairing_screen_notices_the_scan_and_syncs() {
-    let relay = FakeRelay::start();
-    publish_editions(&relay);
+    let server = FakeServer::start();
+    publish_editions(&server);
     let size = &SIZES[2];
-    let setup = Setup { relay: Some(relay.url()), paired: true, ..Default::default() };
+    let setup = Setup { server: Some(server.url()), paired: true, ..Default::default() };
     let mut script = vec![tap_on("OpenSettings"), tap_on("OpenPair"), mark("01-pair-waiting")];
-    // Asked once, and not listed yet.
+    // Asked once, and not known yet.
     script.push(Step::Wait(5500));
     script.extend(sleep_steps(1000));
     script.push(mark("02-pair-still-waiting"));
@@ -781,26 +787,25 @@ fn the_pairing_screen_notices_the_scan_and_syncs() {
     script.push(mark("04-pair-paired"));
     script.push(Step::Wait(12_000));
     script.extend(sleep_steps(500));
-    let r = relay.clone();
+    let r = server.clone();
     let o = run_with("pair-notices", size, &setup, script, move |name| {
         if name == "phone-scans" {
-            assert_eq!(r.count("GET /v1/package"), 1, "one question in the first 5.5 s");
-            r.list(&relay_keys());
+            assert_eq!(r.count("GET /api/v1/kobo/hello"), 1, "one question in the first 5.5 s");
+            pair(&r);
         }
     });
     assert_eq!(o.syncs_started, 1);
     let state = Store::new(&o.home).load_state().unwrap();
-    assert!(state.relay_seen && !state.relay_not_listed && state.last_error.is_none());
-    assert_eq!(state.edition_order, vec![121, 120, 119, 118]);
-    assert_eq!(relay.with(|s| s.fetched.len()), 1);
-    // Two questions, then the sync's own GET /v1/package and its one download.
-    assert_eq!(relay.with(|s| s.requests.iter().filter(|r| *r == "GET /v1/package").count()), 3);
-    assert_eq!(relay.count("GET /v1/packages/"), 1);
+    assert!(state.server_seen && !state.server_not_listed && state.last_error.is_none());
+    assert_eq!(state.edition_order, vec![121, 120, 119]);
+    // Two questions, then the sync.
+    assert_eq!(server.count("GET /api/v1/kobo/hello"), 2);
+    assert_eq!(server.count("GET /api/v1/sync/manifest"), 1);
 
     // Left at once, or shown offline, the code asks nothing.
-    let relay = FakeRelay::start();
+    let server = FakeServer::start();
     for (name, online) in [("pair-left", true), ("pair-offline", false)] {
-        let setup = Setup { online, relay: Some(relay.url()), paired: true, ..Default::default() };
+        let setup = Setup { online, server: Some(server.url()), paired: true, ..Default::default() };
         let mut script = vec![tap_on("OpenSettings"), tap_on("OpenPair")];
         if online {
             script.push(tap_on("Back"));
@@ -810,43 +815,85 @@ fn the_pairing_screen_notices_the_scan_and_syncs() {
         let o = run(name, size, &setup, script);
         assert_eq!(o.syncs_started, 0, "{name}");
     }
-    assert!(relay.with(|s| s.requests.is_empty()));
+    assert!(server.with(|s| s.requests.is_empty()));
 }
 
-/// While the relay takes its time, the home screen says it is syncing.
+/// With no server address in `config.json`, Settings offers the keyboard; Sync now opens it
+/// too. An address that can't be used is refused with the reason; a good one is kept in
+/// `data/settings.json` and synced with.
+#[test]
+fn the_server_address_is_typed_on_the_keyboard() {
+    for size in &SIZES {
+        let server = FakeServer::start();
+        pair(&server);
+        publish_editions(&server);
+        let setup = Setup { no_config_server: true, paired: true, server_seen: true, ..Default::default() };
+        let mut script = vec![tap_on("OpenSettings"), mark("01-settings-no-server"), tap_on("SyncNow"), mark("02-keyboard")];
+        // "x:0": a port that can't be.
+        for c in ['x', ':', '0'] {
+            script.push(tap_on(&format!("KeyChar({c:?})")));
+        }
+        script.push(tap_on("KeyOk"));
+        script.push(mark("03-keyboard-refused"));
+        for _ in 0..3 {
+            script.push(tap_on("KeyDelete"));
+        }
+        script.push(tap_on("KeyText(\"http://\")"));
+        for c in format!("127.0.0.1:{}", server.port).chars() {
+            script.push(tap_on(&format!("KeyChar({c:?})")));
+        }
+        script.push(mark("04-keyboard-typed"));
+        script.push(tap_on("KeyOk"));
+        script.push(mark("05-settings-typed"));
+        script.push(tap_on("SyncNow"));
+        script.extend(sleep_steps(2500));
+        script.push(mark("06-settings-synced"));
+        let o = run(&format!("{}/server-keyboard", size.name), size, &setup, script);
+        assert_eq!(o.syncs_started, 1, "{}", size.name);
+        let settings: Value = serde_json::from_slice(&std::fs::read(Store::new(&o.home).settings_path()).unwrap()).unwrap();
+        assert_eq!(settings["server"], format!("http://127.0.0.1:{}", server.port), "{}", size.name);
+        let state = Store::new(&o.home).load_state().unwrap();
+        assert_eq!(state.edition_order, vec![121, 120, 119], "{}", size.name);
+    }
+}
+
+/// While the server takes its time, the home screen says it is syncing.
 #[test]
 fn syncing_status_on_every_size() {
-    // A relay that takes the connection and never answers.
+    // A server that takes the connection and never answers.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = format!("http://{}", listener.local_addr().unwrap());
     for size in &SIZES {
-        let setup = Setup { sync_on_start: true, relay: Some(address.clone()), paired: true, relay_seen: true, ..Default::default() };
+        let setup = Setup { sync_on_start: true, server: Some(address.clone()), paired: true, server_seen: true, ..Default::default() };
         let o = run(&format!("{}/home-syncing", size.name), size, &setup, vec![Step::Sleep(300), mark("home-syncing"), tap_on("OpenSettings"), mark("settings-syncing")]);
         assert_eq!(o.syncs_started, 1);
     }
     drop(listener);
 }
 
-/// A sync started by the reader, through the relay: a new edition shows up on the home screen
-/// while the reader is open, pictures are taken at the screen's width, and the saved list
-/// follows the phone.
+/// A sync started by the reader: a new edition shows up on the home screen while the reader
+/// is open, pictures are taken at the screen's width, and the saved list follows the server.
 #[test]
 fn what_a_sync_brings_shows_as_it_arrives() {
-    let relay = FakeRelay::start();
-    relay.list(&relay_keys());
+    let server = FakeServer::start();
+    pair(&server);
+    publish_editions(&server);
     let mut saved = saved_list();
-    // The phone has dropped the summary-only article and saved nothing new.
+    // The summary-only article was unsaved elsewhere, and nothing new saved.
     saved["order"] = json!([9038, 9001]);
     saved["articles"].as_object_mut().unwrap().remove("9006");
     saved["version"] = "s2".into();
-    let editions: Vec<fakerelay::Edition> = [121, 120, 119, 118].into_iter().map(|id| (id, format!("v{id}"), edition(id))).collect();
-    let mut pics: Vec<fakerelay::Picture> = pictures().into_iter().map(|(url, bytes)| (url.to_string(), 1264, bytes, "image/jpeg".to_string())).collect();
-    let harbour = encode(photo(1400, 900, 3), image::ImageFormat::Jpeg);
-    pics.push(("https://example.org/img/harbour.jpg".into(), 1264, harbour.clone(), "image/jpeg".into()));
-    pics.push(("https://example.org/img/harbour-plan.png".into(), 1264, encode(plan(1200, 800), image::ImageFormat::Png), "image/png".into()));
-    relay.publish(&crypto::b64url(&[2; 16]), &fakerelay::package("db", &editions, Some(("s2", saved)), &pics, json!({})), &[&relay_keys()]);
+    let harbour = encode(photo(1264, 813, 3), image::ImageFormat::Jpeg);
+    server.with(|s| {
+        s.saved = Some(("s2".into(), saved));
+        for (url, bytes) in pictures() {
+            s.pictures.insert(url.into(), (bytes, "image/jpeg".into(), 1264, 800));
+        }
+        s.pictures.insert("https://example.org/img/harbour.jpg".into(), (harbour.clone(), "image/jpeg".into(), 1264, 813));
+        s.pictures.insert("https://example.org/img/harbour-plan.png".into(), (encode(plan(1200, 800), image::ImageFormat::Png), "image/png".into(), 1200, 800));
+    });
     let size = &SIZES[2];
-    let setup = Setup { sync_on_start: true, relay: Some(relay.url()), paired: true, relay_seen: true, ..Default::default() };
+    let setup = Setup { sync_on_start: true, server: Some(server.url()), paired: true, server_seen: true, ..Default::default() };
     let mut script = vec![mark("01-before")];
     // Wait for the new edition, then look at it with its pictures.
     for _ in 0..15 {
@@ -871,10 +918,10 @@ fn what_a_sync_brings_shows_as_it_arrives() {
     assert_eq!(o.syncs_started, 1);
     let store = Store::new(&o.home);
     let state = store.load_state().unwrap();
-    assert_eq!(state.edition_order, vec![121, 120, 119, 118]);
+    assert_eq!(state.edition_order, vec![121, 120, 119]);
     assert_eq!(store.load_saved().order, vec![9038, 9001]);
     assert_eq!(store.read_image("https://example.org/img/harbour.jpg"), Some(harbour));
-    assert_eq!(relay.with(|s| s.fetched.len()), 1);
+    assert!(server.with(|s| s.image_requests.iter().all(|r| r.0 == 1264)));
 }
 
 /// The panel picture in `dir/panel/<name>.png` (as the panel physically shows it).

@@ -1,6 +1,6 @@
-//! The JSON documents in a relay package (`docs/relay-sync.md`, formats in
-//! `docs/kobo-sync.md`). Every reader here ignores fields it does not know and fills in fields
-//! that are missing, so a newer phone does not break an older Kobo.
+//! The JSON documents the server sends (formats in `docs/kobo-sync.md`). Every reader here
+//! ignores fields it does not know (the server adds some for the phone) and fills in fields
+//! that are missing, so a newer server does not break an older Kobo.
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -12,11 +12,11 @@ pub struct Manifest {
     pub v: i64,
     pub db_id: String,
     pub editions: Vec<ManifestEdition>,
-    /// Left out by a phone that has no saved shelf to offer.
+    /// Left out when there is no saved shelf to offer.
     pub saved: Option<SavedInfo>,
-    /// A relay package's manifest: `"relay/1"`.
+    /// `"server/1"`.
     pub protocol: Option<String>,
-    /// A relay package's manifest: the `ackedSeq` of every paired relay device, by `deviceId`.
+    /// The highest event `seq` the server has merged from this device, by `deviceId`.
     pub acked: BTreeMap<String, i64>,
 }
 
