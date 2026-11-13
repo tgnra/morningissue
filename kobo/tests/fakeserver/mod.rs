@@ -21,6 +21,8 @@ pub struct ServerState {
     /// Its `deviceId`, from the pairing code.
     pub device_id: String,
     pub db_id: String,
+    /// Whether `GET /kobo/hello` names `db_id`; an older server left it out.
+    pub hello_db_id: bool,
     /// Released editions, newest first: (id, version, bundle).
     pub editions: Vec<(i64, String, Value)>,
     /// The saved shelf: (version, body). None leaves `saved` out of the manifest.
@@ -86,6 +88,7 @@ impl FakeServer {
             token: None,
             device_id: String::new(),
             db_id: "db".into(),
+            hello_db_id: true,
             editions: Vec::new(),
             saved: None,
             pictures: BTreeMap::new(),
@@ -250,7 +253,13 @@ fn handle(stream: Box<dyn Conn>, state: &Arc<Mutex<ServerState>>, port: u16) {
     }
 
     match (method.as_str(), path) {
-        ("GET", "/api/v1/kobo/hello") => json(conn, 200, skew, json!({"username": "tania", "server": format!("http://127.0.0.1:{port}")})),
+        ("GET", "/api/v1/kobo/hello") => {
+            let mut v = json!({"username": "tania", "server": format!("http://127.0.0.1:{port}")});
+            if s.hello_db_id {
+                v["dbId"] = json!(s.db_id);
+            }
+            json(conn, 200, skew, v);
+        }
         ("POST", "/api/v1/sync/events") => {
             let v: Value = serde_json::from_slice(&body).unwrap();
             let events = v["events"].as_array().cloned().unwrap_or_default();

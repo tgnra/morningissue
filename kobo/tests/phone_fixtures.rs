@@ -1,6 +1,6 @@
-//! The phone's golden fixtures (`docs/kobo-sync-fixtures/`, written by the app's
+//! The golden fixtures (`docs/kobo-sync-fixtures/`, written by the server's
 //! `BundleExportTest`) parse here without losing anything, so the two sides agree on the
-//! formats a relay package carries: the manifest, edition bundles and the saved shelf.
+//! formats a sync carries: the manifest, edition bundles and the saved shelf.
 
 use morningissue::model::{Block, Bundle, Manifest, SavedList};
 use serde_json::Value;
@@ -15,11 +15,11 @@ fn fixture(name: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// The phone's saved shelf parses whole: every listed article is there with all its
-/// blocks, and one whose text the phone could not get is marked summary-only.
+/// The saved shelf parses whole: every listed article is there with all its
+/// blocks, and one whose text the server could not get is marked summary-only.
 #[test]
 fn phone_saved_list_parses() {
-    // The phone side adds this fixture; until it is merged there is nothing to check.
+    // Without the fixture there is nothing to check.
     if !fixture_path("saved.json").exists() {
         eprintln!("no saved.json fixture yet");
         return;
@@ -47,7 +47,10 @@ fn phone_manifest_parses() {
     let manifest: Manifest = serde_json::from_str(&fixture("manifest.json")).unwrap();
     assert!(!manifest.db_id.is_empty());
     assert!(!manifest.editions.is_empty());
-    assert!(manifest.editions.iter().all(|e| e.id > 0 && !e.version.is_empty()));
+    assert!(manifest.editions.iter().all(|e| e.id > 0 && e.version.len() == 64));
+    assert_eq!(manifest.protocol.as_deref(), Some("server/1"));
+    assert!(!manifest.acked.is_empty() && manifest.acked.values().all(|&a| a >= 0));
+    assert!(manifest.saved.is_some_and(|s| s.version.len() == 64));
 }
 
 #[test]
@@ -64,7 +67,7 @@ fn phone_bundle_parses_every_block() {
     let mut kinds = std::collections::BTreeSet::new();
     for (id, article) in &bundle.articles {
         let stored = value["articles"][id]["blocks"].as_array().unwrap();
-        assert_eq!(article.blocks.len(), stored.len(), "article {id} dropped a block the phone sent");
+        assert_eq!(article.blocks.len(), stored.len(), "article {id} dropped a block the server sent");
         for block in &article.blocks {
             kinds.insert(match block {
                 Block::Paragraph(_) => "p",

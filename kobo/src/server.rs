@@ -3,6 +3,9 @@
 //! the secret in this Kobo's pairing code ([`crate::crypto::token`]).
 //!
 //! 1. No secret: [`SyncError::NotPaired`]. No server address: [`SyncError::NoServer`].
+//!    Then `GET /api/v1/kobo/hello`. A `dbId` in its answer other than the stored one wipes
+//!    everything first, so events recorded against a database the server no longer has are
+//!    never uploaded.
 //! 2. Upload the events above the last `acked`, oldest first, 500 per
 //!    `POST /api/v1/sync/events`; keep the `acked` each answer gives, and delete the events at
 //!    or below it from `events.jsonl`.
@@ -103,6 +106,14 @@ fn unexpected(what: &str, r: &Response) -> SyncError {
         s.push_str(&format!(" ({})", e.message));
     }
     SyncError::ServerProtocol(s)
+}
+
+/// `GET /kobo/hello`'s answer; only the `dbId` matters to a sync, and an older server
+/// leaves it out.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct Hello {
+    db_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -223,6 +234,7 @@ impl Session<'_> {
             self.state.db_id = None;
             self.save()?;
         }
+        self.hello()?;
         self.upload()?;
         let manifest = self.manifest()?;
         self.tell(Progress::Connected { address: self.ep.url() });
@@ -257,6 +269,19 @@ impl Session<'_> {
         self.save()?;
         self.store.collect_garbage(&keep)?;
         Ok(())
+    }
+
+    /// Step 1: asks the server which database it holds before anything goes up.
+    fn hello(&mut self) -> Result<(), SyncError> {
+        let r = self.send("GET", "/kobo/hello", None, None, self.opts.request_timeout, None)?;
+        if r.status != 200 {
+            return Err(unexpected("hello", &r));
+        }
+        let h: Hello = serde_json::from_slice(&r.body).map_err(|e| SyncError::ServerProtocol(format!("hello: {e}")))?;
+        match h.db_id.filter(|d| !d.is_empty()) {
+            Some(db_id) => self.check_db_id(&db_id),
+            None => Ok(()),
+        }
     }
 
     /// Step 2: every event above `acked`, oldest first, [`BATCH`] at a time.

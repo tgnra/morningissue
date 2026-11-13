@@ -798,8 +798,8 @@ fn the_pairing_screen_notices_the_scan_and_syncs() {
     let state = Store::new(&o.home).load_state().unwrap();
     assert!(state.server_seen && !state.server_not_listed && state.last_error.is_none());
     assert_eq!(state.edition_order, vec![121, 120, 119]);
-    // Two questions, then the sync.
-    assert_eq!(server.count("GET /api/v1/kobo/hello"), 2);
+    // Two questions, then the sync, which asks once more before anything goes up.
+    assert_eq!(server.count("GET /api/v1/kobo/hello"), 3);
     assert_eq!(server.count("GET /api/v1/sync/manifest"), 1);
 
     // Left at once, or shown offline, the code asks nothing.

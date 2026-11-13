@@ -287,16 +287,18 @@ cd kobo && cargo test
     most twice, then giving up; an event recorded during the sync going before the next
     bundle;
   - picture zips asked for 100 URLs at a time;
-  - a `dbId` change wiping everything, and what a relay version stored wiped before the
-    first upload;
-  - a removed Kobo told to pair again;
+  - a `dbId` change wiping everything: one named by `GET /kobo/hello` before any event is
+    uploaded, one only in the manifest after; the same `dbId` keeping the events; and what
+    a relay version stored wiped before the first upload;
+  - a removed Kobo told to pair again, uploading nothing;
   - no secret, no address or a bad address asking nothing;
   - a wrong clock put right from the `Date` header;
   - an `https://` server over TLS, and a certificate not yet valid blamed on the clock;
   - addresses, the v=2 pairing code, and the token vector.
 
-- `tests/phone_fixtures.rs` parses the phone's golden fixtures (`docs/kobo-sync-fixtures/`):
-  the manifest, an edition bundle with every block type, and the saved shelf.
+- `tests/phone_fixtures.rs` parses the server's golden fixtures (`docs/kobo-sync-fixtures/`):
+  the manifest (protocol `server/1`, `acked`), an edition bundle with every block type, and
+  the saved shelf.
 - `tests/screens.rs` drives the whole reader through the desktop backend with scripted taps,
   swipes and keys, at:
   - 600×800 at 167 dpi;

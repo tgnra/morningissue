@@ -66,17 +66,18 @@ Anything else unexpected (403, 404 for a listed edition, 413, 503 `busy`, a body
 
 ### Pairing wait
 
-While the pairing code is shown and the Kobo is online, it asks `GET /kobo/hello` every 5 seconds. `401 unknown` means not yet; `200 {"username", "server"}` means the phone has registered it, and the reader goes back to Settings and syncs. Nothing is uploaded or installed by the question. The phone needn't stay open, then or later.
+While the pairing code is shown and the Kobo is online, it asks `GET /kobo/hello` every 5 seconds. `401 unknown` means not yet; `200 {"username", "server", "dbId"}` means the phone has registered it, and the reader goes back to Settings and syncs. Nothing is uploaded or installed by the question. The phone needn't stay open, then or later.
 
 ### A sync
 
 1. No secret: "Not paired yet". No server address: the reader opens the address keyboard; `morningissue sync` says there is none.
-2. Upload events: `POST /sync/events` `{"events": [...]}` with every event above the stored `acked`, at most 500 per request. Each answer is `200 {"acked": n}`; store `n` and delete events at or below it from `events.jsonl`.
-3. `GET /sync/manifest?editions=3`, gated. Check `protocol` is `server/1`, and `dbId` (on a change, wipe and start over: "Manifest" below). Store `acked` for this device and drop events at or below it.
-4. Each edition whose `version` differs from the stored one: `GET /editions/{id}/bundle`, gated. Save each as it comes, so the reader can show it straight away.
-5. If `saved.version` differs from the stored one: `GET /saved`, gated.
-6. Pictures not stored yet: `POST /kobo/images` `{"width": <screen short side>, "urls": [...]}`, gated, at most 100 URLs per request ("Pictures" below).
-7. Delete local editions that aren't in the manifest, saved articles that aren't in the list, and images nothing refers to. Record the sync's time and result.
+2. `GET /kobo/hello`, before anything is uploaded. If its `dbId` differs from the stored one, wipe first ("Manifest" below), so events recorded against a database the server no longer has (reset, or restored from another backup) are never uploaded; then store the new `dbId` and go on. A server that leaves `dbId` out of hello changes nothing here, and the manifest's `dbId` decides. Its errors are handled as any request's ("Errors" above): `401 unknown` is "Waiting for the phone" or "removed", and nothing is uploaded.
+3. Upload events: `POST /sync/events` `{"events": [...]}` with every event above the stored `acked`, at most 500 per request. Each answer is `200 {"acked": n}`; store `n` and delete events at or below it from `events.jsonl`.
+4. `GET /sync/manifest?editions=3`, gated. Check `protocol` is `server/1`, and `dbId` again (on a change, wipe and start over: "Manifest" below). Store `acked` for this device and drop events at or below it.
+5. Each edition whose `version` differs from the stored one: `GET /editions/{id}/bundle`, gated. Save each as it comes, so the reader can show it straight away.
+6. If `saved.version` differs from the stored one: `GET /saved`, gated.
+7. Pictures not stored yet: `POST /kobo/images` `{"width": <screen short side>, "urls": [...]}`, gated, at most 100 URLs per request ("Pictures" below).
+8. Delete local editions that aren't in the manifest, saved articles that aren't in the list, and images nothing refers to. Record the sync's time and result.
 
 Requests time out after 30 s each (120 s for a picture zip), and a whole sync after 10 minutes.
 
@@ -105,7 +106,7 @@ Requests time out after 30 s each (120 s for a picture zip), and a whole sync af
 
 `acked` holds, for this Kobo's `deviceId`, the highest event `seq` from it that the server has merged, or 0. (v1's manifest had it as `ackedSeq`.)
 
-`dbId` is a random ID the server keeps per account. If it differs from the one the Kobo saved, the Kobo drops all its editions, unsent events, Likes and images, then starts over: events naming the old database's IDs would otherwise attach to the wrong articles.
+`dbId` is a random ID the server keeps per account; `GET /kobo/hello` answers it too, and a sync checks it there first, before uploading. If it differs from the one the Kobo saved, the Kobo drops all its editions, unsent events, Likes and images, then starts over: events naming the old database's IDs would otherwise attach to the wrong articles.
 
 ## Edition bundle
 

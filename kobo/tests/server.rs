@@ -156,7 +156,7 @@ fn a_sync_uploads_events_installs_editions_and_pictures_and_follows_versions() {
     let requests = server.with(|s| s.requests.clone());
     assert_eq!(
         requests,
-        vec!["POST /api/v1/sync/events", "GET /api/v1/sync/manifest?editions=3", "GET /api/v1/editions/2/bundle", "GET /api/v1/editions/1/bundle", "GET /api/v1/saved", "POST /api/v1/kobo/images"]
+        vec!["GET /api/v1/kobo/hello", "POST /api/v1/sync/events", "GET /api/v1/sync/manifest?editions=3", "GET /api/v1/editions/2/bundle", "GET /api/v1/editions/1/bundle", "GET /api/v1/saved", "POST /api/v1/kobo/images"]
     );
     assert!(server.with(|s| s.through.iter().all(|(_, t)| *t == Some(0))));
     // Pictures asked for at this Kobo's width, newest edition first in reading order.
@@ -169,12 +169,12 @@ fn a_sync_uploads_events_installs_editions_and_pictures_and_follows_versions() {
     assert!(store.load_bundle(2).is_some() && store.load_bundle(1).is_some());
     assert_eq!(std::fs::read_dir(store.incoming_dir()).unwrap().count(), 0, "nothing left of the zip");
 
-    // Nothing new: the manifest only (the missing picture is asked for again).
+    // Nothing new: hello and the manifest only (the missing picture is asked for again).
     let before = server.with(|s| s.requests.len());
     let r = sync(&store, &opts(&server.url())).unwrap();
     assert_eq!((r.events_sent, r.editions_fetched.len(), r.saved_fetched), (0, 0, false));
     let after: Vec<String> = server.with(|s| s.requests[before..].to_vec());
-    assert_eq!(after, vec!["GET /api/v1/sync/manifest?editions=3", "POST /api/v1/kobo/images"]);
+    assert_eq!(after, vec!["GET /api/v1/kobo/hello", "GET /api/v1/sync/manifest?editions=3", "POST /api/v1/kobo/images"]);
 
     // One edition changes, the saved shelf changes, and edition 1 leaves for a new one.
     server.with(|s| {
@@ -210,7 +210,7 @@ fn the_gate_sends_the_events_again_then_gives_up() {
     server.with(|s| s.ack_caps.push_back(2));
     sync(&store, &opts(&server.url())).unwrap();
     let requests = server.with(|s| s.requests.clone());
-    assert_eq!(requests[..4], ["POST /api/v1/sync/events", "GET /api/v1/sync/manifest?editions=3", "POST /api/v1/sync/events", "GET /api/v1/sync/manifest?editions=3"]);
+    assert_eq!(requests[..5], ["GET /api/v1/kobo/hello", "POST /api/v1/sync/events", "GET /api/v1/sync/manifest?editions=3", "POST /api/v1/sync/events", "GET /api/v1/sync/manifest?editions=3"]);
     assert_eq!(server.with(|s| s.through[..2].iter().map(|t| t.1).collect::<Vec<_>>()), vec![Some(5), Some(0)]);
     assert_eq!(server.with(|s| s.uploads.clone()), vec![5, 3]);
     assert_eq!(server_seqs(&server), vec![1, 2, 3, 4, 5]);
@@ -249,7 +249,7 @@ fn an_event_recorded_during_the_sync_goes_before_the_next_bundle() {
     let r = sync(&store, &o).unwrap();
     assert_eq!(r.editions_fetched, vec![2, 1]);
     let requests = server.with(|s| s.requests.clone());
-    assert_eq!(requests[..4], ["GET /api/v1/sync/manifest?editions=3", "GET /api/v1/editions/2/bundle", "POST /api/v1/sync/events", "GET /api/v1/editions/2/bundle"]);
+    assert_eq!(requests[..5], ["GET /api/v1/kobo/hello", "GET /api/v1/sync/manifest?editions=3", "GET /api/v1/editions/2/bundle", "POST /api/v1/sync/events", "GET /api/v1/editions/2/bundle"]);
     assert_eq!(server_seqs(&server), vec![7]);
     assert!(seqs(&store).is_empty());
 }
@@ -297,6 +297,75 @@ fn a_new_server_database_wipes_everything() {
     assert_eq!(r.editions_fetched, vec![2, 1], "fetched again after the wipe");
     assert_eq!(store.load_state().unwrap().db_id.as_deref(), Some("db-B"));
     assert!(store.load_liked().is_empty());
+}
+
+/// Events recorded against a database the server no longer has (it was reset or restored
+/// from a backup) would name other articles there: the `dbId` in hello wipes them before
+/// anything is uploaded.
+#[test]
+fn a_new_database_in_hello_wipes_the_events_before_they_go() {
+    let server = FakeServer::start();
+    publish(&server);
+    let store = paired("hello-wipe", &server);
+    sync(&store, &opts(&server.url())).unwrap();
+    for s in 1..=3 {
+        store.append_event(&event(s)).unwrap();
+    }
+    std::fs::write(store.liked_path(), b"[100]").unwrap();
+    // The server starts over with a new database.
+    server.with(|s| s.db_id = "db-B".into());
+    let before = server.with(|s| s.requests.len());
+    let r = sync(&store, &opts(&server.url())).unwrap();
+    assert!(r.wiped);
+    assert_eq!(r.events_sent, 0);
+    assert_eq!(server.count("POST /api/v1/sync/events"), 0);
+    assert!(server_seqs(&server).is_empty(), "no event reached the new database");
+    assert!(seqs(&store).is_empty());
+    assert!(store.load_liked().is_empty());
+    let after: Vec<String> = server.with(|s| s.requests[before..before + 2].to_vec());
+    assert_eq!(after, vec!["GET /api/v1/kobo/hello", "GET /api/v1/sync/manifest?editions=3"]);
+    assert_eq!(r.editions_fetched, vec![2, 1], "fetched again after the wipe");
+    let state = store.load_state().unwrap();
+    assert_eq!(state.db_id.as_deref(), Some("db-B"));
+    assert!(state.next_seq >= 4, "seqs only go up");
+}
+
+/// The same `dbId` in hello: the events go as before, and nothing is wiped.
+#[test]
+fn the_same_database_in_hello_keeps_the_events() {
+    let server = FakeServer::start();
+    publish(&server);
+    let store = paired("hello-same", &server);
+    sync(&store, &opts(&server.url())).unwrap();
+    for s in 1..=3 {
+        store.append_event(&event(s)).unwrap();
+    }
+    let before = server.with(|s| s.requests.len());
+    let r = sync(&store, &opts(&server.url())).unwrap();
+    assert!(!r.wiped);
+    assert_eq!(r.events_sent, 3);
+    assert_eq!(server_seqs(&server), vec![1, 2, 3]);
+    let after: Vec<String> = server.with(|s| s.requests[before..before + 3].to_vec());
+    assert_eq!(after, vec!["GET /api/v1/kobo/hello", "POST /api/v1/sync/events", "GET /api/v1/sync/manifest?editions=3"]);
+    assert!(store.load_bundle(2).is_some());
+}
+
+/// A server whose hello names no `dbId`: the events go, and the manifest's `dbId` decides
+/// on the wipe as before.
+#[test]
+fn a_hello_without_a_database_leaves_the_check_to_the_manifest() {
+    let server = FakeServer::start();
+    publish(&server);
+    server.with(|s| s.hello_db_id = false);
+    let store = paired("hello-no-db", &server);
+    sync(&store, &opts(&server.url())).unwrap();
+    assert_eq!(store.load_state().unwrap().db_id.as_deref(), Some("db"));
+    store.append_event(&event(1)).unwrap();
+    server.with(|s| s.db_id = "db-B".into());
+    let r = sync(&store, &opts(&server.url())).unwrap();
+    assert_eq!(r.events_sent, 1);
+    assert!(r.wiped);
+    assert_eq!(store.load_state().unwrap().db_id.as_deref(), Some("db-B"));
 }
 
 /// A Kobo upgraded from relay sync keeps its secret (`relaySecret`) and acked (`relayAcked`),
@@ -348,6 +417,7 @@ fn a_removed_kobo_is_told_to_pair_again() {
     let store = paired("removed", &server);
     sync(&store, &opts(&server.url())).unwrap();
     server.remove();
+    store.append_event(&event(1)).unwrap();
     match sync(&store, &opts(&server.url())) {
         Err(e @ SyncError::NotListed { waiting: false }) => assert_eq!(e.to_string(), "This Kobo was removed from your account; pair again."),
         other => panic!("{other:?}"),
@@ -355,6 +425,9 @@ fn a_removed_kobo_is_told_to_pair_again() {
     let state = store.load_state().unwrap();
     assert!(state.server_seen && state.server_not_listed);
     assert_eq!(state.last_error.as_deref(), Some("This Kobo was removed from your account; pair again."));
+    // Hello was refused, so nothing went up; the event waits.
+    assert_eq!(server.count("POST /api/v1/sync/events"), 0);
+    assert_eq!(seqs(&store), vec![1]);
     // What it had stays readable.
     assert_eq!(state.edition_order, vec![2, 1]);
     assert!(!hello(&store, &opts(&server.url())).unwrap());
