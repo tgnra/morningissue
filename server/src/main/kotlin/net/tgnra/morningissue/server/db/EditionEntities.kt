@@ -1,15 +1,21 @@
 package net.tgnra.morningissue.server.db
 
 import androidx.room3.ColumnInfo
+import androidx.room3.Embedded
 import androidx.room3.Entity
 import androidx.room3.ForeignKey
 import androidx.room3.Index
 import androidx.room3.PrimaryKey
 import java.time.Instant
 import java.time.LocalDate
+import net.tgnra.morningissue.model.CadenceTier
+import net.tgnra.morningissue.model.ContentSource
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
+import net.tgnra.morningissue.model.FeedStatus
+import net.tgnra.morningissue.model.HealthFlag
 import net.tgnra.morningissue.model.ItemKind
+import net.tgnra.morningissue.model.SliderStep
 
 // Per-user reading state and editions (owned by W-B). Columns carried over from the app keep its
 // names; `user_id` and `change_seq` are new.
@@ -115,4 +121,131 @@ data class EditionPageViewEntity(
     /** Total time on screen, in milliseconds. */
     val msVisible: Long,
     val firstSeenAt: Instant,
+)
+
+// Read shapes of the W-B DAOs. They are named apart from W-A's rows (`User*`, `Learning*`),
+// since both workstreams add classes to this package.
+
+/**
+ * An article as one user sees it: its feed's name for them, whether they subscribe, when it
+ * was first seen by them ([seenAt] = `MAX(firstSeenAt, subscription.added_at)`) and their
+ * engagement. Engagement columns are null when the user has no row for the article.
+ */
+data class UserArticleRow(
+    @Embedded val article: ArticleEntity,
+    val feedTitle: String,
+    val feedIconUrl: String?,
+    /** Null when the user has no subscription to the post's feed at all. */
+    val feedStatus: FeedStatus?,
+    val seenAt: Instant,
+    val openedAt: Instant?,
+    val readFraction: Float?,
+    val readAt: Instant?,
+    val savedAt: Instant?,
+    val likedAt: Instant?,
+    val editionsRunUnopened: Int?,
+    val leadCount: Int?,
+)
+
+/** An edition item with its article, as the user sees it. */
+data class UserItemRow(
+    @Embedded(prefix = "item_") val item: EditionItemEntity,
+    @Embedded val row: UserArticleRow,
+)
+
+/** An edition with what its newsstand cover shows. */
+data class UserCoverRow(
+    @Embedded val edition: EditionEntity,
+    val leadTitle: String?,
+    val leadImageUrl: String?,
+    val leadFeedTitle: String?,
+    val storyCount: Int,
+)
+
+/** One printed (non-index) story in one of the user's editions, with what they did; input to affinity. */
+data class UserRunRow(
+    val feedId: Long,
+    val articleId: Long,
+    val editionId: Long,
+    val ranAt: Instant,
+    val openedAt: Instant?,
+    val readAt: Instant?,
+    val savedAt: Instant?,
+    val likedAt: Instant?,
+    /** The story's page was on screen for `pageSeenMinMillis` in all, or the edition predates page views. */
+    val seen: Boolean = true,
+)
+
+/** An article the user engaged with, printed or not; input to affinity. */
+data class UserEngagedRow(
+    val feedId: Long,
+    val articleId: Long,
+    val openedAt: Instant?,
+    val readAt: Instant?,
+    val savedAt: Instant?,
+    val likedAt: Instant?,
+)
+
+/** A subscribed feed as the publisher and the learner read it. */
+data class UserFeedRow(
+    val feedId: Long,
+    val title: String,
+    val tier: CadenceTier,
+    val medianIntervalHrs: Double?,
+    val affinity: Double,
+    val sliderStep: SliderStep,
+    val muteUntil: Instant?,
+    val addedAt: Instant,
+)
+
+/** A tag on one of the user's subscriptions. */
+data class UserTagLinkRow(
+    val feedId: Long,
+    val tagId: Long,
+    val name: String,
+    val affinity: Double,
+)
+
+/** One of the user's tags. */
+data class UserTagRow(
+    val id: Long,
+    val name: String,
+    val affinity: Double,
+)
+
+/** An edition's reading state, for the engagement delta. */
+data class UserEditionStateRow(
+    val id: Long,
+    val openedAt: Instant?,
+    val finishedAt: Instant?,
+)
+
+/** A stored body; see `EditionArticleDao.contents`. */
+data class StoredBodyRow(
+    val articleId: Long,
+    val blocksJson: String,
+    val source: ContentSource,
+)
+
+/** A feed flag as the desk notice counts it. */
+data class UserFlagRow(
+    val flag: HealthFlag?,
+    val dismissedUntil: Instant?,
+)
+
+/** One row of `LearningDao`'s signal reads, before its categories are attached. */
+data class LearningSignalRow(
+    val articleId: Long,
+    val feedId: Long,
+    val feedWordCount: Int,
+    @Embedded(prefix = "t_") val traits: ArticleTraitsEntity?,
+    val vector: ByteArray?,
+)
+
+/** What the manifest's bundle cache is keyed by, besides the edition: see `EditionDao.bundleKey`. */
+data class BundleKeyRow(
+    val editionSeq: Long,
+    val engagementSeq: Long,
+    val contentAt: Long,
+    val contentCount: Int,
 )

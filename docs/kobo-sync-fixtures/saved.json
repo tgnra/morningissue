@@ -1,5 +1,5 @@
 {
-    "version": "a9ea57399339f3af35ff22eaabb5aa65",
+    "version": "f843b6e6b9849176d0a7254ae06104f761077134c1e1a9e098868a3957832598",
     "order": [
         5,
         2
@@ -41,7 +41,12 @@
                 "readAt": null,
                 "savedAt": "2026-11-11T06:50:00Z",
                 "likedAt": null
-            }
+            },
+            "feedId": 1,
+            "guid": "shed",
+            "firstSeenAt": "2026-11-09T01:43:20Z",
+            "feedWordCount": 0,
+            "contentSource": "FEED"
         },
         "2": {
             "feedTitle": "The Kitchen Garden",
@@ -59,7 +64,12 @@
                 "readAt": null,
                 "savedAt": "2026-11-11T06:45:00Z",
                 "likedAt": null
-            }
+            },
+            "feedId": 1,
+            "guid": "leeks",
+            "firstSeenAt": "2026-11-11T05:30:00Z",
+            "feedWordCount": 0,
+            "contentSource": null
         }
     }
 }

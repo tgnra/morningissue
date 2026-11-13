@@ -1141,3 +1141,28 @@ W-C (HTTP, auth, config and packaging) landed on `ws/server-http`. Where it diff
 
 **The query guard.**
 - **Stricter than 2.3 asks.** `UserScopedQueryTest` requires `user_id = :userId`, or an insert of the user's own row, rather than any mention of `user_id`. It also checks `edition_item` and `edition_page_view`, which may instead be keyed by `:editionId`. It covers every `*Dao.kt` in `db/`, so other workstreams' DAOs are held to it.
+
+## Phase 2 deviations (W-B)
+
+Editions, learning, sync and import. Each point differs from, or settles, something the text above leaves open.
+
+- **Settings `customized`.** A PATCH sets `customized` only when it carries `editionLength`, `onboardingDone` or `extraOfferDismissedAt`, and so does `PUT /settings/release`. A PATCH carrying only `timeZone` or `followDeviceTimeZone` does not, because the phone sends the zone at login, which would otherwise always block the phone's settings at import. Settings created before any PATCH take their zone from `UserSettingsStore.defaultZone` (the server's zone unless configured).
+- **`change_seq`.** One `users.change_seq` bump per write transaction, not one per row. Every engagement or edition row the transaction changes gets the same stamp. An events request that changes nothing above `acked_seq` takes no stamp, so a retry leaves the cursor where it was.
+- **Page views move the edition's `change_seq`.** They are part of the phone's bundle, so a page-view event stamps its edition.
+- **Bundle version.** The full SHA-256 hex of the `ApiJson` encoding, 64 characters; the app used the first 16 bytes. Versions are cached by (edition `change_seq`, newest engagement `change_seq` among its articles, newest `article_content.storedAt`, number of stored bodies), because full text arriving changes a bundle without stamping anything.
+- **Kobo fixtures.** `docs/kobo-sync-fixtures/` is now written by the server's export path (`KoboFixturesTest` in `server/`). The manifest has `protocol: "server/1"`, `serverTime` and `acked: {deviceId: n}` in place of `ackedSeq`, and 64-character versions. Bundles and saved articles carry the optional fields for the phone. The Kobo's serde model reads all of these (unknown fields are ignored, `acked` already exists).
+- **Unknown device.** Events, the gate and the manifest for a device that is not the user's, or is revoked, fail with `ApiFailure(ApiError.UNKNOWN)`. W-C's auth should make this unreachable.
+- **Which articles a user "has".** An event for an article is applied when the user subscribes to its feed (any status), already has engagement for it, or has it in one of their editions. Otherwise the event is skipped and acknowledged.
+- **Read fraction.** As in the merge table, `readFraction` never sets `readAt`. The phone sends a separate `read` event.
+- **Relearning.** After a merge that changed opened, read, saved or Liked state, affinity is relearned by `Relearner` after a 10 s debounce, as well as at every build. A new subscription's tag affinity lands at the next relearn, not on subscribe (subscribing is W-A's).
+- **Periodic refresh.** Every `refreshInterval` the scheduler refreshes the union of enabled users' subscribed feeds (no global unscoped query). Disabled users' feeds are not refreshed unless another user subscribes. `Scheduler.restore()` starts the interval from `MAX(feed.last_attempt_at)`. Without it, the first tick refreshes.
+- **Scheduler state.** Handled releases are kept per user in `user_state["lastBuild"]` (`{"handled":[ms]}`, newest 8), so a restart does not rebuild them. The catch-up-once record is in memory: after a restart, a missing edition is tried once more.
+- **Hooks for integration.** `Scheduler(maintenance = …)` runs after each periodic refresh (W-A's health checks, signals upkeep and clean-up). `ImportServiceImpl(afterImport = …)` runs after an import (W-A's signals upkeep for the new posts). Both default to doing nothing.
+- **Import.**
+  - Posts the server already held count in `skippedPosts`, including those whose text was restored.
+  - An imported edition records page views only when its line has `pageViewsTracked != false` and a non-empty `pageViews`.
+  - Imported engagement takes one `change_seq` per batch of 100 posts, and only rows whose visible fields changed are stamped.
+  - A failed import (bad file) logs nothing, so its key can be used again.
+  - `ImportDao` writes W-A's `feed`, `subscription`, `tag`, `subscription_tag`, `article`, `article_content`, `article_fts`, `article_category` and `article_traits` tables directly. It uses the same rules as W-A's code, and none of their entities changed.
+- **Kobo pictures.** An address that could not be fetched or decoded is remembered for 15 minutes, then tried again. Build-time warming prepares each picture at every distinct width of the user's Kobos from one download.
+- **`users.db_id` and devices.** These are read through W-B's `UserStateDao` (`dbId`, `ackedSeq`, `setAckedSeq`, `koboWidths`, `enabledUserIds`, `changeSeq`). W-B does not write the account tables, apart from `acked_seq`, `users.change_seq` and the user's own `user_settings` and `user_state` rows.
