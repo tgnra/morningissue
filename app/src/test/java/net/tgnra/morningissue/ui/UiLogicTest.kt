@@ -11,8 +11,7 @@ import java.util.Locale
 import net.tgnra.morningissue.model.InlineSpan
 import net.tgnra.morningissue.model.InlineStyle
 import net.tgnra.morningissue.model.RichText
-import net.tgnra.morningissue.edition.BuildStage
-import net.tgnra.morningissue.sync.SyncStatus
+import net.tgnra.morningissue.client.BuildStage
 import net.tgnra.morningissue.ui.components.ImageTreatment
 import net.tgnra.morningissue.ui.components.StepScroll
 import net.tgnra.morningissue.ui.format.PaperFormat
@@ -175,17 +174,16 @@ class UiLogicTest {
 
     @Test
     fun printNowProgressIsOneBarThatOnlyMovesForward() {
-        val idle = SyncStatus.Idle
         val steps = listOf(
-            printProgress(BuildStage.Syncing, idle),
-            printProgress(BuildStage.Syncing, SyncStatus.Running(0, 40)),
-            printProgress(BuildStage.Syncing, SyncStatus.Running(10, 40)),
-            printProgress(BuildStage.Syncing, SyncStatus.Running(40, 40)),
-            printProgress(BuildStage.Building, idle),
-            printProgress(BuildStage.FetchingText(1, 0, 20), idle),
-            printProgress(BuildStage.FetchingText(1, 10, 20), idle),
-            printProgress(BuildStage.FetchingText(1, 20, 20), idle),
-            printProgress(BuildStage.FetchingImages(1, 12), idle),
+            printProgress(BuildStage.Syncing()),
+            printProgress(BuildStage.Syncing(0, 40)),
+            printProgress(BuildStage.Syncing(10, 40)),
+            printProgress(BuildStage.Syncing(40, 40)),
+            printProgress(BuildStage.Building),
+            printProgress(BuildStage.FetchingText(0, 20)),
+            printProgress(BuildStage.FetchingText(10, 20)),
+            printProgress(BuildStage.FetchingText(20, 20)),
+            printProgress(BuildStage.FetchingImages(12)),
         )
         assertEquals(steps.sorted(), steps)
         assertEquals(0f, steps.first())
@@ -193,8 +191,8 @@ class UiLogicTest {
         assertEquals("the sync is the first half", 0.5f, steps[3])
         assertTrue(steps.last() < 1f)
         // No feeds and no stories do not divide by zero.
-        assertEquals(0f, printProgress(BuildStage.Syncing, SyncStatus.Running(0, 0)))
-        assertEquals(0.9f, printProgress(BuildStage.FetchingText(1, 0, 0), idle), 0.0001f)
+        assertEquals(0f, printProgress(BuildStage.Syncing(0, 0)))
+        assertEquals(0.9f, printProgress(BuildStage.FetchingText(0, 0)), 0.0001f)
     }
 
     // --- Layout and rendering helpers --------------------------------------------------------

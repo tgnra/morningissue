@@ -20,13 +20,11 @@ sealed interface ArchiveStatus {
     /** [freed] is set when the export was followed by "free up space". */
     data class Exported(val report: ExportReport, val freed: TrimReport?) : ArchiveStatus
 
-    data class Imported(val report: ImportReport) : ArchiveStatus
-
     data class Failed(val importing: Boolean, val reason: ArchiveFormatException.Reason?) : ArchiveStatus
 }
 
 /**
- * Runs archive exports and imports against files the reader picked with the system file
+ * Runs archive exports to files the reader picked with the system file
  * picker (Storage Access Framework). The work runs in the app's scope, so it survives leaving
  * the Settings screen; [status] is what the screen shows. One job at a time.
  */
@@ -49,14 +47,6 @@ class ArchiveController(
             transfer.export(out) { _status.value = ArchiveStatus.Running(importing = false, progress = it) }.also { out.flush() }
         }
         ArchiveStatus.Exported(report, if (freeSpace) storage.trimAll() else null)
-    }
-
-    fun import(uri: Uri) = start(importing = true) {
-        val report = transfer.import(
-            open = { resolver.openInputStream(uri) ?: throw IOException("No stream for $uri") },
-            onProgress = { _status.value = ArchiveStatus.Running(importing = true, progress = it) },
-        )
-        ArchiveStatus.Imported(report)
     }
 
     /** Forgets a finished job's result. */

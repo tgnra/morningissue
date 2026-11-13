@@ -173,22 +173,23 @@ class StorageBudgetImagesTest {
         val previousImage = image(previous, 1)
         val latest = post("latest", 98)
         val latestImage = image(latest, 1)
-        val waiting = post("waiting", 99)
-        val waitingImage = image(waiting, 1)
+        // Not in an edition yet: no longer kept for the next one, which the server prints.
+        val unprinted = post("unprinted", 99)
+        val unprintedImage = image(unprinted, 1)
         edition(5, old[0], old[1], old[2], saved)
         edition(97, previous)
         edition(98, latest)
 
         val report = storage.trimAll()
 
-        assertEquals(4, report.imagesTrimmed)
-        assertEquals(3, report.articlesTrimmed)
-        assertTrue(oldImages.none { hasImage(it) })
-        // Saved, in the two newest editions, or waiting for the next one: kept.
-        assertTrue(listOf(savedImage, previousImage, latestImage, waitingImage).all { hasImage(it) })
-        assertEquals(4, db.storedImageDao().count())
-        assertEquals(4, files.directory.listFiles().orEmpty().count { it.isFile })
-        assertEquals(4 * MB, storage.usage().imageBytes)
+        assertEquals(5, report.imagesTrimmed)
+        assertEquals(4, report.articlesTrimmed)
+        assertTrue((oldImages + unprintedImage).none { hasImage(it) })
+        // Saved, or in the two newest editions: kept.
+        assertTrue(listOf(savedImage, previousImage, latestImage).all { hasImage(it) })
+        assertEquals(3, db.storedImageDao().count())
+        assertEquals(3, files.directory.listFiles().orEmpty().count { it.isFile })
+        assertEquals(3 * MB, storage.usage().imageBytes)
     }
 
     private companion object {

@@ -151,21 +151,23 @@ class StorageRepositoryTest {
     }
 
     @Test
-    fun theNewestEditionsAndPostsWaitingForTheNextOneAreNeverTrimmed() = runBlocking<Unit> {
+    fun theNewestEditionsAreNeverTrimmedAndNoPostWaitsForTheNextOne() = runBlocking<Unit> {
         val old = (1..3).map { post("old$it", it) }
         // A held-over post: first seen long ago, printed in the latest edition.
         val heldOver = post("held", 4)
         val previous = post("previous", 97)
         val latest = post("latest", 98)
-        val waiting = post("waiting", 99)
+        // Newer than the latest edition: the phone used to keep it for the next one. The server
+        // prints the editions now, so on the phone it is only a cached post like any other.
+        val unprinted = post("unprinted", 99)
         edition(5, old[0], old[1], old[2])
         edition(97, previous)
         edition(98, latest, heldOver)
 
         val report = storage.trimAll()
-        assertEquals(3, report.articlesTrimmed)
-        assertTrue(old.none { hasBody(it) })
-        for (kept in listOf(heldOver, previous, latest, waiting)) assertNotNull(db.articleDao().getContent(kept))
+        assertEquals(4, report.articlesTrimmed)
+        assertTrue((old + unprinted).none { hasBody(it) })
+        for (kept in listOf(heldOver, previous, latest)) assertNotNull(db.articleDao().getContent(kept))
 
         // Free up space never touches Liked or saved posts either.
         // With its edition gone, the saved post has only its save to protect it.

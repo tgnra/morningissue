@@ -62,22 +62,19 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.TextStyle
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import net.tgnra.morningissue.R
-import net.tgnra.morningissue.edition.BuildStage
+import net.tgnra.morningissue.client.BuildStage
+import net.tgnra.morningissue.client.ExtraResult
 import net.tgnra.morningissue.edition.DueEditions
 import net.tgnra.morningissue.edition.DueRelease
 import net.tgnra.morningissue.edition.DueStatus
-import net.tgnra.morningissue.edition.PrintResult
-import net.tgnra.morningissue.edition.PrintState
+import net.tgnra.morningissue.client.PrintResult
+import net.tgnra.morningissue.client.PrintState
 import net.tgnra.morningissue.engine.schedule
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionSummary
-import net.tgnra.morningissue.sync.SyncStatus
 import net.tgnra.morningissue.ui.LocalAppContainer
 import net.tgnra.morningissue.ui.components.LocalPagedScroller
 import net.tgnra.morningissue.ui.components.boxOutlineColor
@@ -104,9 +101,9 @@ private const val RACKED_EDITIONS = 6
  * "Older issues" tile to the calendar, and the button bar (Search, Saved, Sources, Settings).
  *
  * The stand never builds an edition by being opened, and it has no refresh: editions are
- * printed in the background ahead of their release. When the one that is due failed to build
+ * printed on the server ahead of their release. When the one that is due failed to build
  * (`DueEditions` has the rule), an unprinted cover stands in its place with a Print now
- * button, which hands the work to the app-wide `EditionPrinter`; this screen only shows where
+ * button, which hands the work to the app-wide `client.PrintClient`; this screen only shows where
  * that has got to, so leaving or rotating it loses nothing.
  */
 @Composable
@@ -126,9 +123,8 @@ fun NewsstandScreen(
 
     val editions by retainedState("editions") { container.editions.observeReleasedEditions() }
     val feeds by retainedState("feeds") { container.feeds.observeFeeds() }
-    val syncStatus by container.feedSyncer.status.collectAsStateWithLifecycle()
     val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = null)
-    val printState by container.editionPrinter.state.collectAsStateWithLifecycle()
+    val printState by container.printClient.state.collectAsStateWithLifecycle()
     val zone = ZoneId.systemDefault()
 
     // Every release time below comes from the schedule, which knows how a time changed in
@@ -203,7 +199,7 @@ fun NewsstandScreen(
     val printNow: () -> Unit = {
         notice = null
         // Does nothing if a run is already under way.
-        container.editionPrinter.printNow()
+        container.printClient.printNow()
     }
 
     val newSources = remember(feeds, editions, settings?.extraOfferDismissedAt) {
@@ -223,18 +219,18 @@ fun NewsstandScreen(
             val ids = newSources.map { it.id }.toSet()
             scope.launch {
                 try {
-                    // Fetch the new sources first: an imported list has not been read at all yet.
-                    coroutineScope { ids.map { id -> async { container.feedSyncer.syncFeed(id) } }.awaitAll() }
-                    val printed = container.editions.publishExtraEdition(ids)
-                    if (printed == null) {
+                    // The server fetches the new sources first: an imported list has not been read at all yet.
+                    val result = container.printClient.printExtra(ids)
+                    if (result == ExtraResult.NothingToPrint) {
                         // Nothing recent enough to print; do not keep offering the same sources.
                         container.settings.setExtraOfferDismissedAt(container.clock.instant())
                     }
                     notice = resources.getString(
-                        when {
-                            printed == null -> R.string.extra_nothing_to_print
-                            reprintsExtra -> R.string.extra_reprinted
-                            else -> R.string.extra_printed
+                        when (result) {
+                            ExtraResult.NothingToPrint -> R.string.extra_nothing_to_print
+                            ExtraResult.Reprinted -> R.string.extra_reprinted
+                            ExtraResult.Printed -> if (reprintsExtra) R.string.extra_reprinted else R.string.extra_printed
+                            ExtraResult.Failed -> R.string.print_failed
                         },
                     )
                 } finally {
@@ -275,7 +271,7 @@ fun NewsstandScreen(
                         if (printMessage != null) {
                             ResultNotice(
                                 text = stringResource(printMessage),
-                                onDismiss = { container.editionPrinter.dismissResult() },
+                                onDismiss = { container.printClient.dismissResult() },
                                 modifier = Modifier.padding(horizontal = spec.pageMargin).padding(top = 8.dp),
                                 isError = printFailed,
                             )
@@ -316,7 +312,6 @@ fun NewsstandScreen(
                                     release = unprinted,
                                     today = now.atZone(zone).toLocalDate(),
                                     stage = printing?.stage,
-                                    syncStatus = syncStatus,
                                     tryAgain = printFailed,
                                     onPrint = printNow,
                                     modifier = frontModifier,
@@ -376,13 +371,10 @@ fun NewsstandScreen(
 /**
  * How far a Print now run has got, 0..1, as one bar that only moves forward: the sync is the
  * first half, the build a step, the stories' text most of the rest, the pictures the end.
- * [sync] is the syncer's own count of feeds, which only matters during [BuildStage.Syncing].
+ * During [BuildStage.Syncing] the server's count of feeds fetched moves the first half.
  */
-internal fun printProgress(stage: BuildStage, sync: SyncStatus): Float = when (stage) {
-    BuildStage.Syncing -> {
-        val running = sync as? SyncStatus.Running
-        if (running != null && running.feedsTotal > 0) 0.5f * running.feedsDone / running.feedsTotal else 0f
-    }
+internal fun printProgress(stage: BuildStage): Float = when (stage) {
+    is BuildStage.Syncing -> if (stage.total > 0) 0.5f * stage.done / stage.total else 0f
     BuildStage.Building -> 0.5f
     is BuildStage.FetchingText -> 0.55f + if (stage.total > 0) 0.35f * stage.done / stage.total else 0.35f
     is BuildStage.FetchingImages -> 0.95f
@@ -680,7 +672,6 @@ private fun UnprintedDisplay(
     release: DueRelease,
     today: LocalDate,
     stage: BuildStage?,
-    syncStatus: SyncStatus,
     tryAgain: Boolean,
     onPrint: () -> Unit,
     modifier: Modifier = Modifier,
@@ -719,7 +710,7 @@ private fun UnprintedDisplay(
                     primary = true,
                 )
             } else {
-                PrintProgress(stage, syncStatus)
+                PrintProgress(stage)
             }
         }
     }
@@ -727,27 +718,26 @@ private fun UnprintedDisplay(
 
 /** Where a Print now run has got to: the stage in words, a count where there is one, and the bar. */
 @Composable
-private fun PrintProgress(stage: BuildStage, syncStatus: SyncStatus) {
+private fun PrintProgress(stage: BuildStage) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
-    val running = syncStatus as? SyncStatus.Running
     val line = when (stage) {
-        BuildStage.Syncing ->
-            if (running != null) pluralStringResource(R.plurals.fetching_feeds, running.feedsTotal, running.feedsTotal)
+        is BuildStage.Syncing ->
+            if (stage.total > 0) pluralStringResource(R.plurals.fetching_feeds, stage.total, stage.total)
             else stringResource(R.string.print_stage_syncing)
         BuildStage.Building -> stringResource(R.string.print_stage_building)
         is BuildStage.FetchingText -> stringResource(R.string.print_stage_text)
         is BuildStage.FetchingImages -> pluralStringResource(R.plurals.print_stage_images, stage.count, stage.count)
     }
     val count = when (stage) {
-        BuildStage.Syncing -> running?.let { stringResource(R.string.fetching_progress, it.feedsDone, it.feedsTotal) }
+        is BuildStage.Syncing -> if (stage.total > 0) stringResource(R.string.fetching_progress, stage.done, stage.total) else null
         is BuildStage.FetchingText -> stringResource(R.string.fetching_progress, stage.done, stage.total)
         else -> null
     }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         // Announced when the stage changes, not at every count.
         Text(line, style = type.label, color = colors.ink, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-        ThinProgressBar(printProgress(stage, syncStatus), height = 4.dp)
+        ThinProgressBar(printProgress(stage), height = 4.dp)
         Text(count ?: stringResource(R.string.print_stay), style = type.byline, color = colors.inkSecondary)
     }
 }

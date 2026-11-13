@@ -94,7 +94,7 @@ fun SourcesScreen(
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     var filterKey by rememberSaveable { mutableStateOf<String?>(null) }
     val addFlow = rememberAddFeedFlow(syncAfterAdd = true)
-    val opml = rememberOpmlActions(syncAfterImport = true) { message, isError ->
+    val opml = rememberOpmlActions { message, isError ->
         notice = message
         noticeIsError = isError
     }

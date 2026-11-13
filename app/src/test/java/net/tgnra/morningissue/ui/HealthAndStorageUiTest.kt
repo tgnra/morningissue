@@ -5,11 +5,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.time.Duration
 import java.time.Instant
 import java.util.Locale
-import net.tgnra.morningissue.data.archive.ArchiveFormatException
 import net.tgnra.morningissue.data.archive.ArchiveProgress
 import net.tgnra.morningissue.data.archive.ArchiveStatus
 import net.tgnra.morningissue.data.archive.ExportReport
-import net.tgnra.morningissue.data.archive.ImportReport
 import net.tgnra.morningissue.data.storage.StorageUsage
 import net.tgnra.morningissue.data.storage.TrimReport
 import net.tgnra.morningissue.model.AppSettings
@@ -173,28 +171,15 @@ class HealthAndStorageUiTest {
         fun message(status: ArchiveStatus) = archiveMessage(status, resources)
 
         assertNull(message(ArchiveStatus.Idle))
-        assertEquals("Importing…", message(ArchiveStatus.Running(importing = true, progress = null)))
-        assertEquals("Importing… 400 of 1,550 posts", message(ArchiveStatus.Running(true, ArchiveProgress(400, 1550))))
+        assertEquals("Exporting…", message(ArchiveStatus.Running(importing = false, progress = null)))
         assertEquals("Exporting… 1,200 of 1,550 posts", message(ArchiveStatus.Running(false, ArchiveProgress(1200, 1550))))
 
-        assertEquals(
-            "Imported 1,240 posts, skipped 310.",
-            message(ArchiveStatus.Imported(ImportReport(postsImported = 1240, postsSkipped = 310))),
-        )
-        assertEquals(
-            "Imported 1 post, skipped 0. Put back the text of 85 posts. Imported 12 editions, skipped 3. " +
-                "Subscribed again to 2 feeds that were in the file.",
-            message(ArchiveStatus.Imported(ImportReport(1, 0, textsRestored = 85, editionsImported = 12, editionsSkipped = 3, feedsAdded = 2))),
-        )
         assertEquals("Exported 31 editions and 1,240 posts.", message(ArchiveStatus.Exported(ExportReport(9, 1240, 31), freed = null)))
         assertEquals(
             "Exported 1 edition and 1 post. Freed 120 MB by trimming 1,100 articles.",
             message(ArchiveStatus.Exported(ExportReport(1, 1, 1), TrimReport(1100, 120L * 1024 * 1024))),
         )
 
-        assertEquals("That file isn’t a Morning Issue archive.", message(ArchiveStatus.Failed(true, ArchiveFormatException.Reason.NOT_AN_ARCHIVE)))
-        assertTrue(message(ArchiveStatus.Failed(true, ArchiveFormatException.Reason.NEWER_VERSION))!!.contains("newer version"))
-        assertEquals("The import stopped: the file couldn’t be read.", message(ArchiveStatus.Failed(importing = true, reason = null)))
         assertEquals("The export couldn’t be written.", message(ArchiveStatus.Failed(importing = false, reason = null)))
     }
 }

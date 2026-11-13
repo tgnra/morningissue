@@ -67,7 +67,6 @@ import net.tgnra.morningissue.ui.components.NotSubscribedBar
 import net.tgnra.morningissue.R
 import net.tgnra.morningissue.model.ContentBlock
 import net.tgnra.morningissue.model.ReaderArticle
-import net.tgnra.morningissue.sync.FullTextResult
 import net.tgnra.morningissue.ui.LocalAppContainer
 import net.tgnra.morningissue.ui.components.EmptyMessage
 import net.tgnra.morningissue.ui.components.HairlineRule
@@ -117,10 +116,7 @@ fun ReaderScreen(
     LaunchedEffect(articleId) {
         container.articles.markOpened(articleId)
         // Cheap when complete text is already stored; otherwise the body arrives through the flow.
-        fullText = when (container.fullTextFetcher.ensureFullText(articleId)) {
-            is FullTextResult.Unavailable -> FullText.Unavailable
-            else -> FullText.Done
-        }
+        fullText = if (container.articles.ensureFullText(articleId)) FullText.Done else FullText.Unavailable
         // An article the reader opens keeps its pictures, wherever it was opened from. On the
         // app's scope so that leaving the screen does not stop it, and a little later so that
         // the pictures the screen is loading right now are taken from Coil's cache, not fetched twice.
@@ -191,7 +187,7 @@ private fun Reader(article: ReaderArticle, fullText: FullText, onOpenSource: (Lo
         onDispose {
             // Leaving between two reporting steps must not lose the last stretch.
             val last = furthest
-            if (last > 0f) container.appScope.launch { container.articles.setReadFraction(articleId, last) }
+            if (last > 0f) container.appScope.launch { container.articles.setReadFraction(articleId, last, leaving = true) }
         }
     }
     var dwellMillis by rememberSaveable(articleId) { mutableLongStateOf(0L) }

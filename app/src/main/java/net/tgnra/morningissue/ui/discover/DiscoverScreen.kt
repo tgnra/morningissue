@@ -38,9 +38,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import net.tgnra.morningissue.R
-import net.tgnra.morningissue.data.discovery.Decision
-import net.tgnra.morningissue.data.discovery.DeckState
-import net.tgnra.morningissue.data.discovery.Suggestion
+import net.tgnra.morningissue.client.DeckState
+import net.tgnra.morningissue.client.Decision
+import net.tgnra.morningissue.client.Suggestion
 import net.tgnra.morningissue.engine.CatalogueCluster
 import net.tgnra.morningissue.engine.CatalogueHeadline
 import net.tgnra.morningissue.model.FeedUrls
@@ -226,8 +226,7 @@ private fun SuggestionCard(
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
     val feed = suggestion.feed
-    val fetched = (live as? LiveState.Fetched)?.candidate
-    val title = fetched?.parsed?.title?.takeIf { it.isNotBlank() } ?: feed.title
+    val title = feed.title
     val passLabel = stringResource(R.string.discover_pass)
     val subscribeLabel = stringResource(R.string.discover_subscribe)
     Column(
@@ -262,7 +261,7 @@ private fun SuggestionCard(
         Text(suggestion.card.reason, style = type.body.copy(fontStyle = FontStyle.Italic), color = colors.inkSecondary)
 
         Spacer(Modifier.height(4.dp))
-        SectionLabel(stringResource(if (fetched != null) R.string.discover_latest else R.string.discover_catalogue_headlines), color = colors.ink)
+        SectionLabel(stringResource(if (live is LiveState.Fetched) R.string.discover_latest else R.string.discover_catalogue_headlines), color = colors.ink)
         HairlineRule()
         if (headlines.isEmpty()) {
             Text(stringResource(R.string.discover_no_headlines), style = type.caption, color = colors.inkSecondary)

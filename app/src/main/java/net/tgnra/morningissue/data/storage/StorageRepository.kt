@@ -1,7 +1,7 @@
 package net.tgnra.morningissue.data.storage
 
 import java.time.Clock
-import java.time.Duration
+import java.time.Instant
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -40,10 +40,11 @@ data class TrimReport(val articlesTrimmed: Int = 0, val bytesFreed: Long = 0, va
  * there is nothing to read or search. So every image that may go is gone before the first
  * body is dropped.
  *
- * Trimming never touches a Liked or saved post (text or images), the newest editions, or posts
- * waiting for the next edition, and it never removes a post, a headline, a summary or an
- * edition: a trimmed post opens with its summary and the reader fetches the page, and its
- * pictures, again.
+ * The phone holds a cache of the server's library, so the budget runs after every sync.
+ * Trimming never touches a Liked or saved post (text or images) or the newest editions, and it
+ * never removes a post, a headline, a summary or an edition: a trimmed post opens with its
+ * summary while its text is fetched again from the server (`GET /articles/{id}`), and its
+ * pictures are fetched again too.
  */
 interface StorageRepository {
     /** Reads every stored body's length, so not for the main thread's every frame; cheap enough per screen. */
@@ -93,9 +94,8 @@ class RoomStorageRepository(
 
     private suspend fun trimTo(target: Long, used: Long): TrimReport {
         val keepEditionIds = editionDao.getRecent(config.storageKeepEditions).map { it.id }
-        // Posts first seen after the latest cutoff are waiting for the next edition.
-        val protectFrom = editionDao.getLatestByCutoff()?.cutoffAt
-            ?: clock.instant().minus(Duration.ofDays(config.firstEditionWindowDays))
+        // The server builds the editions: no post on the phone is waiting for the next one.
+        val protectFrom = NO_PROTECTION
         // Images first; see the interface for why.
         val imageTrim = images?.trim(protectFrom, keepEditionIds, bytesToFree = used - target) ?: ImageTrimReport()
         var freed = imageTrim.bytesFreed
@@ -119,5 +119,8 @@ class RoomStorageRepository(
         /** A `Long` on purpose: budgets go up to 16,000 MB, and an `Int` product overflows from 2,048 MB. */
         const val BYTES_PER_MB = 1024L * 1024L
         const val BATCH = 200
+
+        /** A `protectFrom` that protects nothing: every post was first seen before it. */
+        val NO_PROTECTION: Instant = Instant.ofEpochMilli(Long.MAX_VALUE)
     }
 }

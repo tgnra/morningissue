@@ -9,14 +9,11 @@ import androidx.datastore.preferences.core.stringPreferencesKey
  * Removes, once, the keys of settings the app no longer has, as a migration of the settings
  * store that runs before anything reads it:
  *
- * - `relay_address` and `relay_registration_token`, which an earlier Relay sync screen let the
- *   reader type. The relay is now the build's alone (`RelaySettings`), and a value left here
- *   would only be misleading.
+ * - `relay_address`, `relay_registration_token`, `relay_registered_at`, `relay_last_published`
+ *   and `relay_last_done`, from the relay sync of earlier versions. Kobos now sync with the
+ *   reader's server (`docs/server-design.md`), and the app has no relay.
  * - `kobo_image_widths`, the picture width each Kobo last asked for over the local network,
- *   which the app no longer serves. A relay package takes each Kobo's width from its pairing.
- * - `relay_registered_at`, `relay_last_published` and `relay_last_done`, from when the relay
- *   kept the group between syncs and Publish and Done were separate. A sync is now one session
- *   that makes the group and deletes it at the end (`RelaySync`).
+ *   which the app no longer serves.
  */
 object RetiredSettings : DataMigration<Preferences> {
     val KEYS: List<Preferences.Key<*>> = listOf(

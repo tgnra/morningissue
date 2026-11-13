@@ -36,7 +36,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.tgnra.morningissue.R
 import net.tgnra.morningissue.model.Feed
-import net.tgnra.morningissue.sync.SyncStatus
+import kotlinx.coroutines.flow.first
+import net.tgnra.morningissue.client.BuildStage
+import net.tgnra.morningissue.client.PrintState
 import net.tgnra.morningissue.ui.LocalAppContainer
 import net.tgnra.morningissue.ui.components.DoubleRule
 import net.tgnra.morningissue.ui.components.HairlineRule
@@ -58,7 +60,7 @@ private const val LISTED_SOURCES = 5
 private enum class Step {
     AddSources,
 
-    /** Fetch every feed, then set the first edition. */
+    /** The server fetches every feed and prints the first edition. */
     FirstEdition,
 
     /** Straight to the stand with nothing fetched. */
@@ -66,9 +68,9 @@ private enum class Step {
 }
 
 /**
- * First launch: add feeds by address or OPML, fetch them all once ("Fetching 42 feeds…"),
- * build the first edition and move on to the newsstand. This is the only time the app waits on
- * the network. If nothing can be fetched or built, the stand's empty state takes over.
+ * First launch: add feeds by address or OPML, then Print now on the server (it fetches them
+ * all once, "Fetching 42 feeds…", and prints the first edition) and move on to the newsstand
+ * once the phone has synced it. If nothing can be fetched or built, the stand's empty state takes over.
  */
 @Composable
 fun OnboardingScreen(
@@ -78,19 +80,18 @@ fun OnboardingScreen(
     val container = LocalAppContainer.current
     val colors = MorningIssueTheme.colors
     val feeds by remember(container) { container.feeds.observeFeeds() }.collectAsStateWithLifecycle(initialValue = emptyList())
-    val syncStatus by container.feedSyncer.status.collectAsStateWithLifecycle()
+    val printState by container.printClient.state.collectAsStateWithLifecycle()
     var step by rememberSaveable { mutableStateOf(Step.AddSources) }
-    var syncDone by remember { mutableStateOf(false) }
     val finished = rememberUpdatedState(onFinished)
 
-    // Keyed on the step, which survives rotation, so an interrupted first sync is picked up again
-    // (a second `syncAll` joins the one already running).
+    // Keyed on the step, which survives rotation, so an interrupted first print is followed
+    // again (a run under way is not started twice; the printer outlives the screen).
     LaunchedEffect(step) {
         if (step == Step.AddSources) return@LaunchedEffect
         if (step == Step.FirstEdition) {
-            container.feedSyncer.syncAll()
-            syncDone = true
-            container.editions.ensureCurrentEdition()
+            if (container.printClient.state.value == PrintState.Idle) container.printClient.printNow()
+            // The server prints, then the phone syncs: the edition is on the stand when it opens.
+            container.printClient.state.first { it is PrintState.Finished }
         }
         container.settings.setOnboardingDone(true)
         finished.value()
@@ -99,7 +100,7 @@ fun OnboardingScreen(
     Box(Modifier.fillMaxSize().background(colors.paper).windowInsetsPadding(WindowInsets.safeDrawing).imePadding()) {
         when (step) {
             Step.AddSources -> AddSources(feeds, onPrint = { step = Step.FirstEdition }, onSkip = { step = Step.Skip }, onFindSources = onFindSources)
-            Step.FirstEdition -> FirstEditionProgress(feedCount = feeds.size, status = syncStatus, syncing = !syncDone)
+            Step.FirstEdition -> FirstEditionProgress(feedCount = feeds.size, stage = (printState as? PrintState.Printing)?.stage)
             Step.Skip -> Unit
         }
     }
@@ -127,7 +128,7 @@ private fun AddSources(feeds: List<Feed>, onPrint: () -> Unit, onSkip: () -> Uni
     val addFlow = rememberAddFeedFlow(syncAfterAdd = false)
     var importNotice by rememberSaveable { mutableStateOf<String?>(null) }
     var importFailed by rememberSaveable { mutableStateOf(false) }
-    val opml = rememberOpmlActions(syncAfterImport = false) { message, isError ->
+    val opml = rememberOpmlActions { message, isError ->
         importNotice = message
         importFailed = isError
     }
@@ -192,15 +193,17 @@ private fun AddSources(feeds: List<Feed>, onPrint: () -> Unit, onSkip: () -> Uni
 }
 
 @Composable
-private fun FirstEditionProgress(feedCount: Int, status: SyncStatus, syncing: Boolean) {
+private fun FirstEditionProgress(feedCount: Int, stage: BuildStage?) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
     Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 420.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Nameplate()
             Spacer(Modifier.height(18.dp))
-            val running = status as? SyncStatus.Running
-            val total = running?.feedsTotal ?: feedCount
+            val running = (stage as? BuildStage.Syncing)?.takeIf { it.total > 0 }
+            // Fetching the feeds until the server says it has moved on (or the run is over).
+            val syncing = stage is BuildStage.Syncing
+            val total = running?.total ?: feedCount
             Text(
                 text = if (syncing) pluralStringResource(R.plurals.fetching_feeds, total, total) else stringResource(R.string.onboarding_setting),
                 style = type.headline,
@@ -209,14 +212,14 @@ private fun FirstEditionProgress(feedCount: Int, status: SyncStatus, syncing: Bo
             ThinProgressBar(
                 fraction = when {
                     !syncing -> 1f
-                    running != null && running.feedsTotal > 0 -> running.feedsDone.toFloat() / running.feedsTotal
+                    running != null -> running.done.toFloat() / running.total
                     else -> 0f
                 },
                 height = 4.dp,
             )
             if (syncing && running != null) {
                 Text(
-                    stringResource(R.string.fetching_progress, running.feedsDone, running.feedsTotal),
+                    stringResource(R.string.fetching_progress, running.done, running.total),
                     style = type.byline,
                     color = colors.inkSecondary,
                 )
