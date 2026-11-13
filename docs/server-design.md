@@ -984,3 +984,80 @@ Final acceptance:
 - /home/tania/Code/morningissue/app/src/main/java/net/tgnra/morningissue/data/archive/ArchiveTransfer.kt and ArchiveFormat.kt
 - /home/tania/Code/morningissue/kobo/src/relay.rs (to be replaced; old client at `git show eb75c12^:kobo/src/sync.rs`)
 - /home/tania/Code/morningissue/settings.gradle.kts, /home/tania/Code/morningissue/gradle/libs.versions.toml, /home/tania/Code/morningissue/app/build.gradle.kts
+
+---
+
+## Phase 1 deviations
+
+Phase 1 landed on `self-hosted` in four commits (core extraction, archive additions, API, server skeleton) plus CI and docs. Where it differs from the sections above, or settles something they left open, this is what was done. Later phases treat this as part of the contract.
+
+**Versions added to `gradle/libs.versions.toml`.** Ktor 3.6.1, tomlj 2.2.0, logback 1.6.6, TwelveMonkeys 3.15.3, `sqlite-bundled` on the existing `sqlite` ref (2.7.1), `kotlinx-coroutines-core` on the existing `coroutines` ref, plugin `kotlin-jvm` on the `kotlin` ref. Also `jspecify` 1.0.0, which `:core` needs `compileOnly`: Jsoup's nullness annotations must be visible where a Jsoup type is inferred (the app got them transitively from AndroidX).
+
+**More moved to `:core` than section 1.2 lists.**
+- `data/images/ImageStoreConfig.kt` (pure constants), because `ImageDownload` uses it.
+- `kobo/KoboImagePlan.kt`: `KoboImageConfig`, `PreparedImage` and `KoboImagePlan`, split out of the app's `KoboImages.kt`. They are pure, `GreyImageTest` tests them, and W-B's JVM port of `KoboImages` needs them.
+- `FullTextExtractor.isTeaser` and `looksComplete` are public (they were `internal`), with a new `feedWasComplete(feedWords, pageWords)`. The app's callers now name `FullTextExtractor.*`. `FullTextExtractor.extract(url, title)` returns `Extraction.Page(blocks, text, words, imageUrl)` or `Extraction.Unavailable(message)`, and stores nothing.
+
+**Test helpers are core test fixtures** (`core/src/testFixtures/`, the `java-test-fixtures` plugin), not core test sources, because the app's remaining tests use them and the server's will. They are `sync/Fixtures.kt` (now public: `Fixtures`, `NOW`, `MutableClock`, `rssOf`, `response`, `Routes`), `embedding/EmbeddingFixtures.kt` (public; reads `../assets/embedding/…`, which works from any module directory), and the open parser test classes `FeedParserTest`, `FeedSignalsParserTest` and `OpmlTest`. Core runs those three through `ParsersOnJvmTest.kt` subclasses; the app still runs them under Robolectric through `ParsersOnAndroidTest`. Consumers add `testImplementation(testFixtures(project(":core")))`; `:app` and `:server` already do.
+
+**Test moves beyond the list.**
+- `parity.json` moved to `core/src/test/resources/discovery/` with `CatalogueParityTest`. `catalogue-fixture.db` stays in the app.
+- `FullTextFetcherTest`'s extractor half is a new core `FullTextExtractorTest`; the database half stays in the app.
+- `EmbeddableTextTest.aPostGetsAVectorOrAMarkSayingWhyNot` moved into the app's `EmbeddingBackfillTest`, because it calls the app's `EmbeddingBackfill`.
+
+**Git history.** The 47 moved files and their tests are true renames. `FullTextExtractor.kt` and `KoboEvents.kt` show as new files, because their sources (`DefaultFullTextFetcher.kt`, `EventMerge.kt`) stay in the app holding the database halves. Use `git blame -C -C` to trace them.
+
+**Small app edits forced by the module boundary.** Three smart casts on model properties no longer compile across modules (`DefaultFeedSyncer`, `ReaderScreen`, `SubscriptionsDeskScreen`); they now use a local value or `!!`. Nothing else in the app changed behaviour.
+
+**Workflows.** `tests.yml` runs `:core:test :server:test testDebugUnitTest`. `release.yml` also runs `:core:test` before a release. `discovery-catalogue.yml` runs the parity check as `./gradlew -PserverOnly :core:test --tests …CatalogueParityTest` and no longer installs the Android SDK.
+
+**Column names in the server schema.**
+- Tables new on the server (`users`, `device`, `user_settings`, `user_state`, `import_log`, `feed_status`, `subscription`, `subscription_tag`, `feed_flag`) use the snake_case columns written in 2.2.
+- Tables carried over from the app (`feed`, `tag`, `article*`, `engagement`, `edition`, `edition_item`, `edition_page_view`, `discovery_verdict`) keep the app's camelCase column names, so ported SQL reads the same. They add the new columns in snake_case: `user_id`, `change_seq`, `feed.url_key`, `last_attempt_at` and `last_success_at`.
+- So it is `engagement(user_id, articleId, …, change_seq)`, not `article_id`, and `discovery_verdict` has the primary key (`user_id`, `urlKey`).
+- `import_log.user_id` has the usual foreign key to `users` with cascade.
+- `device.kind` stores `api.DeviceKind` by name.
+
+**Server database.**
+- `ServerDatabase.open(file)` uses WAL and `setQueryCoroutineContext(Dispatchers.IO.limitedParallelism(8))`; `ServerDatabase.inMemory()` is for tests.
+- Room 3 accepts DAOs with no methods, so the 14 DAO files are empty `@Dao interface`s.
+- Room on the JVM needed no `@ConstructedBy`.
+- The spike found nothing unworkable. FTS4 `MATCH` and `snippet()`, foreign-key cascades, WAL and native extraction under `java.io.tmpdir` all pass.
+
+**Server skeleton.**
+- The version comes from `-PserverVersion` (default `0.1.0`) through the jar manifest.
+- `Main.kt` reads only `MORNINGISSUE_PORT` and `MORNINGISSUE_LISTEN`.
+- When `MORNINGISSUE_DATA_DIR` is set, `useDataDirForTemp` points `java.io.tmpdir` at `<dataDir>/tmp`, unless the JVM was given `-Djava.io.tmpdir`.
+- `Application.morningIssue()` is the Ktor module that tests install.
+- `server/src/main/resources/logback.xml` logs INFO to stderr.
+- The server's test JVM runs with `java.io.tmpdir=server/build/tmp/test-jvm`.
+
+**API package additions and choices** (`core/.../api/`).
+- **Typed fields.** Instants, dates and times are typed (`Instant`, `LocalDate`, `LocalTime`) through `IsoInstantSerializer`, `IsoDateSerializer` and `LocalTimeSerializer`. Enums reuse the model's (`EditionKind`, `EditionLength`, `ItemKind`, `SliderStep`, `CadenceTier`, `FeedStatus`, `HealthFlag`, `RetryOutcome`, `ContentSource`).
+- **JSON configuration.** `ApiJson.json` ignores unknown keys, writes defaults and nulls, and coerces unknown enum values to the field's default.
+- **Bundle, saved shelf and manifest.** These are separate API classes (`EditionBundleDto`, `BundleArticleDto`, `SavedBundleDto`, `ManifestDto`), field-compatible with `docs/kobo-sync.md`. The relay-era `kobo/KoboProtocol.kt` classes are unchanged. Events reuse `kobo.SyncEvent`.
+- **`Patch<T>`** carries PATCH fields where null means "clear": `FeedPatch.muteUntil` and `SettingsPatch.extraOfferDismissedAt`. An absent key is `Patch.Absent`; `{"muteUntil": null}` is `Patch.Set(null)`.
+- **Jobs.**
+  - `JobResult` gains `DONE`, the result of IMPORT and OPML jobs.
+  - `JobOutcomeDto.report` is a `JsonElement`: an `ImportReportDto` or an `OpmlReportDto`.
+  - `JobOutcomeDto.message` explains a FAILED job.
+- **Fields added beyond section 4:**
+  - `EditionSummaryDto.leadSource`;
+  - `FeedCandidateDto.iconUrl`;
+  - `CardDto` carries `urlKey`, `host`, `tier`, `postsPerWeek` and `fullTextShare`;
+  - `ArticleResponse.fullText` is set only by `POST /articles/{id}/fulltext`;
+  - `ImportResponse(jobId?, report?)` covers both the 202 and the 200 answers;
+  - the error code `not_a_feed` (422).
+- **Constants and paths.** `ApiLimits` collects the numeric limits, `ApiQuery` the query parameter names, and `IDEMPOTENCY_KEY_HEADER`, `SERVER_PROTOCOL` and `API_VERSION` sit beside `EVENTS_THROUGH_HEADER`. The `ApiPaths` constants are relative to `ApiPaths.BASE` and use Ktor `{id}` templates.
+- **`api/client/MorningIssueApi.kt`** holds the interface and the typed `ApiException` hierarchy (`EventsPending(acked)`, `Unauthenticated`, `PasswordChangeRequired`, `Offline`, `Http`). W-D owns both and may refine the exceptions.
+
+**Service interfaces** (`server/.../service/`), beyond the bare list in section 8.
+- `ApiFailure(code, message, acked?)` is how a service refuses a request. The HTTP layer maps it to `ApiError.statusOf(code)` and an `ApiErrorBody`.
+- `Principal(userId, deviceId, kind, mustChangePassword)` comes from `AuthService.authenticate(token)`.
+- `AuthService` also has `resetPassword` and `bootstrapUsers`. `DeviceService` has `koboConfig()` and `markSeen(deviceId)`.
+- `FeedService.add` returns `AddFeedOutcome(feed, created)`, so the route can answer 201 or 200.
+- `JobService.start(userId, kind, work)` with `JobProgress` is how W-A's OPML import and W-B's archive import run as jobs. Starting a job returns `JobStart(jobId, alreadyRunning)`.
+- `SyncService.checkGate(userId, deviceId, eventsThrough: Long?)` is the gate that every gated route calls first.
+- `FeedRefresher.refresh` returns a `RefreshReport` (`reachedFeeds`). `reachedFeedsOf(userId)` replaces the pseudo-code's `lastReportCoversUserFeeds`.
+- `EditionService.bundle` and `saved` return DTOs. The manifest's `version` hashes their `ApiJson` encoding.
+- `KoboImageService.writeZip(userId, request, output)` streams the zip.

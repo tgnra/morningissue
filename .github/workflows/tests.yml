@@ -1,5 +1,6 @@
-# Runs the unit tests, the 180-day ranking simulation among them, the Kobo reader's tests and the
-# relay server's tests on every push and pull request.
+# Runs the unit tests (the shared :core module, the self-hosted :server and the app, the 180-day
+# ranking simulation among them), the Kobo reader's tests and the relay server's tests on every
+# push and pull request.
 # The simulation's per-persona reports (how affinity and W moved) and the test reports are kept
 # as workflow artifacts, so a failing ranking check can be diagnosed from the run's page.
 name: Tests
@@ -44,7 +45,7 @@ jobs:
           "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest -PsimulationReport
+        run: ./gradlew :core:test :server:test testDebugUnitTest -PsimulationReport
 
       - name: Upload the ranking simulation reports
         if: always()
@@ -59,7 +60,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: unit-test-reports
-          path: app/build/reports/tests/testDebugUnitTest/
+          path: |
+            core/build/reports/tests/test/
+            server/build/reports/tests/test/
+            app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: ignore
 
   # The Kobo reader's tests: sync against a fake relay, the phone's golden fixtures, and the
