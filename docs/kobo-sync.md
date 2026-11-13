@@ -8,7 +8,7 @@ Everything travels through a relay, end-to-end encrypted ([`docs/relay-sync.md`]
 
 | Side | What | Where |
 |---|---|---|
-| Phone | Bundle export, picture preparation, event merge, relay publish and Done | `app/` (`net.tgnra.morningissue.kobo`, `net.tgnra.morningissue.relay`) |
+| Phone | Bundle export, picture preparation, event merge, the relay sync session | `app/` (`net.tgnra.morningissue.kobo`, `net.tgnra.morningissue.relay`) |
 | Relay | A mailbox for encrypted packages and changes | `relay/` |
 | Kobo | One static binary, `morningissue`, with `sync` and `read` subcommands, launched from NickelMenu | `kobo/` |
 
@@ -150,12 +150,11 @@ fonts/                bundled fonts and their licences
 data/state.json       deviceId, dbId, next seq, per-edition versions, last sync result,
                       clock offset from the relay's last Date header, and for relay sync
                       (docs/relay-sync.md): the device secret S (relaySecret, made when the
-                      pairing code is first shown, erased only by Reset), the highest seq
-                      uploaded (relayUploadedSeq) and since when uploads have waited for an
-                      ack (relayUnackedSince), the last package installed (relayPackage,
+                      pairing code is first shown, erased only by Reset), the last package installed (relayPackage,
                       relayFetched) and its acked[deviceId] (relayAcked), whether the relay
                       has accepted this Kobo (relaySeen) or last answered 401 unknown
-                      (relayUnpaired)
+                      (relayNotListed: no phone session lists it now, or the phone removed
+                      it; earlier versions wrote relayUnpaired, which is still read)
 data/settings.json    what Settings and Aa change (page-turn buttons, orientation, text size,
                       light)
 data/editions/<id>.json

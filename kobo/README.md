@@ -33,20 +33,24 @@ firmware 4.6 or newer.
 ### Pairing
 
 The Kobo syncs through a relay: a small server that holds encrypted packages for the Kobo
-and the Kobo's encrypted changes for the phone, and never sees what you read. The Kobo uses
-`https://mirelay.tgnra.net` unless `config.json` names another (see Configuration); the
-phone has to publish to the same one.
+and the Kobo's encrypted changes for the phone while the phone is syncing, and never sees
+what you read. The Kobo uses `https://mirelay.tgnra.net` unless `config.json` names another
+(see Configuration); the phone has to use the same one.
+
+A sync is a session on the phone: open Sync on the phone and press **Start**, keep the
+screen open, and sync the Kobo while it waits. Outside a session the relay holds nothing,
+and the Kobo can't sync.
 
 1. On the Kobo, open **Settings** and tap **Pair with phone**. The Kobo shows a large QR
    code. (Turn on Wi-Fi and sync, or Sync now, on a Kobo that has never been paired opens
    it too.)
 2. Scan it with Morning Issue on the phone (Kobo settings). Scanning is the consent;
-   nothing is asked on the Kobo.
+   nothing is asked on the Kobo. The phone starts a sync session straight away.
 3. While the code is shown and the Kobo is on Wi-Fi, it asks the relay every 5 seconds
-   whether the phone has told it about this Kobo. Once it has, the Kobo goes back to
-   Settings and syncs. (Offline, go back and tap **Turn on Wi-Fi and sync**; until the phone
-   has told the relay, Settings says "Waiting for the phone".) Once the phone has published
-   a package, the Kobo installs it.
+   whether the phone has listed this Kobo, which it does once the package is uploaded.
+   The Kobo then goes back to Settings, syncs and installs the package. (Offline, go back
+   and tap **Turn on Wi-Fi and sync** while the phone's session is still open; until the
+   Kobo has been listed once, its pairing screen says "Waiting for the phone".)
 
 Reset erases the pairing secret with everything else; pair again afterwards.
 
@@ -74,13 +78,15 @@ change the screen mode.
   connection the home screen shows "Offline", and Settings has **Turn on Wi-Fi and sync**:
   it turns Wi-Fi on (joining a network saved in the Kobo's Wi-Fi settings), syncs, and turns
   Wi-Fi off again. A sync that gets through the relay turns it off even when it brings
-  nothing new. If the relay can't be reached, or is still waiting for the phone to publish
-  this Kobo, Wi-Fi stays on and the sync is tried again every few seconds until it gets
-  through; **Turn Wi-Fi off** (beside the sync button whenever Wi-Fi is on) ends it, and so
-  does sleep. Anything else, such as a Kobo the phone has dropped (it has to be paired
-  again), turns Wi-Fi off. If no network is joined, Wi-Fi goes off again and the reader says
-  so. A Kobo that has never been paired doesn't turn Wi-Fi on: the button opens the pairing
-  code.
+  nothing new. If the relay can't be reached, or a Kobo that has never been listed is still
+  waiting for the phone, Wi-Fi stays on and the sync is tried again every few seconds until
+  it gets through; **Turn Wi-Fi off** (beside the sync button whenever Wi-Fi is on) ends it,
+  and so does sleep. A Kobo that has synced before and isn't let in says the phone isn't
+  syncing: open Sync on the phone and press Start, then sync again; if this Kobo was removed
+  from the phone, pair it again. (The relay answers both cases the same way, so the Kobo
+  can't tell them apart.) Anything else turns Wi-Fi off. If no network is joined, Wi-Fi
+  goes off again and the reader says so. A Kobo that has never been paired doesn't turn
+  Wi-Fi on: the button opens the pairing code.
 - **Edition and article pages** fill the screen. Swipe down from the top edge (or tap the top
   strip) to show the header (back, title) and the footer (position, and in an article
   **Like**, **Save** and **Aa**). A tap on the page, or 7 seconds, hides them again. The
@@ -124,8 +130,10 @@ What you read is recorded in `data/events.jsonl` and sent on the next sync.
 
 ### Relay sync
 
-Events are sent to the relay encrypted, and stay on the Kobo until a package from the phone
-shows they were merged; if none does within the relay's 48 hours, they are sent again.
+Events are sent to the relay encrypted, and only during a phone session. They stay on the
+Kobo until a package from the phone shows they were merged, and every sync sends all of them
+again, since a cancelled session takes its uploads with it. Nothing is lost; the phone skips
+what it has already merged.
 
 `https://` relays are checked against the Mozilla root certificates. Since a Kobo's clock can
 be far off, the time used for that is the clock corrected by the last `Date` the relay sent,
@@ -151,7 +159,7 @@ You can create `.adds/morningissue/config.json` yourself. Every field is optiona
 
 - `relay` is the relay's address, `http[s]://host[:port][/prefix]`, instead of the default
   `https://mirelay.tgnra.net`. Without `http://` or `https://`, an IPv4 address gets
-  `http://` and a name `https://`. The phone has to publish to the same relay.
+  `http://` and a name `https://`. The phone has to use the same relay.
 - `name` is the name the phone shows for this Kobo once it has scanned the pairing code.
 - `touch` and `display` are escape hatches for a model whose profile turns out to be wrong.
 - `flashEvery` sets how many partial page turns pass before a full refresh.
@@ -272,8 +280,8 @@ cd kobo && cargo test
     them, and waiting when the relay already holds 64 batches;
   - a dropped download resumed with `Range`;
   - a `dbId` change wiping everything;
-  - "Waiting for the phone", then paired, then dropped ("Not paired"), with the events sent
-    again once paired again;
+  - "Waiting for the phone", then listed, then not listed (no session on the phone, or
+    removed), with the events sent again once listed again;
   - a Kobo that has never shown its pairing code asking nothing;
   - a wrong clock put right from the `Date` header, and no signature ever sent twice;
   - tampered packages and wrongly wrapped keys installing nothing;
@@ -302,8 +310,8 @@ cd kobo && cargo test
   orientation (portrait and landscape, each upside down, a brief tilt ignored, no sensor,
   the old setting); inverted buttons; Turn on Wi-Fi and sync (Wi-Fi on, a sync, Wi-Fi off,
   with a package and with nothing new; staying on while the relay can't be reached or waits
-  for the phone, until it gets through or Turn Wi-Fi off is tapped; a dropped Kobo turning it
-  off; a network that can't be joined; sleep while Wi-Fi is coming on); an unpaired Kobo
+  for the phone, until it gets through or Turn Wi-Fi off is tapped; a Kobo listed before but
+  not now turning it off; a network that can't be joined; sleep while Wi-Fi is coming on); an unpaired Kobo
   opening the pairing code instead of turning Wi-Fi on; and the pairing code noticing the
   phone's scan and syncing, and asking nothing when left at once or offline. It writes every
   screen, plus a `contact.png` sheet, to `kobo/target/screens/<size>/<run>/`.

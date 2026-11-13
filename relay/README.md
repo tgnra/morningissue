@@ -1,8 +1,8 @@
 # Morning Issue relay
 
-The relay lets a Kobo sync with the phone when they aren't on the same Wi-Fi. The phone uploads an encrypted package of editions and saved articles; each paired Kobo uploads its encrypted changes and downloads the package; the phone collects the changes and tells the relay to delete what it has finished with. The protocol, relay/1, is described in [`docs/relay-sync.md`](../docs/relay-sync.md).
+The relay lets a Kobo sync with the phone when they aren't on the same Wi-Fi. A sync is one session on the phone: the phone uploads an encrypted package of editions and saved articles; each paired Kobo uploads its encrypted changes and downloads the package; the phone collects the changes, and when the session ends it deletes its group from the relay. The protocol, relay/1, is described in [`docs/relay-sync.md`](../docs/relay-sync.md).
 
-The relay is a mailbox. It never sees plaintext and holds no key that could decrypt anything: it checks request signatures, stores opaque blobs, and deletes them once used, and in any case after 48 hours. You run it on your own server.
+The relay is a mailbox. It never sees plaintext and holds no key that could decrypt anything: it checks request signatures and stores opaque blobs, and only while a sync is happening. Between sessions it holds nothing for a phone: no keys, no device list, no package and no changes. Anything a session leaves behind is deleted after 48 hours. You run it on your own server.
 
 It is one Go binary using only the standard library.
 
@@ -71,13 +71,13 @@ The server's clock must be right. Requests are refused when their timestamp is m
 <data>/groups/<group>/changes/    changes envelopes
 ```
 
-A sweeper runs every minute and deletes packages and changes older than the TTL, uploads that were never published after an hour, and groups whose phone hasn't been in touch for 90 days. The phone deletes changes as soon as it has merged them, and the package once every device has it. Deleting means removing the files.
+A sweeper runs every minute and deletes packages and changes older than the TTL, uploads that were never published after an hour, and groups whose phone hasn't been in touch for 90 days. These are backstops: the phone deletes its whole group (`DELETE /v1/group`) at the end of every session, which takes the package, the changes, the device list and the keys with it. Deleting means removing the files.
 
 Every signed request is refused if its signature has been seen before. The relay appends each signature to `<data>/replay` before acting on the request, so a request replayed after a restart is still refused; the sweeper rewrites the file without the signatures whose timestamp the clock check would refuse anyway, which keeps it to about ten minutes of requests.
 
-Plan disk space for one package per phone (tens to hundreds of MB) plus a briefly overlapping upload when the phone publishes a new one.
+Plan disk space for one package per phone that is syncing at the moment (tens to hundreds of MB), plus any a session left behind until the sweeper clears it.
 
-**No backups are needed.** Everything is ephemeral and encrypted with keys the relay never has. If the data directory is lost, the phone registers its group again on its next publish (`PUT /v1/group` after a `401`) and sends the device list; at worst, changes the phone hadn't collected yet are lost. Leave the data directory out of backups.
+**No backups are needed.** Everything is ephemeral and encrypted with keys the relay never has. If the data directory is lost, only a session in progress fails; the phone creates its group again at the start of every session anyway. Changes the phone hadn't collected stay on the Kobos, which send them again. Leave the data directory out of backups.
 
 ## Deploying on your own server
 

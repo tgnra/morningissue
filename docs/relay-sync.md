@@ -1,6 +1,6 @@
 # Relay sync (protocol relay/1)
 
-Relay sync is how a Kobo syncs with the phone, wherever each of them is. The phone uploads an encrypted package of editions, saved articles and pictures to a relay server. Each paired device uploads its encrypted changes and downloads the package. The phone then collects the changes, merges them and tells the relay to delete what it has finished with.
+Relay sync is how a Kobo syncs with the phone, wherever each of them is. A sync is one session on the phone's Sync screen. The phone uploads an encrypted package of editions, saved articles and pictures to a relay server. While the session is open, each paired device uploads its encrypted changes and downloads the package, and the phone merges each device's changes as soon as it has fetched. When the session ends, the phone deletes everything it put on the relay.
 
 It is the only way a Kobo syncs. It carries the formats of `docs/kobo-sync.md` unchanged: the manifest, edition bundles, the saved shelf, pictures and events, first defined by protocol v1, a LAN protocol the Kobo no longer speaks. Only the way they travel is new.
 
@@ -8,8 +8,8 @@ The relay is a dumb mailbox:
 
 - It never sees plaintext. Everything it stores is encrypted with keys only the phone and the paired devices have.
 - It never holds a secret that could decrypt anything. It holds request-signing keys, which only let a caller talk to the relay.
-- The phone alone decides which devices belong to its group, by sending the relay the list.
-- Everything is deleted once used, and in any case after 48 hours.
+- The phone alone decides which devices belong to its group, by sending the relay the list in each session.
+- It holds no state except while a sync is happening. Between sessions it holds nothing for the group: no keys, no device list, no package and no changes. The 48-hour TTL and the 90-day group expiry are only backstops.
 
 ## Pieces
 
@@ -40,7 +40,7 @@ The relay learns the owner key and every device auth key, because it needs them 
 
 ## Pairing
 
-The device has no camera, so it shows a QR code and the phone scans it. Pairing never touches the relay.
+The device has no camera, so it shows a QR code and the phone scans it. Pairing never touches the relay except through the session that follows the scan.
 
 The QR code is this URI, its query values percent-encoded:
 
@@ -55,13 +55,13 @@ morningissue:pair?v=1&s=<base64url S>&d=<deviceId>&n=<name>&w=<short side in px>
 
 Scanning is the consent: there is no extra Allow prompt.
 
-The phone stores the device: `deviceId`, name, `w`, auth key and enc key. It should keep the two keys wrapped with an Android Keystore key. It then sends the relay the new device list straight away (`PUT /v1/group/devices`). Until then the device's requests get `401`, and the device shows "Waiting for the phone".
+The phone stores the device: `deviceId`, name, `w`, auth key and enc key. It should keep the two keys wrapped with an Android Keystore key. It then starts a session straight away ("Phone: session" below), which lists the device once the package is uploaded. Until then the device's requests get `401 "unknown"`, and the device shows "Waiting for the phone".
 
-While it shows the code, a device may ask whether the phone has done so: a signed `GET /v1/package` answers `401 "unknown"` until the device is listed, and `200` or `204` after. The Kobo asks every 5 seconds while the code is on screen and it is online, and syncs as soon as it is listed. It takes nothing else from that answer.
+While it shows the code, a device may ask whether it has been listed: a signed `GET /v1/package` answers `401 "unknown"` until the device is listed, `204` once it is listed but the package isn't published yet, and `200` after. The Kobo asks every 5 seconds while the code is on screen and it is online, and syncs on the first `200`, so it never syncs in the moment between the phone listing it and publishing. It takes nothing else from that answer.
 
-The device also needs the relay's address. The QR code can't carry it, since the device shows the code and doesn't read one. A Kobo uses `https://mirelay.tgnra.net` unless `"relay"` in its `config.json` names another (`http[s]://host[:port][/prefix]`; without a scheme, an IPv4 address gets `http://` and a name `https://`). Nothing on the Kobo changes it; Settings shows it. The phone must publish to the same relay.
+The device also needs the relay's address. The QR code can't carry it, since the device shows the code and doesn't read one. A Kobo uses `https://mirelay.tgnra.net` unless `"relay"` in its `config.json` names another (`http[s]://host[:port][/prefix]`; without a scheme, an IPv4 address gets `http://` and a name `https://`). Nothing on the Kobo changes it; Settings shows it. The phone must use the same relay.
 
-**Unpairing:** the phone removes the device and sends the list again. The relay deletes that device's pending changes and its fetch record. Its requests get `401` from then on, and the device shows itself as unpaired.
+**Unpairing:** the phone drops the device from its list. It makes no relay call: there is nothing on the relay to remove between sessions, and the next session doesn't list the device. The device's requests then get `401 "unknown"`, exactly as outside a session, so it can't tell that it was removed ("Device: sync", step 4).
 
 Pairing the same `deviceId` again replaces its keys and keeps its `ackedSeq`.
 
@@ -184,18 +184,21 @@ Blob IDs are base64url and 16 to 64 characters long.
  "devices": [{"kid": "…", "lastSeenAt": "…" | null, "pendingChanges": 2}]}
 ```
 
+The phone reads `fetchedBy` from it during a session. It doesn't show `lastSeenAt`: the group is new in every session, so the phone records a device's last seen itself.
+
 **`GET /v1/group/changes`** returns `{"changes": [{"id": "…", "kid": "…", "batch": "1-500", "size": 123, "receivedAt": "…"}]}`, oldest first.
 
 **`GET /v1/group/changes/{id}`** returns the envelope bytes (`application/octet-stream`).
 
-**`POST /v1/group/done`** is the phone's "Done".
+**`POST /v1/group/done`** deletes changes the owner has handled, and the package once every device has it.
 
 - Body: `{"changes": ["<id>", …]}`.
 - Deletes those changes.
 - Deletes the current package if every device in the list has fetched it. Otherwise the package stays until it is replaced or expires.
 - Response: `200 {"deletedChanges": n, "packageDeleted": true|false}`.
+- The phone no longer uses it: it ends every session with `DELETE /v1/group` instead. The endpoint remains on the relay.
 
-**`DELETE /v1/group`** deletes the group and everything in it. Response: `204`.
+**`DELETE /v1/group`** deletes the group and everything in it. Response: `204`. The phone sends it at the end of every session, however the session ends.
 
 ### Device (signed with the device auth key)
 
@@ -228,7 +231,7 @@ A sweeper runs every minute and deletes:
 - unpublished uploads older than 1 hour;
 - groups whose owner hasn't made a signed request in 90 days.
 
-Deleted means removed from disk, not just hidden.
+Deleted means removed from disk, not just hidden. The phone deletes the group at the end of every session, so the sweeper only clears what a session left behind, for example when the phone lost its connection before it could send `DELETE /v1/group`.
 
 ## Package contents
 
@@ -253,43 +256,52 @@ The phone merges them as `docs/kobo-sync.md` describes:
 - only events with `seq > ackedSeq` for that device;
 - in one transaction that also stores the new `ackedSeq`.
 
-The phone drops, unmerged, a batch that fails to decrypt, or whose `deviceId` doesn't belong to the key that sent it. It still deletes that batch from the relay.
+The phone drops, unmerged, a batch that fails to decrypt, or whose `deviceId` doesn't belong to the key that sent it. It goes with the group at the end of the session.
 
 ## Order of a sync
 
-### Phone: publish
+### Phone: session
 
-Runs after the early build, when a relay is configured, and from **Publish** on the Sync screen.
+A sync is one interactive session, started with **Start** on the phone's Sync screen. Nothing runs in the background: the phone builds no package and makes no relay request outside a session. The screen keeps the display on while the session runs and tells the user to keep it open.
 
-1. `PUT /v1/group` (only the first time, or after a `401`), then `PUT /v1/group/devices`.
-2. Build the package from the three latest released editions, the saved shelf and the images, exported and prepared as `docs/kobo-sync.md` describes.
-3. Encrypt it with a fresh package key and upload it in parts of 32 MiB (`PUT …/parts/{n}`, each sent again up to 3 times after a network failure or a `5xx`), then `POST …/complete`. Wrap the key for each device, then publish.
+1. Build the package from the three latest released editions, the saved shelf and the images, exported and prepared as `docs/kobo-sync.md` describes.
+2. `PUT /v1/group`. The group doesn't exist between sessions, so the phone creates it every time from the owner secret it keeps.
+3. Encrypt the package with a fresh package key and upload it in parts of 32 MiB (`PUT …/parts/{n}`, each sent again up to 3 times after a network failure or a `5xx`), then `POST …/complete`.
+4. `PUT /v1/group/devices` with every paired device, from the auth keys the phone keeps. The devices are listed only now, once the package is uploaded, so a device can't sync before there is something to fetch.
+5. Wrap the package key for each device, then publish.
+6. Wait. Poll `GET /v1/group/status` every few seconds and show each paired device as waiting, downloaded, or changes collected. When a device's kid appears in `fetchedBy`, its changes for this round are already on the relay ("Device: sync" uploads before it marks the package fetched). So the phone then lists `GET /v1/group/changes`, downloads and decrypts that device's batches, merges them as above, relearns affinity if anything merged, as for the phone's own reader, and records the device's last seen.
+7. When every listed device has fetched and been merged, `DELETE /v1/group`.
+
+A session can also end early. Each way deletes the group, and between sessions the relay holds nothing:
+
+- **Finish now:** merge what has arrived, then `DELETE /v1/group`. Devices that didn't connect get nothing this time.
+- **Cancel:** `DELETE /v1/group` without merging. Changes already uploaded are lost from the relay, but they are still on the devices, which upload them again in a later session (step 1 of "Device: sync").
+- **The app goes to the background:** the session is cancelled. The phone sends `DELETE /v1/group` at once, and queues an expedited WorkManager job that sends it as well, in case the process dies first.
+- **Any failure:** the phone sends `DELETE /v1/group` best effort. If that fails too, the TTL sweeper and the 90-day group expiry clear what is left.
+
+After a scan, the phone starts a session straight away ("Pairing"), so a newly paired device is listed in step 4 and syncs.
+
+The first run of a phone version with sessions sends a one-time `DELETE /v1/group`, to clear a group an older version left on the relay.
 
 ### Device: sync
 
-Runs on every Kobo sync, once the device has a secret (it has shown its pairing code). Without one the Kobo says it is not paired and asks the relay nothing.
+Runs on every Kobo sync, once the device has a secret (it has shown its pairing code). Without one the Kobo says it is not paired and asks the relay nothing. A device gets through only while a phone session lists it; outside one, every request gets `401 "unknown"`.
 
-1. Upload unsent events, oldest first, in batches of up to 500 (`PUT /v1/changes/{first}-{last}`).
-   - "Unsent" means above the highest `seq` already uploaded.
-   - Uploaded events are kept until a package's `acked` shows the phone has merged them, and they are still applied on top of what the device shows, as unsent events are.
+1. Upload every unacknowledged event (`seq` above `acked[deviceId]` of the last installed package), oldest first, in batches of up to 500 (`PUT /v1/changes/{first}-{last}`), at most 64 batches per sync. This comes before the download, so that once the device has marked the package fetched, the phone knows its changes for the round are on the relay.
+   - Every sync sends them all again, because the relay keeps nothing between sessions: an upload from an earlier session, or from a cancelled one, may be gone. The phone skips events at or below `ackedSeq`, so the repeats are harmless.
+   - Events are kept until a package's `acked` shows the phone has merged them, and they are still applied on top of what the device shows.
+   - On a `429` the device stops uploading; the rest go at its next sync.
 2. `GET /v1/package`. If its `id` differs from the last installed one:
    - download to a temporary file, resuming with `Range`;
    - unwrap the key and decrypt as a stream;
    - check `dbId`, then install the editions, saved shelf and images (`docs/kobo-sync.md`, "Installing a package", writing to temporary files and renaming them into place);
    - `POST …/fetched`.
 3. Delete events at or below `acked[deviceId]`.
-   - The relay may delete uploaded changes before the phone merges them: after the TTL, or when the phone drops the device. So a device uploads its unacknowledged events again after a `401 "unknown"`, and once an upload has gone 48 hours without being acknowledged. The phone skips events at or below `ackedSeq`, so this is harmless.
    - A device must never send two requests with the same signature. If a new request would carry the same `ts` as one it sent before with the same method, path and body, it moves `ts` on by a second.
-4. `401` with `"unknown"` means the phone no longer accepts this device. Show "Not paired" and offer pairing again. Other `401`s follow the clock rule above.
-
-### Phone: done
-
-Runs from **Done** on the Sync screen, and from the periodic sync when a relay is configured.
-
-1. `GET /v1/group/changes`, then download and decrypt each batch.
-2. Merge each batch as above.
-3. `POST /v1/group/done` with every batch handled, merged or dropped.
-4. Relearn affinity if anything merged, as for the phone's own reader.
+4. `401` with `"unknown"` means no session lists this device. Either the phone isn't syncing, or it has removed this device, and the device can't tell which.
+   - A device that has been listed before shows one message for both: the phone isn't syncing, so open Sync on the phone, press Start, then sync again; if this Kobo was removed from the phone, pair it again. It doesn't present itself as unpaired.
+   - A device that has never been listed shows "Waiting for the phone" on its pairing screen.
+   - Other `401`s follow the clock rule above.
 
 ## Test vectors
 
@@ -302,5 +314,8 @@ Some vectors use 16-byte chunks so that a short plaintext still spans several ch
 ## Known limits of relay/1
 
 - The QR code can't carry the relay's address, because the device shows the code and doesn't read one. A Kobo uses the default relay, or the one in its `config.json`.
-- A device's changes reach the edition engine only when the phone runs Done. Events that arrive after the next build have already counted their stories as unopened (`docs/kobo-sync.md`, "Events").
+- A device syncs only while the phone's session is open. A device that doesn't connect before the session ends gets no package, and its changes wait on it for the next session.
+- The phone has to stay on the Sync screen for the whole session. Leaving the app cancels it.
+- Outside a session a device can't tell "the phone isn't syncing" from "the phone removed this device": both get `401 "unknown"`. The device shows one message that covers both.
+- A device's changes reach the edition engine only in a session. Events that arrive after the next build have already counted their stories as unopened (`docs/kobo-sync.md`, "Events").
 - The relay sees group sizes, blob sizes and timing. Over plain HTTP, so does anyone on the network path.

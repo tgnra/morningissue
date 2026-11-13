@@ -211,7 +211,7 @@ The phone syncs with a Kobo only through the relay (see "Relay sync" below, and 
 
 ### Relay sync
 
-The protocol is `docs/relay-sync.md` (relay/1), with test vectors in `docs/relay-sync-fixtures/`. The phone uploads an encrypted package, Kobos upload encrypted changes and download it, and the phone's Done merges the changes and clears the relay. The relay server is `relay/` (Go), the Kobo side is in `kobo/`, and the phone side is in `app/` (`net.tgnra.morningissue.relay`); see "Relay sync" in `docs/how-it-works.md`.
+The protocol is `docs/relay-sync.md` (relay/1), with test vectors in `docs/relay-sync-fixtures/`. A sync is one session on the phone's Sync screen: the phone uploads an encrypted package, Kobos upload encrypted changes and download it while the session is open, the phone merges each Kobo's changes once it has fetched, and the session ends by deleting the group, so the relay holds nothing between sessions. The relay server is `relay/` (Go), the Kobo side is in `kobo/`, and the phone side is in `app/` (`net.tgnra.morningissue.relay`); see "Relay sync" in `docs/how-it-works.md`.
 
 - [x] Spec with test vectors from fixed inputs, cross-checked against an independent Python implementation; Go, Rust and Kotlin each reproduce every vector.
 - [x] Relay server, standard library only: request signing with skew and replay checks, packages streamed to disk with Range resume, changes, Done, unpairing, and a sweeper (48 hours, 1 hour for unpublished uploads, 90 days for idle groups). Tested with `-race`; CI runs it on every push and attaches amd64 and arm64 binaries to releases.
@@ -219,15 +219,15 @@ The protocol is `docs/relay-sync.md` (relay/1), with test vectors in `docs/relay
 - [x] Phone: schema version 6 (relay keys on the same `sync_peer` row, so a Kobo paired both ways has one `ackedSeq`), keys wrapped with the Android Keystore, QR scanning with CameraX and ZXing, Publish and Done on the Sync with Kobo screen, Done then Publish after the early build, and Done after each periodic sync. Tested against a mock relay.
 - [x] Phone: relay sync is the only sync. The relay is the build's (`https://mirelay.tgnra.net` unless `morningissue.relayAddress` or `MORNINGISSUE_RELAY_ADDRESS` says otherwise; the token only from `morningissue.relayToken` or the `MORNINGISSUE_RELAY_TOKEN` secret), with no setting to change it.
 - [ ] **Run it end to end on real devices**: the QR code scanned off a real e-ink screen, TLS speed and memory on the Kobo, a large package over Kobo Wi-Fi, and the Sync with Kobo screen on a phone, a tablet and in E-ink.
-- [ ] **A test of all three together.** The Kobo has been tested against the real relay, the phone only against a mock. A test that runs the Go relay, the phone's Publish and Done, and the Kobo client in one go would catch any disagreement between the two clients.
+- [ ] **A test of all three together.** The Kobo has been tested against the real relay, the phone only against a mock. A test that runs the Go relay, the phone's session, and the Kobo client in one go would catch any disagreement between the two clients.
 - [x] Kobo: the pairing screen notices the scan. While the code is shown and the Kobo is online, it asks the relay every 5 s (a signed `GET /v1/package`, `401 unknown` until the phone sends the device list), then goes back to Settings and syncs. Turn on Wi-Fi and sync counts a relay sync as getting through (even with nothing new), and an unreachable relay or one still waiting for the phone as the phone not being found (Wi-Fi stays on and it tries again); a Kobo the phone dropped turns Wi-Fi off. Tested against the fake relay in `kobo/tests/screens.rs`.
 - [x] **The relay address is no longer typed on the Kobo.** It defaults to `https://mirelay.tgnra.net`, and `"relay"` in `config.json` overrides it; Settings shows it but can't change it. A phone publishing to another relay needs the Kobo's `config.json` to say so.
 - [x] Kobo: **relay sync is the only sync.** LAN sync is gone from the Kobo: the beacon, the HTTP client to the phone, LAN pairing and its token, the phone address keypad, the relay address keyboard, and the `phone`, `beaconSeconds` and `beaconPort` config fields (old `config.json` and `settings.json` fields are ignored). Turn on Wi-Fi and sync keeps Wi-Fi on and tries again every 5 s while the relay can't be reached or waits for the phone to list this Kobo; a Kobo never paired opens the pairing code instead of turning Wi-Fi on. `docs/kobo-sync.md` now holds only the formats relay/1 carries, the Kobo's files and its launch flow.
 - [ ] **A Kobo whose clock is far off can't check an `https://` relay's certificate**, and with LAN sync gone no phone `Date` header can put it right. The build date is the floor; the reader suggests letting Nickel set the clock or using an `http://` relay. Check how far off a Libra 2's clock gets, and whether Nickel's Wi-Fi sets it.
 - [x] **Path prefixes.** `-base-path /morningissue` (`RELAY_BASE_PATH`) serves the relay under a prefix: it routes on the path below it and checks signatures over the full path as sent, so the proxy must pass the prefix on, not strip it.
 - [x] **The replay cache survives a restart.** Each signature is appended to `<data>/replay` and synced before its request is acted on, and the sweeper rewrites the file without the expired ones. A signature is also kept until its `ts` is out of skew, which closed a sub-second gap at 600 seconds.
-- [ ] **A very large package can outlast the Kobo's 600-second sync**; the download resumes at the next sync.
-- [ ] **A Kobo's changes reach the edition engine only at Done.** Events that arrive after the next build have already counted their stories as unopened (v1's limit).
+- [ ] **A very large package can outlast the Kobo's 600-second sync**; the download resumes at the next sync, but only if that is in the same phone session, since the package goes with the group when the session ends.
+- [ ] **A Kobo's changes reach the edition engine only in a session.** Events that arrive after the next build have already counted their stories as unopened (v1's limit).
 
 ## Smaller gaps against the original spec
 
@@ -299,7 +299,7 @@ Deliberately not being built. Listed so they are not mistaken for forgotten.
 | PDF or printable export of an edition | "Not initially" in the spec's decisions. |
 | Publish time adapting to when the reader opens the app | Decided against: a fixed reset time in the reader's time zone. |
 | Anything appearing between editions | Decided against. |
-| Accounts and cross-device sync | Decided against: fully local. Relay sync (below) is not an account: the phone stays the only owner, the relay holds only end-to-end encrypted blobs for at most 48 hours, and it is the only way the phone syncs with a Kobo. |
+| Accounts and cross-device sync | Decided against: fully local. Relay sync (below) is not an account: the phone stays the only owner, the relay holds only end-to-end encrypted blobs, only while a sync session is open (48 hours at most as a backstop), and it is the only way the phone syncs with a Kobo. |
 | OPML folder names as an affinity hint | Dropped in the spec's review. Folder names become tags instead. |
 | Reprint-only or empty editions | Decided against: with no new posts no edition is built. |
 
