@@ -56,7 +56,9 @@ class FeedHealthCheckerTest {
         server.start()
         db = ServerDatabase.inMemory()
         user = db.newUser("tania")
-        val fetcher = FeedFetcher(OkHttpClient())
+        // Repair also tries https on the same port, which the plain local server never answers;
+        // a short read timeout keeps that from taking ten seconds a probe.
+        val fetcher = FeedFetcher(OkHttpClient.Builder().readTimeout(Duration.ofMillis(500)).build())
         val discovery = DefaultFeedDiscovery(fetcher, clock)
         checker = FeedHealthChecker(db, FeedRepairer(fetcher, discovery, clock), clock)
         refresher = DefaultFeedRefresher(db, fetcher, clock, scope)
