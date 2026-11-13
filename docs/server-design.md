@@ -1061,3 +1061,47 @@ Phase 1 landed on `self-hosted` in four commits (core extraction, archive additi
 - `FeedRefresher.refresh` returns a `RefreshReport` (`reachedFeeds`). `reachedFeedsOf(userId)` replaces the pseudo-code's `lastReportCoversUserFeeds`.
 - `EditionService.bundle` and `saved` return DTOs. The manifest's `version` hashes their `ApiJson` encoding.
 - `KoboImageService.writeZip(userId, request, output)` streams the zip.
+
+## Phase 2 deviations (W-D)
+
+The Android client as built, where it differs from section 5 or adds to it.
+
+**Database (version 7).**
+- `MIGRATION_6_7` adds `outbox_event` and also drops `sync_peer`: Kobos pair with the server now, so the phone's pairings mean nothing. Every other table is kept as the cache, and as the library a legacy upload exports.
+- A cache reset (logout, another account, the server's `dbId` changed, Use the account's library) empties every table in place with `clearAllTables()` and deletes the image files. It does not delete the database file. `outbox_event` is emptied too.
+- The outbox's `seq` floor is `AuthState.ackedSeq` in the `server_auth` DataStore. After a reset the next event is numbered above it. `X-Events-Through` is the highest `seq` held, or `ackedSeq` when the table is empty.
+- A feed that a bundle or the saved shelf references, but `/feeds` does not list, is written as a `DISCOVERED` placeholder row so that its posts' foreign keys hold.
+
+**AuthStore** holds more than section 5 lists: `legacyMigration` (NONE, PENDING, DONE, SKIPPED), the persisted import idempotency key, `editionVersions`, `savedVersion`, `engagementCursor`, `lastSyncAt`, `dbId` and `mustChangePassword`. Backup and device transfer exclude `datastore/server_auth.preferences_pb`.
+
+**ServerSync.**
+- After the manifest it also fetches `/settings` and `/stand`, and PATCHes the device's time zone when it changed.
+- It records `nothingNew` from the stand. An `onStand` hook schedules a one-off sync two minutes after the next release (`ClientSyncScheduler.aimAtRelease`). The periodic work runs every 2 hours on a connected network.
+- It answers `NotReady` until the app is logged in, the password is changed and the legacy migration is settled (DONE or SKIPPED).
+- Server settings are applied optimistically on the phone and PATCHed. A failed PATCH is put right by the next sync's `/settings`.
+
+**Account screens.**
+- `AccountGate` wraps the navigation host: sign in, then change password, then migration. When `lastSyncAt` is null it runs a first sync before showing the app.
+- An `http://` address needs an extra confirmation.
+- The legacy upload class is `client.LegacyUpload`, because `LegacyMigration` is the AuthStore enum.
+- Logging in to a different account resets the cache only once the migration is settled. Before that, the phone's library is still waiting to be uploaded.
+
+**Reading.**
+- `CachedArticleRepository.ensureFullText` treats feed content that `FullTextExtractor.looksComplete` accepts as full. Otherwise it asks `POST /articles/{id}/fulltext` once per article per process. Offline, it falls back to the cached body.
+- Search falls back to the cache's FTS index when the server cannot be reached.
+
+**DTO gaps.** `CardDto` has no exploration flag and `BundleItemDto` has no score, so the UI no longer shows either. No core file was edited.
+
+**Storage.** The budget is kept. The "protect from" rule (never trim posts newer than the next edition's cutoff) is gone, because the phone no longer prints. `StorageRepository` uses `NO_PROTECTION`, and only the newest editions are never trimmed.
+
+**Archive.** On the phone, archive import is removed: import goes to the server through the migration screen or the web UI. The export stays, both for Save a copy and for the upload. `ArchiveStatus.Running.importing` is kept but is always false.
+
+**Removed beyond 5.1.**
+- `TimeChangeReceiver` handles only the time zone change, and follows it via `ServerSettingsRepository.followDeviceTimeZone`. `TIME_SET` is no longer received.
+- `RankingSimulationTest` and the engine tests were deleted with the code they tested.
+- `MorningIssueApp` cancels the retired WorkManager jobs by name on start.
+- `rememberOpmlActions` lost its `syncAfterImport` parameter.
+
+**Benchmarks.** `OnOpenEditionBuildBenchmark` is `@Ignore`d, since the phone no longer builds editions. The benchmark seed receiver fakes a login (`https://benchmark.invalid`, migration DONE) so the app opens straight onto its cache.
+
+**Not owned, left as is.** `.github/workflows/release.yml` still passes `MORNINGISSUE_RELAY_ADDRESS` and `MORNINGISSUE_RELAY_TOKEN`. Nothing reads them now. `jsoup` and `readability4j` stay in the version catalog, because `:core` uses them.
