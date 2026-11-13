@@ -10,8 +10,8 @@ import net.tgnra.morningissue.model.Tag
 
 /**
  * The user's subscriptions. Called by the UI (Sources, onboarding, long-press menu) and by
- * OPML import. Implemented by [RoomFeedRepository]. None of these methods touch the network:
- * finding a feed's address is `FeedDiscovery`, fetching its posts is `FeedSyncer`.
+ * OPML import. Implemented by `client.ServerFeedRepository`: reads come from the phone's cache,
+ * changes go to the server; finding a feed's address is `client.FeedFinder`.
  */
 interface FeedRepository {
     /**

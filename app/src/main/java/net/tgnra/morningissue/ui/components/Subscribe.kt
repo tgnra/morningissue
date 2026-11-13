@@ -34,12 +34,12 @@ import net.tgnra.morningissue.R
 import net.tgnra.morningissue.ui.theme.MorningIssueTheme
 
 /**
- * Subscribes to a feed the reader found through discovery, then fetches it. Runs in the app's
- * scope: the subscription and its first posts are for the next edition, whatever screen is open.
+ * Subscribes to a feed the reader found through discovery (the server fetches it), then syncs.
+ * Runs in the app's scope: the subscription is for the next edition, whatever screen is open.
  */
 fun subscribeAndSync(container: AppContainer, feedId: Long) {
     container.appScope.launch {
-        if (container.feeds.subscribe(feedId)) container.feedSyncer.syncFeed(feedId)
+        if (container.feeds.subscribe(feedId)) container.serverSync.sync("subscribed")
     }
 }
 

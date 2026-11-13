@@ -40,7 +40,6 @@ import java.util.Locale
 import kotlinx.coroutines.launch
 import net.tgnra.morningissue.R
 import net.tgnra.morningissue.data.archive.ArchiveFormat
-import net.tgnra.morningissue.data.archive.ArchiveFormatException
 import net.tgnra.morningissue.data.archive.ArchiveStatus
 import net.tgnra.morningissue.data.storage.StorageUsage
 import net.tgnra.morningissue.ui.LocalAppContainer
@@ -90,8 +89,7 @@ internal fun archiveMessage(status: ArchiveStatus, resources: Resources): String
     is ArchiveStatus.Running -> {
         val progress = status.progress
         when {
-            progress == null -> resources.getString(if (status.importing) R.string.archive_importing else R.string.archive_exporting)
-            status.importing -> resources.getString(R.string.archive_importing_progress, progress.postsDone, progress.postsTotal)
+            progress == null -> resources.getString(R.string.archive_exporting)
             else -> resources.getString(R.string.archive_exporting_progress, progress.postsDone, progress.postsTotal)
         }
     }
@@ -116,37 +114,12 @@ internal fun archiveMessage(status: ArchiveStatus, resources: Resources): String
             }
         }
     }
-    is ArchiveStatus.Imported -> buildString {
-        val report = status.report
-        append(resources.getQuantityString(R.plurals.archive_imported_posts, report.postsImported, report.postsImported))
-        append(resources.getString(R.string.archive_imported_skipped, report.postsSkipped))
-        if (report.textsRestored > 0) {
-            append(' ')
-            append(resources.getQuantityString(R.plurals.archive_imported_restored, report.textsRestored, report.textsRestored))
-        }
-        if (report.editionsImported > 0 || report.editionsSkipped > 0) {
-            append(' ')
-            append(resources.getQuantityString(R.plurals.archive_imported_editions, report.editionsImported, report.editionsImported))
-            append(resources.getString(R.string.archive_imported_skipped, report.editionsSkipped))
-        }
-        if (report.feedsAdded > 0) {
-            append(' ')
-            append(resources.getQuantityString(R.plurals.archive_imported_feeds, report.feedsAdded, report.feedsAdded))
-        }
-    }
-    is ArchiveStatus.Failed -> resources.getString(
-        when {
-            status.reason == ArchiveFormatException.Reason.NEWER_VERSION -> R.string.archive_failed_newer
-            status.reason == ArchiveFormatException.Reason.NOT_AN_ARCHIVE -> R.string.archive_failed_not_archive
-            status.importing -> R.string.archive_import_failed
-            else -> R.string.archive_export_failed
-        },
-    )
+    is ArchiveStatus.Failed -> resources.getString(R.string.archive_export_failed)
 }
 
 /**
- * Settings' Storage and Archive sections: the budget for stored article text with what is in
- * use, and export and import of the whole library through the system file picker.
+ * Settings' Storage and Archive sections: the budget for the cache's article text and pictures
+ * with what is in use, and export of the library through the system file picker.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -171,9 +144,6 @@ fun StorageSettingsSections(budgetMb: Int) {
     }
     val exportAndFreeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ArchiveFormat.MIME_TYPE)) { uri ->
         if (uri != null) container.archive.export(uri, freeSpace = true)
-    }
-    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) container.archive.import(uri)
     }
     fun pick(launch: () -> Unit) {
         pickerMissing = false
@@ -246,9 +216,6 @@ fun StorageSettingsSections(budgetMb: Int) {
                 )
             }
         }
-        Setting(stringResource(R.string.archive_import), stringResource(R.string.archive_import_detail)) {
-            PaperButton(stringResource(R.string.archive_import_action), { pick { importLauncher.launch(ARCHIVE_IMPORT_TYPES) } }, enabled = !running)
-        }
         val message = if (pickerMissing) stringResource(R.string.opml_no_picker) else archiveMessage(status, resources)
         if (message != null) {
             NoticeLine(
@@ -259,9 +226,6 @@ fun StorageSettingsSections(budgetMb: Int) {
         }
     }
 }
-
-/** Zip files are not always typed as such by file providers, so the picker allows any file. */
-private val ARCHIVE_IMPORT_TYPES = arrayOf(ArchiveFormat.MIME_TYPE, "application/octet-stream", "*/*")
 
 /** "Less", the budget, "More": the budget moved one step at a time, as the feed slider's stepper does. */
 @Composable

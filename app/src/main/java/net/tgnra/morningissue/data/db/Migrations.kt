@@ -180,6 +180,27 @@ object Migrations {
         }
     }
 
+    /**
+     * Version 7 makes the database the cache of a self-hosted server (`docs/server-design.md`,
+     * section 5): reading events now wait in `outbox_event` until the server acknowledges them.
+     *
+     * - `outbox_event` starts empty. Nothing done before the upgrade is an event: it is in the
+     *   library itself, which the first launch uploads whole (`client.LegacyMigration`).
+     * - `sync_peer` is dropped. The phone no longer syncs with Kobos itself; each Kobo pairs
+     *   with the server again, and the server keeps its acknowledged events from then on.
+     * - Every other table and row is kept as it is, so that the library can be exported and
+     *   uploaded after the upgrade. The upload then replaces it with the server's copy.
+     */
+    val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+        override suspend fun migrate(connection: SQLiteConnection) {
+            connection.execSQL(
+                "CREATE TABLE IF NOT EXISTS `outbox_event` (`seq` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`json` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)",
+            )
+            connection.execSQL("DROP TABLE IF EXISTS `sync_peer`")
+        }
+    }
+
     /** Every step, for `RoomDatabase.Builder.addMigrations`. */
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
 }

@@ -36,7 +36,7 @@ import net.tgnra.morningissue.ui.theme.MorningIssueTheme
  *            ├─ Search ── Reader
  *            ├─ Saved / Liked ── Reader
  *            ├─ Sources ── Source page, Subscriptions desk, Find sources ── Reader, Passed
- *            └─ Settings ── Sync with Kobo ── Relay sync
+ *            └─ Settings ── Sync with Kobo
  * ```
  *
  * Screens never see the controller; they get one callback per way out.

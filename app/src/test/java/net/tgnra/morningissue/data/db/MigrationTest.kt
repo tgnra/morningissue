@@ -13,19 +13,11 @@ import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import kotlinx.coroutines.runBlocking
-import net.tgnra.morningissue.data.signals.EmbeddingBackfill
-import net.tgnra.morningissue.data.signals.SignalsUpkeep
-import net.tgnra.morningissue.data.signals.StoredEmbedding
-import net.tgnra.morningissue.data.signals.TraitsBackfill
-import net.tgnra.morningissue.embedding.EmbeddingFixtures
-import net.tgnra.morningissue.embedding.StaticEmbedder
-import net.tgnra.morningissue.model.ArticleTraits
 import net.tgnra.morningissue.model.ContentBlock
 import net.tgnra.morningissue.model.ContentBlocks
 import net.tgnra.morningissue.model.ContentSource
 import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
-import net.tgnra.morningissue.model.EnclosureKind
 import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.model.InlineSpan
 import net.tgnra.morningissue.model.InlineStyle
@@ -169,7 +161,7 @@ class MigrationTest {
     }
 
     @Test
-    fun theAppOpensAVersion1DatabaseAndTheBackfillFillsInTheTraits() = runBlocking<Unit> {
+    fun theAppOpensAVersion1DatabaseAndKeepsTheLibraryForTheUpload() = runBlocking<Unit> {
         helper.createDatabase(1).use(::seedVersion1)
 
         // As `MorningIssueDatabase.create` builds it, on the file version 1 left behind.
@@ -193,10 +185,9 @@ class MigrationTest {
         assertEquals(3, dao.countWithoutEmbedding(1))
         assertTrue(dao.signalsFor(listOf(1L, 2L, 3L), null).all { it.traits == null && it.categories.isEmpty() && it.embedding == null })
 
-        assertEquals(3, TraitsBackfill(db).run())
-        assertEquals(ArticleTraits(1, 0, false, EnclosureKind.NONE, isLinkPost = true, titlePrefix = "links"), dao.getTraits(1)!!.toTraits())
-        assertEquals(ArticleTraits(0, 0, false, EnclosureKind.NONE, isLinkPost = false, titlePrefix = null), dao.getTraits(2)!!.toTraits())
-        assertEquals(0, TraitsBackfill(db).run())
+        // The upload's check: the phone holds a library. The outbox starts empty.
+        assertEquals(listOf(1L, 2L), db.cacheDao().feedIds().sorted())
+        assertEquals(0, db.outboxDao().count())
 
         // The new tables go with their post.
         dao.addCategories(1, listOf(net.tgnra.morningissue.model.ArticleCategories.of("Tech")!!))
@@ -207,58 +198,6 @@ class MigrationTest {
         assertEquals(0, db.storedImageDao().count())
         assertEquals(0, dao.categoryCount())
         assertEquals(0, dao.embeddingCount())
-        assertEquals(1, dao.traitsCount())
-    }
-
-    @Test
-    fun anUpgradedLibraryGetsItsTraitsAndVectorsFromOnePassOfUpkeep() = runBlocking<Unit> {
-        helper.createDatabase(1).use { v1 ->
-            seedVersion1(v1)
-            // Two more posts as version 1 held them: one in Russian, one with no words at all.
-            v1.execSQL(
-                "INSERT INTO article (id, feedId, guid, url, title, summary, publishedAt, firstSeenAt, wordCount, contentHash) VALUES " +
-                    "(4, 2, 'd', 'https://news.example/d', 'Учёные обнаружили новую экзопланету', 'В зоне обитаемости.', 950, 1000, 3, 'h4'), " +
-                    "(5, 2, 'e', 'https://news.example/e', '🚀🚀🚀', NULL, 950, 1000, 0, NULL)",
-            )
-            v1.execSQL(
-                "INSERT INTO article_fts (rowid, title, summary, author, body) VALUES " +
-                    "(4, 'Учёные обнаружили новую экзопланету', 'В зоне обитаемости.', '', ''), (5, '🚀🚀🚀', '', '', '')",
-            )
-        }
-        val db = Room.databaseBuilder<MorningIssueDatabase>(context, file.absolutePath)
-            .setDriver(AndroidSQLiteDriver())
-            .addMigrations(*Migrations.ALL)
-            .build()
-        helper.closeWhenFinished(db)
-        val dao = db.articleSignalDao()
-        assertEquals(0, dao.traitsCount())
-        assertEquals(0, dao.embeddingCount())
-        val upkeep = SignalsUpkeep(TraitsBackfill(db), EmbeddingBackfill(db, embedder = { EmbeddingFixtures.embedder }))
-
-        // What runs after the first sync, or a few seconds after the app starts.
-        assertEquals(SignalsUpkeep.Result(traits = 5, embedded = 3, marked = 2), upkeep.run())
-
-        val all = listOf(1L, 2L, 3L, 4L, 5L)
-        val signals = dao.signalsFor(all, StaticEmbedder.MODEL_ID).associateBy { it.articleId }
-        assertEquals(all.toSet(), signals.keys)
-        assertTrue(signals.values.all { it.traits?.traitsVersion == net.tgnra.morningissue.model.ArticleTraitRules.VERSION })
-        // Every embeddable post has a vector; it is the one the embedder gives its stored text.
-        for (id in listOf(1L, 2L, 3L)) assertEquals(StaticEmbedder.DIMENSIONS, signals.getValue(id).embedding!!.size)
-        assertEquals(
-            StaticEmbedder.toBytes(EmbeddingFixtures.embedder.embed("Links: something good\nRead this piece on marmalade.")!!).toList(),
-            signals.getValue(1).embedding!!.toList(),
-        )
-        // The two that cannot be embedded are marked, so that they are not tried again.
-        assertEquals(StoredEmbedding.NON_LATIN, StoredEmbedding.markOf(signals.getValue(4).embedding!!))
-        assertEquals(StoredEmbedding.NO_KNOWN_WORDS, StoredEmbedding.markOf(signals.getValue(5).embedding!!))
-        assertEquals(0, dao.countWithoutEmbedding(StaticEmbedder.MODEL_ID))
-        assertEquals(0, dao.articlesNeedingTraits(net.tgnra.morningissue.model.ArticleTraitRules.VERSION, 0, 10).size)
-
-        // A second pass finds nothing to do and changes nothing.
-        assertEquals(SignalsUpkeep.Result(), upkeep.run())
-        assertEquals(5, dao.traitsCount())
-        assertEquals(5, dao.embeddingCount())
-        assertEquals(signals.getValue(1).embedding!!.toList(), dao.getEmbedding(1)!!.vector.toList())
     }
 
     /** What version 3 must hold after an upgrade: every feed subscribed, the discovery tables empty and usable. */
@@ -406,7 +345,7 @@ class MigrationTest {
     }
 
     @Test
-    fun anUpgradedDatabaseCanPairAKobo() = runBlocking<Unit> {
+    fun anUpgradedDatabaseTakesEventsInTheOutbox() = runBlocking<Unit> {
         helper.createDatabase(1).use(::seedVersion1)
         helper.runMigrationsAndValidate(4, listOf(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3, Migrations.MIGRATION_3_4)).close()
         val db = Room.databaseBuilder<MorningIssueDatabase>(context, file.absolutePath)
@@ -414,18 +353,11 @@ class MigrationTest {
             .addMigrations(*Migrations.ALL)
             .build()
         helper.closeWhenFinished(db)
-        val peers = db.syncPeerDao()
-        assertTrue(peers.all().isEmpty())
-        peers.pairRelay("b7e2", "Kobo Libra 2", 1264, "auth", "enc", Instant.ofEpochMilli(3_000))
-        peers.setAcked("b7e2", 41, Instant.ofEpochMilli(4_000))
-        // Pairing again replaces the keys and keeps the acknowledged events.
-        peers.pairRelay("b7e2", "Kobo Libra 2", 1264, "auth2", "enc2", Instant.ofEpochMilli(5_000))
-        val peer = peers.get("b7e2")!!
-        assertNull(peer.tokenHash)
-        assertEquals("auth2", peer.relayAuthKey)
-        assertEquals(41L, peer.ackedSeq)
-        assertEquals(Instant.ofEpochMilli(3_000), peer.pairedAt)
-        assertTrue(peers.articleExists(1))
+        val outbox = db.outboxDao()
+        val first = outbox.insert(OutboxEventEntity(json = "{}", createdAt = Instant.ofEpochMilli(3_000)))
+        val second = outbox.insert(OutboxEventEntity(json = "{}", createdAt = Instant.ofEpochMilli(3_001)))
+        assertEquals(first + 1, second)
+        assertTrue(db.cacheDao().articleExists(1))
     }
 
     /** What version 6 must hold after an upgrade: every paired Kobo kept as it was, and none paired for relay sync. */
@@ -465,40 +397,55 @@ class MigrationTest {
         }
     }
 
+    /**
+     * What version 7 must hold after an upgrade: the library as it was (the upload to the server
+     * reads it), the Kobo pairings gone (they pair again with the server), and an empty outbox
+     * whose numbers only go up.
+     */
+    private fun assertVersion7(db: SQLiteConnection) {
+        assertEquals(0L, db.long("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sync_peer'"))
+        assertEquals(0L, db.long("SELECT COUNT(*) FROM outbox_event"))
+        assertEquals(2L, db.long("SELECT COUNT(*) FROM feed WHERE status = 'SUBSCRIBED'"))
+        assertEquals(1200L, db.long("SELECT likedAt FROM engagement WHERE articleId = 1"))
+        assertEquals(body, db.text("SELECT blocksJson FROM article_content WHERE articleId = 1"))
+        // AUTOINCREMENT: a seq is never handed out twice, even once the rows above it are deleted.
+        db.execSQL("INSERT INTO outbox_event (json, createdAt) VALUES ('{}', 1), ('{}', 2)")
+        assertEquals(2L, db.long("SELECT MAX(seq) FROM outbox_event"))
+        db.execSQL("DELETE FROM outbox_event")
+        db.execSQL("INSERT INTO outbox_event (json, createdAt) VALUES ('{}', 3)")
+        assertEquals(3L, db.long("SELECT seq FROM outbox_event"))
+    }
+
     @Test
-    fun anUpgradedKoboPairsForRelaySyncAndKeepsItsAcknowledgedEvents() = runBlocking<Unit> {
-        helper.createDatabase(5).use(::pairAtVersion5)
-        val db = Room.databaseBuilder<MorningIssueDatabase>(context, file.absolutePath)
-            .setDriver(AndroidSQLiteDriver())
-            .addMigrations(*Migrations.ALL)
-            .build()
-        helper.closeWhenFinished(db)
-        val peers = db.syncPeerDao()
-        peers.pairRelay("b7e2", "Kobo Libra 2", 1264, "auth", "enc", Instant.ofEpochMilli(6_000))
-        // A Kobo paired over the local network before keeps its row, and with it its ackedSeq.
-        var peer = peers.get("b7e2")!!
-        assertEquals("ab", peer.tokenHash)
-        assertTrue(peer.isRelayPaired)
-        assertEquals(41L, peer.ackedSeq)
-        assertEquals(listOf("b7e2"), peers.relayPeers().map { it.deviceId })
-        // Scanning again replaces the keys and keeps ackedSeq.
-        peers.pairRelay("b7e2", "Kobo Libra 2 (new name)", 1072, "auth2", "enc2", Instant.ofEpochMilli(7_000))
-        peer = peers.get("b7e2")!!
-        assertEquals("auth2", peer.relayAuthKey)
-        assertEquals(1072, peer.relayWidth)
-        assertEquals(41L, peer.ackedSeq)
-        // Forgotten, the row goes, the old token with it.
-        peers.forget("b7e2")
-        assertNull(peers.get("b7e2"))
+    fun version6To7DropsThePeersAndAddsTheOutbox() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(5, listOf(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3, Migrations.MIGRATION_3_4, Migrations.MIGRATION_4_5))
+            .use(::pairAtVersion5)
+        helper.runMigrationsAndValidate(6, listOf(Migrations.MIGRATION_5_6)).close()
+        // Validated against 7.json.
+        helper.runMigrationsAndValidate(7, listOf(Migrations.MIGRATION_6_7)).use(::assertVersion7)
+    }
+
+    @Test
+    fun version1To7RunsEveryStep() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(7, Migrations.ALL.toList()).use(::assertVersion7)
+    }
+
+    @Test
+    fun version2To7RunsEveryStep() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(2, listOf(Migrations.MIGRATION_1_2)).close()
+        helper.runMigrationsAndValidate(7, Migrations.ALL.drop(1)).use(::assertVersion7)
     }
 
     @Test
     fun aFreshInstallIsCreatedAtTheCurrentVersion() = runBlocking<Unit> {
-        // Version 6 built directly must be what the migrations arrive at; validation compares both with 6.json.
-        helper.createDatabase(6).use { db ->
+        // Version 7 built directly must be what the migrations arrive at; validation compares both with 7.json.
+        helper.createDatabase(7).use { db ->
             assertEquals(0L, db.long("SELECT COUNT(*) FROM edition_page_view"))
-            assertEquals(0L, db.long("SELECT COUNT(*) FROM sync_peer"))
+            assertEquals(0L, db.long("SELECT COUNT(*) FROM outbox_event"))
         }
-        helper.runMigrationsAndValidate(6, emptyList()).close()
+        helper.runMigrationsAndValidate(7, emptyList()).close()
     }
 }

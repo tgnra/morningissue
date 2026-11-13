@@ -77,6 +77,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -351,6 +353,8 @@ fun PaperTextField(
     onImeAction: () -> Unit = {},
     enabled: Boolean = true,
     leadingIcon: ImageVector? = null,
+    /** Hides what is typed, and asks for the password keyboard. */
+    isPassword: Boolean = false,
 ) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
@@ -365,10 +369,15 @@ fun PaperTextField(
         leadingIcon = leadingIcon?.let { { Icon(it, contentDescription = null, tint = colors.inkSecondary) } },
         shape = RectangleShape,
         keyboardOptions = KeyboardOptions(
-            keyboardType = if (isUrl) KeyboardType.Uri else KeyboardType.Text,
+            keyboardType = when {
+                isPassword -> KeyboardType.Password
+                isUrl -> KeyboardType.Uri
+                else -> KeyboardType.Text
+            },
             imeAction = imeAction,
-            autoCorrectEnabled = !isUrl,
+            autoCorrectEnabled = !isUrl && !isPassword,
         ),
+        visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardActions = KeyboardActions(onAny = { onImeAction() }),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = colors.ink,

@@ -34,6 +34,9 @@ import net.tgnra.morningissue.model.DisplayMode
 import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.ThemeMode
 import net.tgnra.morningissue.ui.LocalAppContainer
+import net.tgnra.morningissue.ui.account.AccountSettingsDialogs
+import net.tgnra.morningissue.ui.account.AccountSettingsSection
+import net.tgnra.morningissue.ui.account.rememberAccountSettingsState
 import net.tgnra.morningissue.ui.components.DialogButtons
 import net.tgnra.morningissue.ui.components.HeavyRule
 import net.tgnra.morningissue.ui.components.PagedColumn
@@ -49,9 +52,10 @@ import net.tgnra.morningissue.ui.layout.LocalPaperLayoutSpec
 import net.tgnra.morningissue.ui.theme.MorningIssueTheme
 
 /**
- * Reset time, edition length, theme and display mode, storage and the archive, and the way to
- * Sync with Kobo. Every change is written straight to the settings store, and the app
- * re-themes from that, so there is nothing to confirm.
+ * Reset time, edition length, theme and display mode, the account, storage and the archive, and
+ * the Kobo e-readers. Server settings go to the server (and show at once); device settings are
+ * written straight to the settings store, and the app re-themes from that, so there is nothing
+ * to confirm.
  */
 @Composable
 fun SettingsScreen(
@@ -65,11 +69,13 @@ fun SettingsScreen(
     val use24Hour = DateFormat.is24HourFormat(LocalContext.current)
     var pickingTime by rememberSaveable { mutableStateOf(false) }
     var pickingEveningTime by rememberSaveable { mutableStateOf(false) }
+    val account = rememberAccountSettingsState()
 
     PaperScreenFrame(
         title = stringResource(R.string.settings_title),
         onBack = onBack,
         overlay = {
+            AccountSettingsDialogs(account)
             val settings = stored
             if (pickingTime && settings != null) {
                 ResetTimeDialog(
@@ -80,7 +86,7 @@ fun SettingsScreen(
                     onConfirm = { time ->
                         pickingTime = false
                         // From the next release: see `ReleaseTimes`.
-                        scope.launch { container.releaseTimes.setResetTime(time) }
+                        scope.launch { container.settings.setResetTime(time) }
                     },
                 )
             }
@@ -92,7 +98,7 @@ fun SettingsScreen(
                     onDismiss = { pickingEveningTime = false },
                     onConfirm = { time ->
                         pickingEveningTime = false
-                        scope.launch { container.releaseTimes.setEveningEditionTime(time) }
+                        scope.launch { container.settings.setEveningEditionTime(time) }
                     },
                 )
             }
@@ -123,7 +129,7 @@ fun SettingsScreen(
                                 true to stringResource(R.string.settings_evening_on),
                             ),
                             selected = settings.eveningEditionEnabled,
-                            onSelect = { scope.launch { container.releaseTimes.setEveningEditionEnabled(it) } },
+                            onSelect = { scope.launch { container.settings.setEveningEditionEnabled(it) } },
                         )
                         if (settings.eveningEditionEnabled) {
                             PaperButton(
@@ -168,6 +174,7 @@ fun SettingsScreen(
                     )
                 }
             }
+            AccountSettingsSection(account)
             StorageSettingsSections(settings.storageBudgetMb)
             SettingsSection(stringResource(R.string.settings_kobo)) {
                 Setting(stringResource(R.string.settings_kobo_sync), stringResource(R.string.settings_kobo_sync_detail)) {

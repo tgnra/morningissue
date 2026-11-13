@@ -5,8 +5,8 @@ import net.tgnra.morningissue.model.Edition
 import net.tgnra.morningissue.model.EditionSummary
 
 /**
- * Reading stored editions. Called by the UI (newsstand, paper, back issues). Implemented by
- * [RoomEditionRepository], which reads Room and delegates building to `EditionPublisher`.
+ * Reading editions. Called by the UI (newsstand, paper, back issues). Implemented by
+ * `client.CachedEditionRepository`, which reads the cache; editions are printed on the server.
  */
 interface EditionRepository {
     /**
@@ -27,24 +27,10 @@ interface EditionRepository {
     suspend fun getEdition(editionId: Long): Edition?
 
     /**
-     * Makes sure the edition for the most recent reset time exists, building it from stored
-     * posts if it is missing, and returns the ID of the newest edition on the stand. Never
-     * syncs. Returns null when there is nothing to show (for example no feeds yet). Cheap when
-     * the edition already exists.
-     *
-     * The newsstand does not call this when it opens: an edition the background build missed
-     * is shown as unprinted and built by Print now (`edition.EditionPrinter`). Onboarding
-     * calls it once, after its first sync.
+     * Syncs with the server and returns the ID of the newest edition on the stand, or null when
+     * there is none. Printing is the server's (`client.PrintClient`).
      */
     suspend fun ensureCurrentEdition(): Long?
-
-    /**
-     * Prints an Extra edition from the stored posts of [feedIds] and returns its ID; see
-     * `EditionPublisher.publishExtraEdition`. Sync the feeds first. If today already has an
-     * Extra edition it is reprinted to include these feeds and keeps its ID. Null when the
-     * feeds had nothing to print; nothing is then stored or changed.
-     */
-    suspend fun publishExtraEdition(feedIds: Set<Long>): Long? = null
 
     /** Records that the reader opened the edition. Only the first call counts. */
     suspend fun markEditionOpened(editionId: Long)

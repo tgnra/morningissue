@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Only to scan a Kobo's relay pairing code; asked for when Scan is tapped. -->
+    <!-- Only to scan a Kobo's pairing code; asked for when Scan is tapped. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
@@ -28,13 +28,12 @@
             </intent-filter>
         </activity>
 
-        <!-- Reschedules the early edition build when the clock or time zone changes. -->
+        <!-- Tells the server about a new time zone when the account follows the phone's. -->
         <receiver
             android:name=".edition.TimeChangeReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
-                <action android:name="android.intent.action.TIME_SET" />
             </intent-filter>
         </receiver>
     </application>

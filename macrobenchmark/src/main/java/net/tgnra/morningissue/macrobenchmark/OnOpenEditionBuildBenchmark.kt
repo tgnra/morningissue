@@ -10,6 +10,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Until
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,6 +37,10 @@ import org.junit.runner.RunWith
  *
  * Run on a real low-end phone for numbers to hold against the budget: an emulator's are only
  * indicative. **This replaces the installed app's data.**
+ *
+ * Ignored since the phone became a client of a Morning Issue server: editions are built on the
+ * server, so there is no build on the phone to time (`docs/server-design.md`, Phase 2
+ * deviations, W-D).
  */
 @OptIn(ExperimentalMetricApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -43,6 +48,7 @@ class OnOpenEditionBuildBenchmark {
     @get:Rule
     val benchmarkRule = MacrobenchmarkRule()
 
+    @Ignore("Editions are built on the server; the phone has no build to time")
     @Test
     fun onOpenBuildOverOneThousandCandidates() = benchmarkRule.measureRepeated(
         packageName = TARGET_PACKAGE,

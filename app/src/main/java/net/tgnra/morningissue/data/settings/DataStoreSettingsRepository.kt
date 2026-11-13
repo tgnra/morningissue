@@ -127,6 +127,31 @@ class DataStoreSettingsRepository(
         }
     }
 
+    /**
+     * The settings the server holds (`GET /settings`), written over the local copy in one go,
+     * which is what the UI shows offline. The server works out how a release-time change takes
+     * effect, so no local record of one is kept.
+     */
+    suspend fun writeServerFields(
+        resetTime: LocalTime,
+        editionLength: EditionLength,
+        eveningEnabled: Boolean,
+        eveningTime: LocalTime,
+        onboardingDone: Boolean,
+        extraOfferDismissedAt: Instant?,
+    ) {
+        dataStore.edit {
+            it[RESET_MINUTE_OF_DAY] = resetTime.hour * 60 + resetTime.minute
+            it[EDITION_LENGTH] = editionLength.name
+            it[EVENING_EDITION] = eveningEnabled
+            it[EVENING_MINUTE_OF_DAY] = eveningTime.hour * 60 + eveningTime.minute
+            it[ONBOARDING_DONE] = onboardingDone
+            if (extraOfferDismissedAt != null) it[EXTRA_OFFER_DISMISSED_AT] = extraOfferDismissedAt.toEpochMilli() else it.remove(EXTRA_OFFER_DISMISSED_AT)
+            it.remove(RESET_CHANGE)
+            it.remove(EVENING_CHANGE)
+        }
+    }
+
     /** Epoch milliseconds separated by commas; anything unreadable is dropped. */
     private fun releaseTimes(stored: String?): List<Instant> =
         stored.orEmpty().split(',').mapNotNull { it.trim().toLongOrNull() }.map(Instant::ofEpochMilli)

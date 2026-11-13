@@ -414,44 +414,15 @@ class DiscoveryCandidateEntity(
 )
 
 /**
- * A Kobo paired with this phone for relay sync (`docs/relay-sync.md`). [deviceId] is the random
- * ID the Kobo made for itself. [ackedSeq] is the highest event `seq` from this device that has
- * been merged; it is written in the same transaction as the events it covers.
- *
- * Earlier versions also paired Kobos over the local network (`docs/kobo-sync.md`), which the
- * app no longer does. A row they left keeps its [tokenHash] and [ackedSeq], so that the Kobo
- * keeps its place when its relay code is scanned; until then nothing reads it.
+ * One reading event waiting to go to the server (`POST /sync/events`), in the order it happened.
+ * [seq] is the event's `seq` on the wire: assigned here, never reused (AUTOINCREMENT, and
+ * `client.Outbox` keeps it above what the server has acknowledged even after the cache is
+ * reset). [json] is the `kobo.SyncEvent` without its `seq`. A row is deleted once the server has
+ * acknowledged its `seq`; see `client.OutboxUploader`.
  */
-@Entity(tableName = "sync_peer")
-data class SyncPeerEntity(
-    @PrimaryKey val deviceId: String,
-    /** What the Kobo calls itself ("Kobo Libra 2"), as the Sync screen shows it. */
-    val name: String,
-    /**
-     * SHA-256 of the token an earlier version gave it for local-network sync; never checked, and
-     * null for every Kobo paired since.
-     */
-    val tokenHash: String?,
-    /**
-     * The highest event `seq` from this device the phone has merged: a Kobo has one event log,
-     * whichever way an earlier version took its events.
-     */
-    @ColumnInfo(defaultValue = "0") val ackedSeq: Long = 0,
-    /** When the row was made: the first pairing, of either kind. */
-    val pairedAt: Instant,
-    /**
-     * When the device last synced with the phone: it finished its part of a sync session, or
-     * its events were merged. The Sync screen shows it as last seen; null until then.
-     */
-    val lastSyncAt: Instant? = null,
-    /** The short side of its screen from its relay pairing code; null when it is not paired for relay sync. */
-    val relayWidth: Int? = null,
-    /** Its relay auth key, wrapped with the Keystore key (`relay/KeyWrapper`), in base64url. */
-    val relayAuthKey: String? = null,
-    /** Its relay enc key, wrapped the same way. */
-    val relayEncKey: String? = null,
-    /** When its relay pairing code was last scanned. */
-    val relayPairedAt: Instant? = null,
-) {
-    val isRelayPaired: Boolean get() = relayAuthKey != null && relayEncKey != null
-}
+@Entity(tableName = "outbox_event")
+data class OutboxEventEntity(
+    @PrimaryKey(autoGenerate = true) val seq: Long = 0,
+    val json: String,
+    val createdAt: Instant,
+)

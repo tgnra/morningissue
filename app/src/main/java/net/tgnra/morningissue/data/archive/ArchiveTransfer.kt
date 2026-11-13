@@ -1,63 +1,27 @@
 package net.tgnra.morningissue.data.archive
 
 import androidx.room3.withReadTransaction
-import androidx.room3.withWriteTransaction
-import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
-import java.io.BufferedReader
 import java.io.IOException
-import java.io.InputStream
-import java.io.InputStreamReader
 import java.io.OutputStream
 import java.time.Clock
-import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.SerializationException
 import net.tgnra.morningissue.data.db.ArticleEntity
 import net.tgnra.morningissue.data.db.EditionEntity
-import net.tgnra.morningissue.data.db.EditionItemEntity
 import net.tgnra.morningissue.data.db.EngagementEntity
-import net.tgnra.morningissue.data.db.FeedEntity
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
-import net.tgnra.morningissue.data.repository.AffinityLearner
 import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.model.AppSettings
-import net.tgnra.morningissue.model.ArticleCategories
-import net.tgnra.morningissue.model.ContentBlocks
-import net.tgnra.morningissue.model.ContentSource
-import net.tgnra.morningissue.model.FeedWordCount
-import net.tgnra.morningissue.model.EditionKind
-import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.EnclosureKind
-import net.tgnra.morningissue.model.FeedStatus
-import net.tgnra.morningissue.model.FeedUrls
-import net.tgnra.morningissue.model.ItemKind
-import net.tgnra.morningissue.model.SliderStep
 
 data class ExportReport(val feeds: Int = 0, val posts: Int = 0, val editions: Int = 0)
-
-data class ImportReport(
-    /** Posts the database did not hold. */
-    val postsImported: Int = 0,
-    /** Posts it already held (matched by feed address and post ID), left as they were. */
-    val postsSkipped: Int = 0,
-    /** Of the posts already held, those whose trimmed text was put back. Not counted in [postsSkipped]. */
-    val textsRestored: Int = 0,
-    val editionsImported: Int = 0,
-    /** Editions already held (matched by date and kind). */
-    val editionsSkipped: Int = 0,
-    /** Feeds in the archive that were not subscribed and have been added back. */
-    val feedsAdded: Int = 0,
-)
 
 /** How far an export or import has got, in posts (the bulk of the work). */
 data class ArchiveProgress(val postsDone: Int, val postsTotal: Int)
@@ -69,33 +33,15 @@ class ArchiveFormatException(val reason: Reason) : IOException(reason.name) {
 
 /**
  * Writes the whole library (feeds with their tags, every stored post with its text, its feed
- * categories and the reader's engagement, and every released edition) to one file, and merges
- * such a file back.
+ * categories and the reader's engagement, and every released edition) to one file: a copy
+ * the reader keeps, and the upload of the library to the server (`POST /import`). The server
+ * does the importing now.
  * Implemented by [RoomArchiveTransfer]. The file format is [ArchiveFormat].
  */
 interface ArchiveTransfer {
     /** Writes the archive to [output], a line at a time. Does not close [output]. */
     suspend fun export(output: OutputStream, onProgress: (ArchiveProgress) -> Unit = {}): ExportReport
 
-    /**
-     * Merges an archive into the database. [open] is called once per pass over the file and
-     * must return a fresh stream each time; each is closed here.
-     *
-     * - A feed is matched by its normalised address; one not held is added back with its
-     *   tags, slider and status (a feed that only held posts saved from discovery comes back
-     *   as such). Feeds already held keep their own tags and slider; one held only as
-     *   discovered becomes a subscription when the file says it is one. A version 1 file's
-     *   feeds are all subscriptions.
-     * - A post is matched by feed and post ID. One already held is left alone, except that
-     *   text it has lost to trimming is put back.
-     * - Engagement is merged without overwriting anything set locally.
-     * - A post's categories are added when it has none. Traits and embeddings are not in the
-     *   file; `TraitsBackfill` and the embedder rebuild them for imported posts.
-     * - An edition is matched by date and kind; one already held is skipped.
-     *
-     * @throws ArchiveFormatException when the file is not an archive, or is from a newer version.
-     */
-    suspend fun import(open: () -> InputStream, onProgress: (ArchiveProgress) -> Unit = {}): ImportReport
 }
 
 class RoomArchiveTransfer(
@@ -231,227 +177,7 @@ class RoomArchiveTransfer(
         pageViewsTracked = pageViewsTracked, pageViews = pageViews.takeIf { it.isNotEmpty() },
     )
 
-    // --- Import ----------------------------------------------------------------------------
-
-    override suspend fun import(open: () -> InputStream, onProgress: (ArchiveProgress) -> Unit): ImportReport = withContext(dispatcher) {
-        val manifest = readEntry(open, ArchiveFormat.MANIFEST) { lines ->
-            lines.firstOrNull()?.let { decode<ArchiveManifest>(it) }
-        } ?: throw ArchiveFormatException(ArchiveFormatException.Reason.NOT_AN_ARCHIVE)
-        if (manifest.format != ArchiveFormat.FORMAT) throw ArchiveFormatException(ArchiveFormatException.Reason.NOT_AN_ARCHIVE)
-        if (manifest.version > ArchiveFormat.VERSION) throw ArchiveFormatException(ArchiveFormatException.Reason.NEWER_VERSION)
-
-        var report = ImportReport()
-
-        // Feeds: archive number to local feed ID.
-        val feedIds = HashMap<Long, Long>()
-        readEntry(open, ArchiveFormat.FEEDS) { lines ->
-            val feeds = lines.mapNotNull { decode<ArchiveFeed>(it) }.toList()
-            database.withWriteTransaction {
-                val known = feedDao.getUrls().associate { FeedUrls.normalize(it.url) to it.id }.toMutableMap()
-                var added = 0
-                for (feed in feeds) {
-                    val key = FeedUrls.normalize(feed.url)
-                    // A version 1 file has no status: every feed in it was a subscription.
-                    val status = enumOrNull<FeedStatus>(feed.status) ?: FeedStatus.SUBSCRIBED
-                    val existing = known[key]
-                    if (existing != null && status == FeedStatus.SUBSCRIBED) {
-                        // Subscribed in the file, only discovered here: the file's word stands.
-                        if (feedDao.subscribeDiscovered(existing, Instant.ofEpochMilli(feed.addedAt)) > 0) added++
-                    }
-                    val id = existing ?: run {
-                        val newId = feedDao.insert(
-                            FeedEntity(
-                                url = feed.url, siteUrl = feed.siteUrl, title = feed.title, iconUrl = feed.iconUrl,
-                                sliderStep = enumOrNull<SliderStep>(feed.sliderStep) ?: SliderStep.AUTO,
-                                addedAt = Instant.ofEpochMilli(feed.addedAt),
-                                status = status,
-                                discoveredAt = if (status == FeedStatus.DISCOVERED) Instant.ofEpochMilli(feed.discoveredAt ?: feed.addedAt) else null,
-                            ),
-                        )
-                        if (newId == -1L) return@run null
-                        if (feed.tags.isNotEmpty()) tagDao.setFeedTags(newId, feed.tags)
-                        known[key] = newId
-                        if (status == FeedStatus.SUBSCRIBED) added++
-                        newId
-                    } ?: continue
-                    feedIds[feed.n] = id
-                }
-                report = report.copy(feedsAdded = added)
-            }
-        }
-
-        // Posts, a batch per transaction: archive number to local article ID.
-        val postIds = HashMap<Long, Long>()
-        readEntry(open, ArchiveFormat.POSTS) { lines ->
-            var done = 0
-            for (batch in lines.chunked(BATCH)) {
-                currentCoroutineContext().ensureActive()
-                database.withWriteTransaction {
-                    for (text in batch) {
-                        val post = decode<ArchivePost>(text)
-                        val feedId = post?.let { feedIds[it.feed] }
-                        if (post == null || feedId == null) {
-                            report = report.copy(postsSkipped = report.postsSkipped + 1)
-                            continue
-                        }
-                        report = importPost(post, feedId, postIds, report)
-                    }
-                }
-                done += batch.size
-                onProgress(ArchiveProgress(done, maxOf(manifest.posts, done)))
-            }
-        }
-
-        readEntry(open, ArchiveFormat.EDITIONS) { lines ->
-            for (text in lines) {
-                currentCoroutineContext().ensureActive()
-                val edition = decode<ArchiveEdition>(text) ?: continue
-                val imported = database.withWriteTransaction { importEdition(edition, postIds) }
-                report = if (imported) report.copy(editionsImported = report.editionsImported + 1)
-                else report.copy(editionsSkipped = report.editionsSkipped + 1)
-            }
-        }
-
-        // Imported runs and engagement are evidence for affinity like any other.
-        database.withWriteTransaction { AffinityLearner(database, config).refresh(clock.instant()) }
-        report
-    }
-
-    private suspend fun importPost(post: ArchivePost, feedId: Long, postIds: MutableMap<Long, Long>, report: ImportReport): ImportReport {
-        val existing = articleDao.getByGuid(feedId, post.guid)
-        val content = post.content?.let { content ->
-            val blocks = ContentBlocks.decode(content.blocks)
-            val source = enumOrNull<ContentSource>(content.source)
-            if (blocks.isEmpty() || source == null) null else Triple(content, ContentBlocks.plainText(blocks), source)
-        }
-        val articleId: Long
-        var result = report
-        if (existing == null) {
-            articleId = articleDao.insertNew(
-                ArticleEntity(
-                    feedId = feedId, guid = post.guid, url = post.url, title = post.title, summary = post.summary,
-                    imageUrl = post.imageUrl, author = post.author, publishedAt = Instant.ofEpochMilli(post.publishedAt),
-                    firstSeenAt = Instant.ofEpochMilli(post.firstSeenAt), wordCount = post.wordCount,
-                    feedWordCount = post.feedWordCount ?: FeedWordCount.estimate(post.wordCount, post.summary, content?.third),
-                    contentHash = post.contentHash,
-                ),
-            ) ?: return report.copy(postsSkipped = report.postsSkipped + 1)
-            if (content != null) storeContent(articleId, post.wordCount, content)
-            result = result.copy(postsImported = result.postsImported + 1)
-        } else {
-            articleId = existing.id
-            val held = articleDao.getContentSource(articleId)
-            // Put back text lost to trimming; a fetched full text also replaces a feed excerpt.
-            val restore = content != null && (held == null || (held == ContentSource.FEED && content.third == ContentSource.FETCHED))
-            if (restore) {
-                storeContent(articleId, post.wordCount, content!!)
-                result = result.copy(textsRestored = result.textsRestored + 1)
-            } else {
-                result = result.copy(postsSkipped = result.postsSkipped + 1)
-            }
-        }
-        postIds[post.n] = articleId
-        importSignals(post, articleId, isNew = existing == null)
-        post.engagement?.let { archived ->
-            val local = engagementDao.get(articleId)
-            val merged = mergeEngagement(articleId, local, archived)
-            if (merged != local) archiveDao.upsertEngagement(merged)
-        }
-        return result
-    }
-
-    /**
-     * Categories and the enclosure kind fill in what the post lacks and never replace what it
-     * has, like engagement. Keys are normalised again, since the file may not be this app's own.
-     */
-    private suspend fun importSignals(post: ArchivePost, articleId: Long, isNew: Boolean) {
-        val categories = post.categories.mapNotNull { ArticleCategories.of(it.key, it.label) }
-        if (categories.isNotEmpty() && (isNew || signalDao.categoriesOf(listOf(articleId)).isEmpty())) {
-            signalDao.addCategories(articleId, categories)
-        }
-        val enclosure = post.enclosure?.let { enumOrNull<EnclosureKind>(it) }?.takeIf { it != EnclosureKind.NONE } ?: return
-        val held = if (isNew) null else signalDao.getTraits(articleId)
-        when {
-            held == null -> signalDao.insertPendingEnclosure(articleId, enclosure)
-            held.enclosure == EnclosureKind.NONE -> signalDao.updateEnclosure(articleId, enclosure)
-        }
-    }
-
-    private suspend fun storeContent(articleId: Long, wordCount: Int, content: Triple<ArchiveContent, String, ContentSource>) {
-        val (archived, plainText, source) = content
-        articleDao.storeContent(articleId, archived.blocks, plainText, wordCount, source, Instant.ofEpochMilli(archived.storedAt))
-    }
-
-    /** Returns false when an edition for the same date and kind is already held. */
-    private suspend fun importEdition(edition: ArchiveEdition, postIds: Map<Long, Long>): Boolean {
-        val date = runCatching { LocalDate.parse(edition.date) }.getOrNull() ?: return false
-        val kind = enumOrNull<EditionKind>(edition.kind) ?: return false
-        val length = enumOrNull<EditionLength>(edition.length) ?: EditionLength.STANDARD
-        if (editionDao.getByDate(date, kind) != null) return false
-        val items = edition.items.mapNotNull { item ->
-            val articleId = postIds[item.post] ?: return@mapNotNull null
-            val itemKind = enumOrNull<ItemKind>(item.kind) ?: return@mapNotNull null
-            EditionItemEntity(0, articleId, item.page, item.section, item.slot, itemKind, item.score, item.reason)
-        }.distinctBy { it.articleId }
-        editionDao.insertEditionWithItems(
-            EditionEntity(
-                date = date, kind = kind, cutoffAt = Instant.ofEpochMilli(edition.cutoffAt),
-                releaseAt = Instant.ofEpochMilli(edition.releaseAt), builtAt = Instant.ofEpochMilli(edition.builtAt),
-                length = length, number = edition.number, openedAt = edition.openedAt?.let(Instant::ofEpochMilli),
-                finishedAt = edition.finishedAt?.let(Instant::ofEpochMilli),
-            ),
-            items,
-        )
-        return true
-    }
-
-    private inline fun <reified T> decode(line: String): T? {
-        if (line.isBlank()) return null
-        return try {
-            json.decodeFromString<T>(line)
-        } catch (e: SerializationException) {
-            null
-        } catch (e: IllegalArgumentException) {
-            null
-        }
-    }
-
-    private inline fun <reified T : Enum<T>> enumOrNull(name: String): T? = enumValues<T>().firstOrNull { it.name == name }
-
-    /** Runs [block] over the lines of the zip entry [name]; returns null when the file has no such entry. */
-    private inline fun <R> readEntry(open: () -> InputStream, name: String, block: (Sequence<String>) -> R): R? {
-        ZipInputStream(BufferedInputStream(open())).use { zip ->
-            while (true) {
-                val entry = try {
-                    zip.nextEntry
-                } catch (e: java.util.zip.ZipException) {
-                    null
-                } ?: return null
-                if (entry.name == name) return block(BufferedReader(InputStreamReader(zip, Charsets.UTF_8)).lineSequence())
-            }
-        }
-    }
-
-    companion object {
-        private const val PAGE = 200
-        private const val BATCH = 100
-
-        /**
-         * Local engagement wins wherever it says anything: a time set locally is never
-         * replaced, and counters only go up. The archive fills in what is missing, so Likes and
-         * saves come back after a feed was removed or on a new phone.
-         */
-        internal fun mergeEngagement(articleId: Long, local: EngagementEntity?, archived: ArchiveEngagement): EngagementEntity {
-            val base = local ?: EngagementEntity(articleId = articleId)
-            return base.copy(
-                openedAt = base.openedAt ?: archived.openedAt?.let(Instant::ofEpochMilli),
-                readFraction = maxOf(base.readFraction, archived.readFraction.coerceIn(0f, 1f)),
-                readAt = base.readAt ?: archived.readAt?.let(Instant::ofEpochMilli),
-                savedAt = base.savedAt ?: archived.savedAt?.let(Instant::ofEpochMilli),
-                likedAt = base.likedAt ?: archived.likedAt?.let(Instant::ofEpochMilli),
-                editionsRunUnopened = maxOf(base.editionsRunUnopened, archived.editionsRunUnopened),
-                leadCount = maxOf(base.leadCount, archived.leadCount),
-            )
-        }
+    private companion object {
+        const val PAGE = 200
     }
 }

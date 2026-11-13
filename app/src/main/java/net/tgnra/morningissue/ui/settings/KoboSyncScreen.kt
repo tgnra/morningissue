@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.content.res.Resources
 import android.text.format.DateFormat
-import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.border
@@ -18,18 +17,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
@@ -40,18 +39,12 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.Instant
 import java.time.ZoneId
+import kotlinx.coroutines.launch
 import net.tgnra.morningissue.R
-import net.tgnra.morningissue.data.db.SyncPeerEntity
-import net.tgnra.morningissue.relay.KoboStage
-import net.tgnra.morningissue.relay.PairingParse
-import net.tgnra.morningissue.relay.PairingProblem
-import net.tgnra.morningissue.relay.RelayAddress
-import net.tgnra.morningissue.relay.RelayPairingUri
-import net.tgnra.morningissue.relay.RelayProblem
-import net.tgnra.morningissue.relay.RelayProgress
-import net.tgnra.morningissue.relay.RelayResult
-import net.tgnra.morningissue.relay.RelaySession
-import net.tgnra.morningissue.relay.SessionStage
+import net.tgnra.morningissue.api.DeviceDto
+import net.tgnra.morningissue.api.DeviceKind
+import net.tgnra.morningissue.client.KoboDevices
+import net.tgnra.morningissue.client.PairResult
 import net.tgnra.morningissue.ui.LocalAppContainer
 import net.tgnra.morningissue.ui.components.DialogButtons
 import net.tgnra.morningissue.ui.components.HairlineRule
@@ -67,45 +60,66 @@ import net.tgnra.morningissue.ui.layout.LocalPaperLayoutSpec
 import net.tgnra.morningissue.ui.theme.MorningIssueTheme
 
 /**
- * Sync with Kobo, from Settings: the relay's address for typing on the Kobo (built into the app,
- * not changed here), the paired Kobos (scanned from their codes, or pasted), and the sync
- * session: Start builds and uploads the package, then waits while each Kobo syncs, showing how
- * far each one is. The session lives on the app's scope, but leaving the app cancels it, so the
- * screen stays on while it is open.
+ * Kobo e-readers, from Settings: the server's address for typing on the Kobo, pairing (scan
+ * the Kobo's code, or paste it, then `POST /devices/kobo`), and the account's devices from
+ * `GET /devices` with Forget. A paired Kobo syncs with the server by itself; there is no
+ * session here any more.
  */
 @Composable
 fun KoboSyncScreen(onBack: () -> Unit) {
     val container = LocalAppContainer.current
-    val relay = container.relaySync
     val context = LocalContext.current
     val resources = LocalResources.current
+    val scope = rememberCoroutineScope()
     val margin = LocalPaperLayoutSpec.current.pageMargin
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
     val use24Hour = DateFormat.is24HourFormat(context)
     val now = container.clock.instant()
     val zone = container.clock.zone
+    val auth by container.auth.state.collectAsStateWithLifecycle(initialValue = null)
 
-    val config by relay.config.collectAsStateWithLifecycle(initialValue = null)
-    val peers by relay.peers.collectAsStateWithLifecycle(initialValue = emptyList())
-    val activity by relay.activity.collectAsStateWithLifecycle()
-    val session = activity.session
-    var lostKeys by remember { mutableStateOf(emptySet<String>()) }
+    // Null until listed; empty when the account has none. Bumped to list again.
+    var devices by remember { mutableStateOf<List<DeviceDto>?>(null) }
+    var listFailed by remember { mutableStateOf(false) }
+    var listed by remember { mutableIntStateOf(0) }
+    LaunchedEffect(listed) {
+        val answer = container.koboDevices.list()
+        listFailed = answer == null
+        if (answer != null) devices = answer
+    }
 
-    LaunchedEffect(peers) { lostKeys = relay.devicesWithLostKeys() }
-
-    // Only while a session is open: the screen going dark would stop the app, and so the session.
-    val view = LocalView.current
-    DisposableEffect(view, session != null) {
-        view.keepScreenOn = session != null
-        onDispose { view.keepScreenOn = false }
+    var pairing by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    fun pair(code: String) {
+        if (pairing) return
+        pairing = true
+        notice = null
+        scope.launch {
+            try {
+                val result = container.koboDevices.pair(code)
+                notice = pairLine(result, resources) to (result !is PairResult.Paired)
+                if (result is PairResult.Paired) listed++
+            } finally {
+                pairing = false
+            }
+        }
+    }
+    fun forget(device: DeviceDto) {
+        scope.launch {
+            if (container.koboDevices.forget(device.id)) {
+                listed++
+            } else {
+                notice = resources.getString(R.string.kobo_forget_failed, device.name) to true
+            }
+        }
     }
 
     var scanning by rememberSaveable { mutableStateOf(false) }
     var scanNote by remember { mutableStateOf<String?>(null) }
     var cameraNote by remember { mutableStateOf<String?>(null) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) scanning = true else cameraNote = resources.getString(R.string.relay_camera_denied)
+        if (granted) scanning = true else cameraNote = resources.getString(R.string.kobo_camera_denied)
     }
     fun scan() {
         cameraNote = null
@@ -121,112 +135,83 @@ fun KoboSyncScreen(onBack: () -> Unit) {
         onBack = onBack,
         overlay = {
             if (scanning) {
-                PaperDialog(title = stringResource(R.string.relay_scan), onDismiss = { scanning = false; scanNote = null }) {
-                    Text(stringResource(R.string.relay_scan_detail), style = type.body, color = colors.ink)
+                PaperDialog(title = stringResource(R.string.kobo_scan), onDismiss = { scanning = false; scanNote = null }) {
+                    Text(stringResource(R.string.kobo_scan_detail), style = type.body, color = colors.ink)
                     Box(Modifier.fillMaxWidth().aspectRatio(1f).border(1.dp, colors.ink)) {
-                        RelayCodeScanner(
+                        KoboCodeScanner(
                             onCode = { text ->
-                                if (RelayPairingUri.parse(text) is PairingParse.Ok) {
+                                if (KoboDevices.isPairingCode(text)) {
                                     scanning = false
                                     scanNote = null
-                                    relay.startPair(text)
+                                    pair(text)
                                 } else {
-                                    scanNote = resources.getString(R.string.relay_scan_not_code)
+                                    scanNote = resources.getString(R.string.kobo_scan_not_code)
                                 }
                             },
                             onUnavailable = {
                                 scanning = false
-                                cameraNote = resources.getString(R.string.relay_camera_unavailable)
+                                cameraNote = resources.getString(R.string.kobo_camera_unavailable)
                             },
                             modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                         )
                     }
                     scanNote?.let { Text(it, style = type.label, color = colors.accent) }
                     DialogButtons {
-                        PaperButton(stringResource(R.string.relay_scan_cancel), { scanning = false; scanNote = null })
+                        PaperButton(stringResource(R.string.kobo_scan_cancel), { scanning = false; scanNote = null })
                     }
                 }
             }
         },
     ) {
         PagedColumn(contentPadding = PaddingValues(start = margin, end = margin, bottom = 32.dp)) {
-            SettingsSection(stringResource(R.string.relay_server)) {
-                Setting(stringResource(R.string.relay_for_kobo), stringResource(R.string.relay_for_kobo_detail)) {
-                    val address = config?.address.orEmpty()
-                    Text(
-                        when (val parsed = relay.parseAddress(address)) {
-                            is RelayAddress.Parse.Ok -> parsed.url
-                            RelayAddress.Parse.Empty -> stringResource(R.string.relay_problem_no_address)
-                            else -> address
-                        },
-                        style = type.headline,
-                        color = colors.ink,
-                    )
+            SettingsSection(stringResource(R.string.kobo_server)) {
+                Setting(stringResource(R.string.settings_account_server), stringResource(R.string.kobo_server_detail)) {
+                    Text(auth?.serverUrl.orEmpty(), style = type.headline, color = colors.ink)
                 }
             }
 
-            SettingsSection(stringResource(R.string.relay_devices)) {
-                val idle = session == null
+            SettingsSection(stringResource(R.string.kobo_devices)) {
                 Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    PaperButton(stringResource(R.string.relay_scan), ::scan, primary = true, enabled = idle)
+                    PaperButton(stringResource(R.string.kobo_scan), ::scan, primary = true, enabled = !pairing)
                 }
                 cameraNote?.let { Text(it, style = type.label, color = colors.inkSecondary, modifier = Modifier.padding(top = 8.dp)) }
-                PasteCode(enabled = idle, onPair = relay::startPair)
-                if (peers.isEmpty()) {
-                    Text(stringResource(R.string.relay_none), style = type.body, color = colors.inkSecondary, modifier = Modifier.padding(top = 18.dp))
+                PasteCode(enabled = !pairing, onPair = ::pair)
+                if (pairing) {
+                    Text(stringResource(R.string.kobo_pairing), style = type.label, color = colors.inkSecondary, modifier = Modifier.padding(top = 12.dp))
                 }
-                peers.forEachIndexed { index, peer ->
+                notice?.let { (text, isError) ->
+                    NoticeLine(text, Modifier.padding(top = 12.dp).semantics { liveRegion = LiveRegionMode.Polite }, isError = isError)
+                }
+                val shown = devices
+                when {
+                    shown == null && listFailed -> Text(
+                        stringResource(R.string.kobo_list_unreachable),
+                        style = type.body,
+                        color = colors.inkSecondary,
+                        modifier = Modifier.padding(top = 18.dp),
+                    )
+                    shown != null && shown.none { it.kind == DeviceKind.KOBO } -> Text(
+                        stringResource(R.string.kobo_none),
+                        style = type.body,
+                        color = colors.inkSecondary,
+                        modifier = Modifier.padding(top = 18.dp),
+                    )
+                }
+                shown.orEmpty().forEachIndexed { index, device ->
                     if (index > 0) HairlineRule()
-                    PeerRow(
-                        peer = peer,
-                        stage = session?.kobos?.get(peer.deviceId),
-                        keysLost = peer.deviceId in lostKeys,
-                        now = now,
-                        zone = zone,
-                        use24Hour = use24Hour,
-                        onForget = { relay.startForget(peer.deviceId) },
-                        enabled = idle,
-                    )
-                }
-            }
-
-            SettingsSection(stringResource(R.string.relay_sync)) {
-                Setting(stringResource(R.string.relay_start), stringResource(R.string.relay_start_detail)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (session == null) {
-                            val usable = peers.any { it.deviceId !in lostKeys }
-                            PaperButton(
-                                stringResource(R.string.relay_start),
-                                { relay.startSession() },
-                                primary = true,
-                                enabled = config?.isConfigured == true && usable,
-                            )
-                        } else {
-                            if (session.stage == SessionStage.WAITING) {
-                                PaperButton(stringResource(R.string.relay_finish_now), relay::finishNow, primary = true)
-                            }
-                            val stopping = session.stage == SessionStage.FINISHING || session.stage == SessionStage.CANCELLING
-                            PaperButton(stringResource(R.string.relay_cancel), relay::cancel, enabled = !stopping)
-                        }
-                    }
-                }
-                if (session != null) {
-                    Text(stringResource(R.string.relay_keep_open), style = type.label, color = colors.accent, modifier = Modifier.padding(top = 12.dp))
-                    session.paired?.let {
-                        Text(stringResource(R.string.relay_result_paired, it), style = type.label, color = colors.inkSecondary, modifier = Modifier.padding(top = 8.dp))
-                    }
-                }
-                val line = session?.let { sessionLine(it, resources, context) } ?: activity.last?.let { resultLine(it, resources, context) }
-                line?.let {
-                    NoticeLine(
-                        it,
-                        Modifier.padding(top = 18.dp).semantics { liveRegion = LiveRegionMode.Polite },
-                        isError = session == null && (activity.last is RelayResult.Failed || activity.last is RelayResult.PairingRefused),
-                    )
+                    DeviceRow(device, now, zone, use24Hour, onForget = { forget(device) })
                 }
             }
         }
     }
+}
+
+/** What a pairing came to, in plain words. */
+internal fun pairLine(result: PairResult, resources: Resources): String = when (result) {
+    is PairResult.Paired -> resources.getString(R.string.kobo_paired, result.device.name)
+    PairResult.NotACode -> resources.getString(R.string.kobo_not_a_code)
+    PairResult.Refused -> resources.getString(R.string.kobo_refused)
+    PairResult.Unreachable -> resources.getString(R.string.kobo_unreachable)
 }
 
 @Composable
@@ -234,14 +219,14 @@ private fun PasteCode(enabled: Boolean, onPair: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Box(Modifier.weight(1f)) {
-            PaperTextField(text, { text = it }, stringResource(R.string.relay_paste_hint), isUrl = true, onImeAction = {
+            PaperTextField(text, { text = it }, stringResource(R.string.kobo_paste_hint), isUrl = true, onImeAction = {
                 if (enabled && text.isNotBlank()) {
                     onPair(text)
                     text = ""
                 }
             })
         }
-        PaperButton(stringResource(R.string.relay_pair), {
+        PaperButton(stringResource(R.string.kobo_pair), {
             onPair(text)
             text = ""
         }, enabled = enabled && text.isNotBlank())
@@ -249,114 +234,31 @@ private fun PasteCode(enabled: Boolean, onPair: (String) -> Unit) {
 }
 
 @Composable
-private fun PeerRow(
-    peer: SyncPeerEntity,
-    /** Where it is in the open session; null when none is open. */
-    stage: KoboStage?,
-    keysLost: Boolean,
-    now: Instant,
-    zone: ZoneId,
-    use24Hour: Boolean,
-    onForget: () -> Unit,
-    enabled: Boolean,
-) {
+private fun DeviceRow(device: DeviceDto, now: Instant, zone: ZoneId, use24Hour: Boolean, onForget: () -> Unit) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
-    val forget = stringResource(R.string.relay_forget_description, peer.name)
+    val forget = stringResource(R.string.kobo_forget_description, device.name)
     Row(
         Modifier.fillMaxWidth().stepAnchor().padding(vertical = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(peer.name, style = type.headlineSmall, color = colors.ink)
-            if (keysLost) {
-                Text(stringResource(R.string.relay_keys_lost), style = type.label, color = colors.accent)
-            } else if (stage != null) {
-                Text(
-                    stringResource(
-                        when (stage) {
-                            KoboStage.WAITING -> R.string.relay_kobo_waiting
-                            KoboStage.DOWNLOADED -> R.string.relay_kobo_downloaded
-                            KoboStage.COLLECTED -> R.string.relay_kobo_collected
-                        },
-                    ),
-                    style = type.label,
-                    color = if (stage == KoboStage.COLLECTED) colors.ink else colors.inkSecondary,
-                )
-            } else {
-                Text(
-                    peer.lastSyncAt?.let { stringResource(R.string.relay_last_seen, PaperFormat.syncTime(it, now, zone, use24Hour)) }
-                        ?: stringResource(R.string.relay_never_seen),
-                    style = type.label,
-                    color = colors.inkSecondary,
-                )
+            Text(device.name, style = type.headlineSmall, color = colors.ink)
+            val detail = when {
+                device.current -> stringResource(R.string.kobo_this_phone)
+                else -> device.lastSeenAt?.let { stringResource(R.string.kobo_last_seen, PaperFormat.syncTime(it, now, zone, use24Hour)) }
+                    ?: stringResource(R.string.kobo_never_seen)
             }
+            Text(
+                if (device.kind == DeviceKind.PHONE && !device.current) "${stringResource(R.string.kobo_phone)} · $detail" else detail,
+                style = type.label,
+                color = colors.inkSecondary,
+            )
         }
-        PaperButton(stringResource(R.string.relay_forget), onForget, Modifier.semantics { contentDescription = forget }, enabled = enabled)
+        // This phone is forgotten by logging out, in Settings.
+        if (!device.current) {
+            PaperButton(stringResource(R.string.kobo_forget), onForget, Modifier.semantics { contentDescription = forget })
+        }
     }
-}
-
-/** Where the open session is, in plain words. */
-internal fun sessionLine(session: RelaySession, resources: Resources, context: android.content.Context): String = when (session.stage) {
-    SessionStage.PREPARING -> when (val progress = session.progress) {
-        is RelayProgress.PreparingImages -> resources.getString(R.string.relay_progress_images, progress.done, progress.total)
-        else -> resources.getString(R.string.relay_stage_preparing)
-    }
-    SessionStage.UPLOADING -> when (val progress = session.progress) {
-        is RelayProgress.Uploading -> resources.getString(
-            R.string.relay_progress_uploading,
-            Formatter.formatShortFileSize(context, progress.sent),
-            Formatter.formatShortFileSize(context, progress.total),
-        )
-        else -> resources.getString(R.string.relay_stage_preparing)
-    }
-    SessionStage.PUBLISHING -> resources.getString(R.string.relay_stage_publishing)
-    SessionStage.WAITING -> if (session.kobos.size == 1) {
-        resources.getString(R.string.relay_stage_waiting_one)
-    } else {
-        resources.getString(R.string.relay_stage_waiting, session.kobos.values.count { it == KoboStage.COLLECTED }, session.kobos.size)
-    }
-    SessionStage.FINISHING -> resources.getString(R.string.relay_stage_finishing)
-    SessionStage.CANCELLING -> resources.getString(R.string.relay_stage_cancelling)
-}
-
-/** How the last session or pairing ended, in plain words. */
-internal fun resultLine(result: RelayResult, resources: Resources, context: android.content.Context): String = when (result) {
-    is RelayResult.Synced -> buildList {
-        add(
-            when {
-                result.early -> resources.getString(R.string.relay_result_finished_early, result.synced, result.kobos)
-                result.kobos == 1 -> resources.getString(R.string.relay_result_synced_one)
-                else -> resources.getString(R.string.relay_result_synced_all, result.kobos)
-            },
-        )
-        add(if (result.events > 0) resources.getQuantityString(R.plurals.relay_result_collected, result.events, result.events) else resources.getString(R.string.relay_result_nothing))
-        if (result.dropped > 0) add(resources.getQuantityString(R.plurals.relay_result_dropped, result.dropped, result.dropped))
-        if (result.left > 0) add(resources.getQuantityString(R.plurals.relay_result_left, result.left, result.left))
-    }.joinToString(" ")
-    is RelayResult.NoDevices -> resources.getString(R.string.relay_result_no_devices)
-    is RelayResult.Cancelled -> resources.getString(if (result.byLeaving) R.string.relay_result_left_app else R.string.relay_result_cancelled)
-    is RelayResult.Paired -> resources.getString(R.string.relay_result_paired, result.name)
-    is RelayResult.PairingRefused -> resources.getString(
-        when (result.problem) {
-            PairingProblem.NOT_A_CODE -> R.string.relay_code_not_a_code
-            PairingProblem.UNKNOWN_VERSION -> R.string.relay_code_unknown_version
-            PairingProblem.BAD_FIELDS -> R.string.relay_code_bad
-        },
-    )
-    is RelayResult.Failed -> resources.getString(R.string.relay_failed, problemLine(result.problem, result.status, resources))
-}
-
-internal fun problemLine(problem: RelayProblem, status: Int?, resources: Resources): String = when (problem) {
-    RelayProblem.NO_ADDRESS -> resources.getString(R.string.relay_problem_no_address)
-    RelayProblem.NOT_HTTPS -> resources.getString(R.string.relay_problem_not_https)
-    RelayProblem.BAD_ADDRESS -> resources.getString(R.string.relay_problem_bad_address)
-    RelayProblem.NETWORK -> resources.getString(R.string.relay_problem_network)
-    RelayProblem.REGISTRATION_REFUSED -> resources.getString(R.string.relay_problem_registration)
-    RelayProblem.UNAUTHORIZED -> resources.getString(R.string.relay_problem_unauthorized)
-    RelayProblem.TOO_LARGE -> resources.getString(R.string.relay_problem_too_large)
-    RelayProblem.TOO_MANY -> resources.getString(R.string.relay_problem_too_many)
-    RelayProblem.RELAY_ERROR -> resources.getString(R.string.relay_problem_relay_error, status?.toString() ?: "?")
-    RelayProblem.PHONE_ERROR -> resources.getString(R.string.relay_problem_phone_error)
 }
