@@ -1254,4 +1254,6 @@ No other query failed the guard.
 
 **Kobo.** A sync now calls `GET /kobo/hello` before uploading events. A `dbId` that differs from the stored one wipes first, so unsent events never reach a reset server (`docs/kobo-sync.md`).
 
+**A correction.** W-D's deviations mention import "through the migration screen or the web UI". There is no web UI: an archive is imported through the app's migration screen, `POST /import`, or the command line's `import`.
+
 **Removed.** `relay/`, `docs/relay-sync.md`, `docs/relay-sync-fixtures/`, the relay jobs, and `MORNINGISSUE_RELAY_*` in the workflows. `tests.yml` runs `:core:test :server:test :app:testDebugUnitTest -PsimulationReport` and the cargo job; `release.yml` runs the same Gradle tests. The NixOS VM test requires `GET /settings` to answer 200.
