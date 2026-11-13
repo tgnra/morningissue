@@ -1,6 +1,6 @@
 # Morning Issue self-hosted server: design
 
-Status: design contract for the `self-hosted` branch. Every section is normative for the implementation agents unless it says "suggested". Paths are relative to the repository root `/home/tania/Code/morningissue`.
+Status: the design record of the self-hosted refactor. All three phases have landed on `self-hosted`; the "deviations" sections at the end record where the code differs from the text above. For how things work now, read `docs/how-it-works.md`, `docs/server.md` and `docs/kobo-sync.md`. Paths are relative to the repository root `/home/tania/Code/morningissue`.
 
 I worked this out from `docs/how-it-works.md`, `docs/kobo-sync.md`, `docs/relay-sync.md`, `kobo/README.md`, `relay/README.md`, `todo.md`, every package under `app/src/main/java/net/tgnra/morningissue/`, the build files, `kobo/src/*` and git history. Two finds from history save real work:
 
@@ -1210,3 +1210,48 @@ The Android client as built, where it differs from section 5 or adds to it.
 **Benchmarks.** `OnOpenEditionBuildBenchmark` is `@Ignore`d, since the phone no longer builds editions. The benchmark seed receiver fakes a login (`https://benchmark.invalid`, migration DONE) so the app opens straight onto its cache.
 
 **Not owned, left as is.** `.github/workflows/release.yml` still passes `MORNINGISSUE_RELAY_ADDRESS` and `MORNINGISSUE_RELAY_TOKEN`. Nothing reads them now. `jsoup` and `readability4j` stay in the version catalog, because `:core` uses them.
+
+## Phase 3 deviations (integration)
+
+The five workstreams were merged into `self-hosted` in the order W-C, W-A, W-B, W-D, W-E. Where integration differs from section 8's Phase 3, or settles something the workstreams left open:
+
+**Merging.**
+- The only conflicts were the deviations sections of this file. `ServerDatabase.kt`, `libs.versions.toml` and `server/build.gradle.kts` merged cleanly: no workstream added an entity, a DAO accessor or a dependency.
+- W-A and W-B both declared `UserArticleRow` and `UserFeedRow` in `db/`. W-B's keep the names; W-A's are now `ArticleViewRow` (the per-user article row of `ArticleDao`) and `UserFeedPair` (a user and a feed).
+- The schema export `server/schemas/…/1.json` was regenerated. It is unchanged, still version 1.
+- `nix/deps.json` was not regenerated, because no dependency changed after W-C recorded it.
+
+**`ServerContainer`.**
+- It replaces `AccountsContainer`, which is gone. `main` is `Cli(::ServerContainer)`. The constructor takes an optional `Clock`, for tests.
+- It has one OkHttp client (15 s connect, 30 s read, 60 s call), one `SupervisorJob` scope on `Dispatchers.Default`, and the embedder loaded from the classpath on first use. `close()` cancels the scope, then closes the database.
+- The hooks:
+  - `Subscriptions.onChanged` and `SyncServiceImpl`'s relearn both call `Relearner.schedule`.
+  - `afterBatch` runs `SignalsUpkeep`.
+  - `Scheduler.maintenance` runs `FeedHealthChecker.run(repair = true)`, then `DiscoveryCleanup`, then `FeedGarbageCollector`, at most once every 24 hours. The time of the last GC is kept in memory, so the first periodic refresh after a start collects. A failing step is logged and the next one still runs.
+  - `afterImport` runs the signals upkeep, then `TeaserBackfill`, then `Relearner.relearnNow`. The teaser backfill is there because an archive from an older app can hold teaser bodies whose pages were never fetched.
+- The config is mapped as follows:
+  - `[refresh] concurrency` is the refresher's parallelism.
+  - `intervalMinutes`, `prePrintMaxAgeMinutes`, `timeoutSeconds` and `[editions] buildLeadMinutes` go into `EditionTimings`. Its other fields keep their defaults.
+  - `[kobo] imageCacheMb` is the cap of the picture cache in `<dataDir>/kobo-images`.
+- `start()` calls `Scheduler.restore()`, then `start()`.
+- **Desk notice.** `EditionServiceImpl` takes an optional `needingAttention` and is given `DefaultFeedService::needingAttention`. The notice's count therefore includes a move pending for that user, as the desk shows it. Without the parameter it counts the stored flags, as before.
+
+**The query guard.** `UserScopedQueryTest` now allows four lookups that cross users:
+- `DeviceDao.byTokenHash`, `byId` and `touch`: by unique token hash or device ID; the token is what names the user;
+- `EditionDao.ownerOf`: `KoboImageService.prepare` starts from an edition ID alone.
+
+No other query failed the guard.
+
+**The ranking simulation** is in `server/src/test/…/simulation/` and its feeds are in `server/src/test/resources/simulation/`. Its thresholds are unchanged and pass. It drives:
+- the production `DefaultFeedRefresher` (parallelism 1, signals upkeep after each batch);
+- `BuildRunner.run(…, BuildTarget.Scheduled(release), refreshMaxAge = prePrintMaxAge)` at 05:00, as the app's early build ran. It does not use `Scheduler.tick()`, which would build at 06:00;
+- every reading action as a `SyncServiceImpl.postEvents` request. The app's `setReadFraction(0.95)` is sent as `readFraction` plus `read`, because the server's `readFraction` never sets `readAt`;
+- a synchronous `Relearner.relearnNow` after each request that asks for a relearn, in place of the 10 s debounce.
+
+`-PsimulationReport` is now a `:server` property and writes to `server/build/reports/simulation/`.
+
+**End-to-end test.** `server/src/test/…/E2ETest.kt` runs `ServerContainer` behind Ktor on a random port, with core's `OkHttpMorningIssueApi` as both the phone and the Kobo. It covers every step in section 8 step 4. A second test has two users share a feed and checks the 2-hour leeway: a build inside it does not fetch, and the next morning's union refresh fetches once for both. It drives `Scheduler.tick()` with a test clock rather than the ticking loop. The optional `kobo/tests/server_interop.rs` was not written.
+
+**Kobo.** A sync now calls `GET /kobo/hello` before uploading events. A `dbId` that differs from the stored one wipes first, so unsent events never reach a reset server (`docs/kobo-sync.md`).
+
+**Removed.** `relay/`, `docs/relay-sync.md`, `docs/relay-sync-fixtures/`, the relay jobs, and `MORNINGISSUE_RELAY_*` in the workflows. `tests.yml` runs `:core:test :server:test :app:testDebugUnitTest -PsimulationReport` and the cargo job; `release.yml` runs the same Gradle tests. The NixOS VM test requires `GET /settings` to answer 200.
