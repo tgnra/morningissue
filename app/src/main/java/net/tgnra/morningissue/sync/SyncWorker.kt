@@ -10,26 +10,17 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
-import kotlin.coroutines.cancellation.CancellationException
 import net.tgnra.morningissue.MorningIssueApp
 
 /**
- * Background sync: runs [FeedSyncer.syncAll], then relay sync's Done when a relay is set. A run that overlaps another sync (pull to
+ * Background sync: runs [FeedSyncer.syncAll]. A run that overlaps another sync (pull to
  * refresh, the early edition build, the other periodic request) joins it instead of fetching
- * twice.
+ * twice. Relay sync never runs in the background: it is a session on the Sync with Kobo screen.
  */
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val syncer = syncerProvider(applicationContext) ?: return Result.failure()
         val report = syncer.syncAll()
-        // Relay sync's Done, when a relay is set: brings back what was read on a Kobo far from
-        // the phone. Its failures never fail the feed sync.
-        try {
-            relayDone(applicationContext)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-        }
         // Every feed failing means the connection went away; let WorkManager back off and retry.
         return if (report.feedsChecked > 0 && report.feedsFailed == report.feedsChecked) Result.retry() else Result.success()
     }
@@ -39,12 +30,6 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         @Volatile
         internal var syncerProvider: (Context) -> FeedSyncer? = { context ->
             (context.applicationContext as? MorningIssueApp)?.container?.feedSyncer
-        }
-
-        /** Runs relay sync's Done when a relay is set; replaced in tests. */
-        @Volatile
-        internal var relayDone: suspend (Context) -> Unit = { context ->
-            (context.applicationContext as? MorningIssueApp)?.container?.relaySync?.doneIfConfigured()
         }
     }
 }

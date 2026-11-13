@@ -2,6 +2,7 @@ package net.tgnra.morningissue.relay
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import java.io.File
 import java.util.UUID
@@ -65,6 +66,8 @@ class RelaySettingsTest {
         val oldAddress = stringPreferencesKey("relay_address")
         val oldToken = stringPreferencesKey("relay_registration_token")
         val oldWidths = stringPreferencesKey("kobo_image_widths")
+        val oldRegistered = stringPreferencesKey("relay_registered_at")
+        val oldPublished = longPreferencesKey("relay_last_published")
         val dbId = stringPreferencesKey("db_id")
         // What the earlier version left, written without the migration.
         val id = UUID.randomUUID().toString()
@@ -74,6 +77,8 @@ class RelaySettingsTest {
             it[oldAddress] = "https://typed.example.org"
             it[oldToken] = "typed"
             it[oldWidths] = "b7e2=1264"
+            it[oldRegistered] = "https://typed.example.org"
+            it[oldPublished] = 1L
             it[dbId] = id
         }
         // Closed, as by an app update, before the new version opens it.
@@ -87,6 +92,8 @@ class RelaySettingsTest {
         assertNull(prefs[oldAddress])
         assertNull(prefs[oldToken])
         assertNull(prefs[oldWidths])
+        assertNull(prefs[oldRegistered])
+        assertNull(prefs[oldPublished])
         // Everything else stays: the install's ID most of all, or a Kobo would wipe itself.
         assertEquals(id, InstallId(after).get())
     }

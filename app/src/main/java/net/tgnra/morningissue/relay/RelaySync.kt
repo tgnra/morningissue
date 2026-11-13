@@ -8,10 +8,13 @@ import java.time.Instant
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -24,7 +27,6 @@ import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.db.SyncPeerEntity
 import net.tgnra.morningissue.kobo.InstallId
 import net.tgnra.morningissue.kobo.KoboEventMerger
-import net.tgnra.morningissue.kobo.KoboEvents
 import net.tgnra.morningissue.kobo.KoboExporter
 import net.tgnra.morningissue.kobo.KoboImageConfig
 import net.tgnra.morningissue.kobo.KoboProtocol
@@ -43,7 +45,7 @@ fun interface ImagePreparer {
 @Serializable
 data class RelayChanges(val deviceId: String, val events: List<SyncEvent>)
 
-/** Why a relay task did not finish, in terms the screen can put plainly. */
+/** Why a session did not finish, in terms the screen can put plainly. */
 enum class RelayProblem {
     /** The build has no relay address. */
     NO_ADDRESS,
@@ -60,7 +62,7 @@ enum class RelayProblem {
     /** The relay wants a registration token, and the build's is missing or wrong (`403`). */
     REGISTRATION_REFUSED,
 
-    /** The relay refused the phone's signature even after registering again (`401`). */
+    /** The relay refused the phone's signature (`401`). */
     UNAUTHORIZED,
 
     /** Over one of the relay's size limits (`413`). */
@@ -76,62 +78,117 @@ enum class RelayProblem {
     PHONE_ERROR,
 }
 
-/** What a task is doing, for the screen. */
-sealed interface RelayProgress {
-    data object Connecting : RelayProgress
-    data class PreparingImages(val done: Int, val total: Int) : RelayProgress
-    data class Uploading(val bytes: Long) : RelayProgress
-    data object Publishing : RelayProgress
-    data class Collecting(val done: Int, val total: Int) : RelayProgress
+/** Where a sync session is. */
+enum class SessionStage {
+    /** Building the package: the saved articles' text, the editions and the pictures. */
+    PREPARING,
+
+    /** Making the group on the relay and uploading the package. */
+    UPLOADING,
+
+    /** Listing the devices and publishing the package. */
+    PUBLISHING,
+
+    /** Waiting for the Kobos to sync, and collecting each one's changes as it does. */
+    WAITING,
+
+    /** Collecting the changes that are left, then deleting the group. */
+    FINISHING,
+
+    /** Stopping, then deleting the group. */
+    CANCELLING,
 }
 
-/** How a task ended. */
+/** Where one paired Kobo is in a session. */
+enum class KoboStage {
+    /** It has not fetched the package yet. */
+    WAITING,
+
+    /** It has fetched the package; its changes are being collected, or could not all be downloaded yet. */
+    DOWNLOADED,
+
+    /** It has the package and its changes are merged: its part is done. */
+    COLLECTED,
+}
+
+/** What the preparing and uploading stages have done so far, for the screen. */
+sealed interface RelayProgress {
+    data class PreparingImages(val done: Int, val total: Int) : RelayProgress
+    data class Uploading(val sent: Long, val total: Long) : RelayProgress
+}
+
+/** An open sync session. */
+data class RelaySession(
+    val stage: SessionStage = SessionStage.PREPARING,
+    val progress: RelayProgress? = null,
+    /** Each Kobo in the session, by `deviceId`: the paired ones whose keys unwrap. */
+    val kobos: Map<String, KoboStage> = emptyMap(),
+    /** The name of the Kobo whose code was just scanned, when that started the session. */
+    val paired: String? = null,
+)
+
+/** How a session or a pairing ended. */
 sealed interface RelayResult {
     val at: Instant
 
-    data class Published(override val at: Instant, val devices: Int, val editions: Int, val saved: Int, val images: Int, val bytes: Long) : RelayResult
+    /**
+     * A session ended: [synced] of the [kobos] fetched the package and had their changes
+     * merged, by the end of waiting or when Finish now was pressed ([early]). [batches] were
+     * merged with [events] in them, [dropped] could not be read or did not belong to the key
+     * that sent them, and [left] could not be downloaded; the relay deleted them with the group,
+     * and the Kobo sends their events again next time.
+     */
+    data class Synced(
+        override val at: Instant,
+        val early: Boolean,
+        val synced: Int,
+        val kobos: Int,
+        val batches: Int,
+        val events: Int,
+        val dropped: Int,
+        val left: Int,
+    ) : RelayResult
 
-    /** Nothing to publish to: no device is paired for relay sync. */
+    /** Nothing to sync with: no Kobo is paired, or none whose keys unwrap. */
     data class NoDevices(override val at: Instant) : RelayResult
 
-    /**
-     * Done finished: [batches] collected, [events] merged from them, [dropped] batches that
-     * could not be read or did not belong to the key that sent them, and [left] that could not
-     * be downloaded and stay on the relay for next time.
-     */
-    data class Collected(override val at: Instant, val batches: Int, val events: Int, val dropped: Int, val left: Int) : RelayResult
-
-    data class Paired(override val at: Instant, val name: String, val toldRelay: Boolean, val problem: RelayProblem?) : RelayResult
+    /** Cancel was pressed, or the app was left ([byLeaving]). Nothing was merged. */
+    data class Cancelled(override val at: Instant, val byLeaving: Boolean) : RelayResult
 
     data class PairingRefused(override val at: Instant, val problem: PairingProblem) : RelayResult
 
-    data class Forgotten(override val at: Instant, val toldRelay: Boolean, val problem: RelayProblem?) : RelayResult
+    /** [name] is paired, and a session started for it. */
+    data class Paired(override val at: Instant, val name: String) : RelayResult
 
-    data class Failed(override val at: Instant, val task: RelayTask, val problem: RelayProblem, val status: Int? = null) : RelayResult
+    data class Failed(override val at: Instant, val problem: RelayProblem, val status: Int? = null) : RelayResult
 }
 
-enum class RelayTask { PUBLISH, DONE, PAIR, FORGET }
-
-data class RelayActivity(val running: RelayTask? = null, val progress: RelayProgress? = null, val last: RelayResult? = null)
-
-/** A relay device's line from `GET /v1/group/status`, matched to its pairing. */
-data class RelayDeviceStatus(val lastSeenAt: Instant?, val hasCurrentPackage: Boolean, val pendingChanges: Int)
-
-/** `GET /v1/group/status` by `deviceId`, or why it could not be read. */
-data class RelayGroupStatus(
-    val devices: Map<String, RelayDeviceStatus> = emptyMap(),
-    val packagePublishedAt: Instant? = null,
-    val hasPackage: Boolean = false,
-    val problem: RelayProblem? = null,
-)
+/** The open session, if any, and how the last one (or a pairing) ended. */
+data class RelayActivity(val session: RelaySession? = null, val last: RelayResult? = null) {
+    val sessionOpen: Boolean get() = session != null
+}
 
 /**
- * The phone's side of relay sync (`docs/relay-sync.md`): pairing from a device's code, the
- * device list, Publish and Done. One task runs at a time.
+ * The phone's side of relay sync (`docs/relay-sync.md`): pairing from a device's code, and the
+ * sync session. The relay holds the group only while a session is open:
  *
- * Merging goes through [KoboEventMerger], as protocol v1 merged events: per device, only events
- * above its `ackedSeq`, in one transaction that stores the new `ackedSeq` and relearns affinity
- * when what it learns from changed.
+ * 1. Preparing: the package is built from the three latest released editions, the saved
+ *    shelf and the pictures at each device's width.
+ * 2. Uploading: `PUT /v1/group` makes the group, and the package goes up in parts.
+ * 3. Publishing: the device list, then the package with the key wrapped for each device. The
+ *    relay only keeps keys for listed devices, so the list cannot come later; listing the
+ *    devices only now keeps a Kobo from syncing before the package is there (it gets `401`).
+ * 4. Waiting: `GET /v1/group/status` every few seconds. A Kobo uploads its changes before it
+ *    fetches the package, so once its kid is in `fetchedBy` its changes are collected and
+ *    merged straight away.
+ * 5. When every device is done, or on Finish now: whatever changes are left are merged, and
+ *    `DELETE /v1/group` removes everything.
+ *
+ * Cancel, leaving the app and any failure delete the group too, without merging.
+ *
+ * Merging goes through [KoboEventMerger]: per device, only events above its `ackedSeq`, in one
+ * transaction that stores the new `ackedSeq` and relearns affinity when what it learns from
+ * changed.
  */
 class RelaySync(
     private val database: MorningIssueDatabase,
@@ -149,10 +206,17 @@ class RelaySync(
     private val clock: Clock,
     /** Debug builds: lets `http://` through for a relay on this machine or the emulator's host. */
     private val allowLocalHttp: Boolean,
-    /** For work started from the screen, so that it carries on if the screen is left. */
+    /** The app's scope: a session lives as long as the process, not as long as the screen. */
     private val scope: CoroutineScope,
+    /**
+     * Told when a session is cancelled because the app was left; the app queues a job that
+     * deletes the group, in case the process dies before the session's own `DELETE` is sent.
+     */
+    private val onLeft: () -> Unit = {},
     /** The size of each part the package is uploaded in (smaller in tests). */
     private val partBytes: Long = RelayClient.PART_BYTES,
+    /** How often the relay is asked whether the Kobos have synced (shorter in tests). */
+    private val pollMillis: Long = POLL_MILLIS,
 ) {
     private val lock = Mutex()
     private val state = MutableStateFlow(RelayActivity())
@@ -164,61 +228,86 @@ class RelaySync(
     private val peerDao = database.syncPeerDao()
     private val merger = KoboEventMerger(database, clock)
 
+    /** The open session's job, set together with [RelayActivity.session]. */
+    private var job: Job? = null
+    private val finishRequested = MutableStateFlow(false)
+
+    @Volatile private var cancelledByLeaving = false
+
     /** Reads [text] as requests to the relay would, for the screen to show the address in use. */
     fun parseAddress(text: String): RelayAddress.Parse = RelayAddress.parse(text, allowLocalHttp)
 
-    // --- Tasks started from the screen -----------------------------------------------------
+    // --- From the screen ------------------------------------------------------------------
 
-    fun startPublish() = start(RelayTask.PUBLISH) { publish() }
-
-    fun startDone() = start(RelayTask.DONE) { done() }
-
-    fun startPair(text: String) = start(RelayTask.PAIR) { pair(text) }
-
-    fun startForget(deviceId: String) = start(RelayTask.FORGET) { forget(deviceId) }
-
-    private fun start(task: RelayTask, block: suspend () -> RelayResult) {
-        if (state.value.running != null) return
-        state.update { it.copy(running = task, progress = null) }
-        scope.launch {
-            try {
-                block()
-            } finally {
-                state.update { it.copy(running = null, progress = null) }
-            }
-        }
+    /** Opens a session, unless one is open already. False when one was. */
+    fun startSession(paired: String? = null): Boolean = synchronized(this) {
+        if (state.value.session != null) return false
+        finishRequested.value = false
+        cancelledByLeaving = false
+        state.update { it.copy(session = RelaySession(paired = paired)) }
+        job = scope.launch { runSession() }
+        true
     }
 
-    private fun progress(progress: RelayProgress) = state.update { it.copy(progress = progress) }
+    /** Ends the open session now: merges what has arrived, then deletes the group. Kobos that have not synced get nothing. */
+    fun finishNow() {
+        finishRequested.value = true
+    }
 
-    private fun finish(result: RelayResult): RelayResult {
+    /** Stops the open session, whatever it is doing, and deletes the group without merging. */
+    fun cancel() = cancelSession(byLeaving = false)
+
+    /**
+     * The app went to the background: an open session is cancelled, its group deleted from the
+     * app's scope, and [onLeft] queues a job that deletes it again in case the process dies first.
+     */
+    fun cancelForLeaving() {
+        if (cancelSession(byLeaving = true)) onLeft()
+    }
+
+    private fun cancelSession(byLeaving: Boolean): Boolean = synchronized(this) {
+        val running = job ?: return false
+        if (state.value.session == null) return false
+        cancelledByLeaving = byLeaving
+        running.cancel()
+        true
+    }
+
+    /** Pairs from [text] and starts a session; nothing while a session is open. */
+    fun startPair(text: String) {
+        if (state.value.session != null) return
+        scope.launch { pair(text) }
+    }
+
+    /** Forgets a device on this phone; nothing while a session is open. */
+    fun startForget(deviceId: String) {
+        if (state.value.session != null) return
+        scope.launch { forget(deviceId) }
+    }
+
+    private fun session(change: (RelaySession) -> RelaySession) = state.update { s -> s.copy(session = s.session?.let(change)) }
+
+    private fun stage(stage: SessionStage) = session { it.copy(stage = stage, progress = null) }
+
+    private fun progress(progress: RelayProgress) = session { it.copy(progress = progress) }
+
+    private fun kobo(deviceId: String, stage: KoboStage) = session { it.copy(kobos = it.kobos + (deviceId to stage)) }
+
+    private fun record(result: RelayResult): RelayResult {
         state.update { it.copy(last = result) }
         return result
     }
 
-    // --- Background entry points ----------------------------------------------------------
-
-    /** After the early build: Done, so the package carries the latest, then Publish. Only when a relay and a device are set. */
-    suspend fun afterEarlyBuild() {
-        if (!isActive()) return
-        done()
-        publish()
-    }
-
-    /** From the periodic sync: Done, when a relay and a device are set. */
-    suspend fun doneIfConfigured(): RelayResult? = if (isActive()) done() else null
-
-    private suspend fun isActive(): Boolean = settings.current().isConfigured && peerDao.relayPeers().isNotEmpty()
-
     // --- Pairing --------------------------------------------------------------------------
 
     /**
-     * Pairs the device whose code is [text]: stores its keys, wrapped, and sends the relay the
-     * new device list at once, when a relay is set. Scanning is the consent.
+     * Pairs the device whose code is [text]: stores its keys, wrapped, and starts a session, so
+     * that the Kobo, which asks the relay while its code is on screen, syncs as soon as it is
+     * listed. Scanning is the consent.
      */
     suspend fun pair(text: String): RelayResult {
         val pairing = when (val parsed = RelayPairingUri.parse(text)) {
-            is PairingParse.Refused -> return finish(RelayResult.PairingRefused(clock.instant(), parsed.problem))
+            is PairingParse.Refused -> return record(RelayResult.PairingRefused(clock.instant(), parsed.problem))
             is PairingParse.Ok -> parsed.pairing
         }
         val auth = RelayCrypto.authKey(pairing.secret)
@@ -233,104 +322,186 @@ class RelaySync(
                 at = clock.instant(),
             )
         }
-        val problem = if (settings.current().isConfigured) sendDevices() else RelayProblem.NO_ADDRESS
-        return finish(RelayResult.Paired(clock.instant(), pairing.name, toldRelay = problem == null, problem = problem.takeIf { it != RelayProblem.NO_ADDRESS }))
+        val result = record(RelayResult.Paired(clock.instant(), pairing.name))
+        startSession(paired = pairing.name)
+        return result
     }
 
-    /** Forgets [deviceId] and tells the relay, which deletes its pending changes. */
-    suspend fun forget(deviceId: String): RelayResult {
+    /**
+     * Forgets [deviceId] on this phone. The relay is not told: it holds nothing between
+     * sessions, and the next session's device list leaves the device out.
+     */
+    suspend fun forget(deviceId: String) {
         peerDao.forget(deviceId)
-        val problem = if (settings.current().isConfigured) sendDevices() else null
-        return finish(RelayResult.Forgotten(clock.instant(), toldRelay = problem == null && settings.current().isConfigured, problem = problem))
     }
 
-    private suspend fun sendDevices(): RelayProblem? = lock.withLock {
-        runTask { connection -> connection.withGroup { connection.client.putDevices(connection.devices.map { it.auth }) } }.second?.first
+    // --- The session ----------------------------------------------------------------------
+
+    /** What a session has made on the relay, so that whatever ends it can delete it. */
+    private class Made {
+        var client: RelayClient? = null
     }
 
-    // --- Publish --------------------------------------------------------------------------
-
-    /**
-     * Publish: registers if needed, sends the device list, builds the package from the three
-     * latest released editions, the saved shelf and the images at each device's width,
-     * uploads it encrypted with a fresh key, and publishes it with the key wrapped for each
-     * device.
-     */
-    suspend fun publish(): RelayResult = lock.withLock {
-        val (result, problem) = runTask { connection ->
-            val devices = connection.devices
-            progress(RelayProgress.Connecting)
-            connection.withGroup { connection.client.putDevices(devices.map { it.auth }) }
-            if (devices.isEmpty()) return@runTask RelayResult.NoDevices(clock.instant())
-            fullText?.let { fetcher -> withTimeoutOrNull(FULL_TEXT_TIMEOUT_MILLIS) { fetchSavedFullText(database, fetcher) } }
-
-            val packageId = RelayCrypto.b64(RelayCrypto.randomBytes(16))
-            val packageKey = RelayCrypto.randomBytes(RelayCrypto.KEY_BYTES)
-            val directory = File(cacheDirectory, "relay").apply { mkdirs() }
-            directory.listFiles()?.forEach { it.delete() }
-            val target = File(directory, "$packageId.mir1")
-            try {
-                val built = withContext(Dispatchers.IO) {
-                    val snapshot = KoboExporter(database, clock).snapshot(installId.get())
-                    // Fresh from the database, so a Done just before is reflected.
-                    val acked = peerDao.relayPeers().associate { it.deviceId to it.ackedSeq }
-                    val widths = devices.map { it.peer.relayWidth ?: KoboImageConfig.DEFAULT_WIDTH }.distinct()
-                    val images = newImages()
-                    RelayPackageWriter(images::prepare).write(
-                        snapshot, acked, widths, clock.instant(), packageKey, packageId, target,
-                        onImages = { done, total -> progress(RelayProgress.PreparingImages(done, total)) },
-                    )
-                }
-                progress(RelayProgress.Uploading(built.size))
-                connection.withGroup { connection.client.uploadPackage(packageId, target, built.sha256) }
-                progress(RelayProgress.Publishing)
-                val wrapped = devices.associate { device ->
-                    val kid = RelayCrypto.kid(device.auth)
-                    kid to RelayCrypto.b64(Mir1.seal(device.enc, Mir1.KIND_WRAPPED_KEY, Mir1.wrapContext(kid, packageId), packageKey))
-                }
-                connection.withGroup { connection.client.publish(packageId, wrapped) }
-                settings.setLastPublished(clock.instant())
-                RelayResult.Published(clock.instant(), devices.size, built.editions, built.saved, built.images, built.size)
-            } finally {
-                target.delete()
-            }
-        }
-        finish(result ?: RelayResult.Failed(clock.instant(), RelayTask.PUBLISH, problem!!.first, problem.second))
-    }
-
-    // --- Done -----------------------------------------------------------------------------
-
-    /**
-     * Done: downloads every batch of changes, decrypts it with the enc key of the device that
-     * sent it, checks it names that device and stays within its range, merges it, and tells
-     * the relay to delete every batch handled, merged or dropped. A batch that could not be
-     * downloaded stays for next time.
-     */
-    suspend fun done(): RelayResult = lock.withLock {
-        val (result, problem) = runTask { connection ->
-            progress(RelayProgress.Connecting)
-            val byKid = connection.devices.associateBy { RelayCrypto.kid(it.auth) }
-            val listed = connection.withGroup { connection.client.changes() }
-            // Per device in seq order, so that a later batch never acknowledges past an earlier one.
-            val ordered = listed.withIndex().sortedWith(compareBy({ it.value.kid }, { firstSeq(it.value.batch) ?: Long.MAX_VALUE }, { it.index })).map { it.value }
-            val handled = ArrayList<String>()
-            var events = 0
-            var batches = 0
-            var dropped = 0
-            var left = 0
-            ordered.forEachIndexed { index, change ->
-                progress(RelayProgress.Collecting(index, ordered.size))
-                val device = byKid[change.kid]
-                if (device == null) {
-                    // From a key no longer paired, or whose keys this phone lost: unreadable.
-                    handled += change.id
-                    dropped++
-                    return@forEachIndexed
-                }
-                val envelope = try {
-                    connection.withGroup { connection.client.change(change.id, MAX_CHANGES_ENVELOPE_BYTES) }
+    private suspend fun runSession() {
+        val made = Made()
+        var result: RelayResult? = null
+        try {
+            result = lock.withLock {
+                try {
+                    session(made)
                 } catch (e: CancellationException) {
                     throw e
+                } catch (e: Exception) {
+                    val (problem, status) = problemOf(e)
+                    RelayResult.Failed(clock.instant(), problem, status)
+                }
+            }
+        } catch (e: CancellationException) {
+            result = RelayResult.Cancelled(clock.instant(), cancelledByLeaving)
+            throw e
+        } finally {
+            withContext(NonCancellable) {
+                made.client?.let { client ->
+                    if (result !is RelayResult.Failed) stage(SessionStage.CANCELLING)
+                    deleteGroup(client)
+                }
+                synchronized(this@RelaySync) {
+                    state.update { it.copy(session = null, last = result ?: RelayResult.Cancelled(clock.instant(), cancelledByLeaving)) }
+                    job = null
+                }
+            }
+        }
+    }
+
+    private suspend fun session(made: Made): RelayResult {
+        val config = settings.current()
+        val address = when (val parsed = RelayAddress.parse(config.address, allowLocalHttp)) {
+            RelayAddress.Parse.Empty -> return RelayResult.Failed(clock.instant(), RelayProblem.NO_ADDRESS)
+            RelayAddress.Parse.NotHttps -> return RelayResult.Failed(clock.instant(), RelayProblem.NOT_HTTPS)
+            RelayAddress.Parse.Invalid -> return RelayResult.Failed(clock.instant(), RelayProblem.BAD_ADDRESS)
+            is RelayAddress.Parse.Ok -> parsed.url
+        }
+        val devices = devices()
+        if (devices.isEmpty()) return RelayResult.NoDevices(clock.instant())
+        session { it.copy(kobos = devices.associate { device -> device.peer.deviceId to KoboStage.WAITING }) }
+
+        // Preparing.
+        fullText?.let { fetcher -> withTimeoutOrNull(FULL_TEXT_TIMEOUT_MILLIS) { fetchSavedFullText(database, fetcher) } }
+        val packageId = RelayCrypto.b64(RelayCrypto.randomBytes(16))
+        val packageKey = RelayCrypto.randomBytes(RelayCrypto.KEY_BYTES)
+        val directory = File(cacheDirectory, "relay").apply { mkdirs() }
+        directory.listFiles()?.forEach { it.delete() }
+        val target = File(directory, "$packageId.mir1")
+        val owner = RelayCrypto.ownerKey(settings.ownerSecret())
+        val relay = RelayClient(address, owner, client(), clock, partBytes)
+        try {
+            val built = withContext(Dispatchers.IO) {
+                val snapshot = KoboExporter(database, clock).snapshot(installId.get())
+                val acked = peerDao.relayPeers().associate { it.deviceId to it.ackedSeq }
+                val widths = devices.map { it.peer.relayWidth ?: KoboImageConfig.DEFAULT_WIDTH }.distinct()
+                val images = newImages()
+                RelayPackageWriter(images::prepare).write(
+                    snapshot, acked, widths, clock.instant(), packageKey, packageId, target,
+                    onImages = { done, total -> progress(RelayProgress.PreparingImages(done, total)) },
+                )
+            }
+
+            // Uploading. Marked as made before the request, so that a group whose answer is lost is deleted too.
+            stage(SessionStage.UPLOADING)
+            progress(RelayProgress.Uploading(0, built.size))
+            made.client = relay
+            relay.register(config.registrationToken)
+            relay.uploadPackage(packageId, target, built.sha256) { sent, total -> progress(RelayProgress.Uploading(sent, total)) }
+        } finally {
+            target.delete()
+        }
+
+        // Publishing.
+        stage(SessionStage.PUBLISHING)
+        relay.putDevices(devices.map { it.auth })
+        val wrapped = devices.associate { device ->
+            val kid = RelayCrypto.kid(device.auth)
+            kid to RelayCrypto.b64(Mir1.seal(device.enc, Mir1.KIND_WRAPPED_KEY, Mir1.wrapContext(kid, packageId), packageKey))
+        }
+        relay.publish(packageId, wrapped)
+
+        // Waiting.
+        stage(SessionStage.WAITING)
+        val collector = Collector(relay, devices)
+        val done = HashSet<String>()
+        var failures = 0
+        while (done.size < devices.size && !finishRequested.value) {
+            try {
+                val fetched = relay.status().currentPackage?.fetchedBy.orEmpty().toSet()
+                for (device in devices) {
+                    val kid = RelayCrypto.kid(device.auth)
+                    if (kid in done || kid !in fetched) continue
+                    kobo(device.peer.deviceId, KoboStage.DOWNLOADED)
+                    if (collector.collect(kid)) {
+                        done += kid
+                        peerDao.setLastSync(device.peer.deviceId, clock.instant())
+                        kobo(device.peer.deviceId, KoboStage.COLLECTED)
+                    }
+                }
+                failures = 0
+            } catch (e: RelayHttpException) {
+                throw e
+            } catch (e: IOException) {
+                // A moment without a connection: asked again next time, up to a point.
+                if (++failures >= MAX_POLL_FAILURES) throw e
+            }
+            if (done.size < devices.size) withTimeoutOrNull(pollMillis) { finishRequested.first { it } }
+        }
+
+        // Finishing: what arrived from Kobos that did not fetch, or could not be downloaded before.
+        stage(SessionStage.FINISHING)
+        collector.collect(null)
+        relay.deleteGroup()
+        made.client = null
+        return RelayResult.Synced(
+            at = clock.instant(),
+            early = done.size < devices.size,
+            synced = done.size,
+            kobos = devices.size,
+            batches = collector.batches,
+            events = collector.events,
+            dropped = collector.dropped,
+            left = collector.left,
+        )
+    }
+
+    /**
+     * Collects changes during a session: downloads each batch, decrypts it with the enc key of
+     * the device that sent it, checks it names that device and stays within its range, and
+     * merges it. Batches are remembered once handled, merged or dropped, and left on the relay,
+     * which deletes them with the group.
+     */
+    private inner class Collector(private val relay: RelayClient, devices: List<Device>) {
+        private val byKid = devices.associateBy { RelayCrypto.kid(it.auth) }
+        private val handled = HashSet<String>()
+        var batches = 0
+        var events = 0
+        var dropped = 0
+
+        /** Batches the last pass could not download. */
+        var left = 0
+
+        /** Collects the batches from [kid], or from every key when null. True when none was left undownloaded. */
+        suspend fun collect(kid: String?): Boolean {
+            val listed = relay.changes().filter { (kid == null || it.kid == kid) && it.id !in handled }
+            // Per device in seq order, so that a later batch never acknowledges past an earlier one.
+            val ordered = listed.withIndex().sortedWith(compareBy({ it.value.kid }, { firstSeq(it.value.batch) ?: Long.MAX_VALUE }, { it.index })).map { it.value }
+            left = 0
+            for (change in ordered) {
+                val device = byKid[change.kid]
+                if (device == null) {
+                    // From a key not in this session: unreadable.
+                    handled += change.id
+                    dropped++
+                    continue
+                }
+                val envelope = try {
+                    relay.change(change.id, MAX_CHANGES_ENVELOPE_BYTES)
                 } catch (e: RelayHttpException) {
                     if (e.status == 413) {
                         handled += change.id
@@ -338,59 +509,78 @@ class RelaySync(
                     } else {
                         left++
                     }
-                    return@forEachIndexed
+                    continue
                 } catch (_: IOException) {
                     left++
-                    return@forEachIndexed
+                    continue
                 }
-                if (envelope == null) {
-                    // Already gone from the relay.
-                    return@forEachIndexed
-                }
+                handled += change.id
+                if (envelope == null) continue // Already gone from the relay.
                 val read = readBatch(device.peer.deviceId, device.enc, change.kid, change.batch, envelope)
-                if (read == null) {
-                    handled += change.id
-                    dropped++
-                    return@forEachIndexed
-                }
-                val merged = merger.merge(device.peer.deviceId, read)
+                val merged = read?.let { merger.merge(device.peer.deviceId, it) }
                 if (merged == null) {
-                    // Forgotten while this ran.
-                    handled += change.id
+                    // Unreadable, or the device was forgotten while this ran.
                     dropped++
                 } else {
-                    handled += change.id
                     batches++
                     events += merged.merged
                 }
             }
-            progress(RelayProgress.Collecting(ordered.size, ordered.size))
-            if (handled.isNotEmpty()) connection.withGroup { connection.client.done(handled) }
-            settings.setLastDone(clock.instant())
-            RelayResult.Collected(clock.instant(), batches, events, dropped, left)
+            return left == 0
         }
-        finish(result ?: RelayResult.Failed(clock.instant(), RelayTask.DONE, problem!!.first, problem.second))
     }
 
-    // --- Status ---------------------------------------------------------------------------
+    // --- Clearing the relay outside a session ---------------------------------------------
 
-    /** `GET /v1/group/status`, matched to the paired devices. */
-    suspend fun status(): RelayGroupStatus {
-        val (result, problem) = runTask { connection ->
-            val status = connection.withGroup { connection.client.status() }
-            val byKid = connection.devices.associateBy { RelayCrypto.kid(it.auth) }
-            val fetched = status.currentPackage?.fetchedBy.orEmpty().toSet()
-            val devices = status.devices.mapNotNull { line ->
-                val device = byKid[line.kid] ?: return@mapNotNull null
-                device.peer.deviceId to RelayDeviceStatus(
-                    lastSeenAt = KoboEvents.parseTime(line.lastSeenAt),
-                    hasCurrentPackage = line.kid in fetched,
-                    pendingChanges = line.pendingChanges,
-                )
-            }.toMap()
-            RelayGroupStatus(devices, KoboEvents.parseTime(status.currentPackage?.publishedAt), status.currentPackage != null)
+    /**
+     * Once after upgrading: deletes the group an earlier version kept on the relay between
+     * syncs. Tried again at the next start until the relay confirms it is gone.
+     */
+    suspend fun clearLeftoverGroup() {
+        if (settings.leftoverGroupCleared()) return
+        val address = (RelayAddress.parse(settings.current().address, allowLocalHttp) as? RelayAddress.Parse.Ok)?.url ?: return
+        if (!settings.hasOwnerSecret()) {
+            // No owner secret, so no group was ever made.
+            settings.setLeftoverGroupCleared()
+            return
         }
-        return result ?: RelayGroupStatus(problem = problem?.first)
+        // A session holding the lock ends by deleting the group anyway; try again next time.
+        if (!lock.tryLock()) return
+        try {
+            if (deleteGroup(RelayClient(address, RelayCrypto.ownerKey(settings.ownerSecret()), client(), clock))) settings.setLeftoverGroupCleared()
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    /**
+     * For the job queued when the app was left: deletes the group, unless a session is open
+     * (it deletes its own at the end). True when there is nothing left to delete.
+     */
+    suspend fun deleteAbandonedGroup(): Boolean {
+        if (state.value.session != null) return true
+        val address = (RelayAddress.parse(settings.current().address, allowLocalHttp) as? RelayAddress.Parse.Ok)?.url ?: return true
+        if (!settings.hasOwnerSecret()) return true
+        if (!lock.tryLock()) return true
+        return try {
+            deleteGroup(RelayClient(address, RelayCrypto.ownerKey(settings.ownerSecret()), client(), clock))
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    /** `DELETE /v1/group`, best effort. True when the group is gone, including when the relay did not know it (`401 unknown`, `404`). */
+    private suspend fun deleteGroup(relay: RelayClient): Boolean = try {
+        relay.deleteGroup()
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: RelayUnauthorizedException) {
+        e.isUnknown
+    } catch (e: RelayHttpException) {
+        e.status == 404
+    } catch (_: IOException) {
+        false
     }
 
     // --- Shared ---------------------------------------------------------------------------
@@ -398,70 +588,19 @@ class RelaySync(
     /** A paired device with its keys unwrapped. */
     private class Device(val peer: SyncPeerEntity, val auth: ByteArray, val enc: ByteArray)
 
-    private inner class Connection(val address: String, val client: RelayClient, val devices: List<Device>, val token: String) {
-        /** Registers when the group is not known to exist at this address. */
-        suspend fun ensureGroup(force: Boolean = false) {
-            if (!force && settings.registeredAt() == address) return
-            client.register(token)
-            settings.setRegisteredAt(address)
-        }
-
-        /**
-         * Runs [block]; on a `401 unknown` the relay has forgotten the group (or never had it),
-         * so registers, sends the device list and runs [block] once more.
-         */
-        suspend fun <T> withGroup(block: suspend () -> T): T {
-            ensureGroup()
-            return try {
-                block()
-            } catch (e: RelayUnauthorizedException) {
-                if (!e.isUnknown) throw e
-                settings.setRegisteredAt(null)
-                ensureGroup(force = true)
-                client.putDevices(devices.map { it.auth })
-                block()
-            }
-        }
-    }
-
-    /**
-     * Sets up a connection to the relay and runs [block], turning failures into a problem. A
-     * null result comes with the problem and, for an HTTP answer, its status.
-     */
-    private suspend fun <T> runTask(block: suspend (Connection) -> T): Pair<T?, Pair<RelayProblem, Int?>?> {
-        val config = settings.current()
-        val address = when (val parsed = RelayAddress.parse(config.address, allowLocalHttp)) {
-            RelayAddress.Parse.Empty -> return null to (RelayProblem.NO_ADDRESS to null)
-            RelayAddress.Parse.NotHttps -> return null to (RelayProblem.NOT_HTTPS to null)
-            RelayAddress.Parse.Invalid -> return null to (RelayProblem.BAD_ADDRESS to null)
-            is RelayAddress.Parse.Ok -> parsed.url
-        }
-        return try {
-            val owner = RelayCrypto.ownerKey(settings.ownerSecret())
-            val connection = Connection(address, RelayClient(address, owner, client(), clock, partBytes), devices(), config.registrationToken)
-            block(connection) to null
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: RelayUnauthorizedException) {
-            null to (RelayProblem.UNAUTHORIZED to 401)
-        } catch (e: RelayHttpException) {
-            val problem = when (e.status) {
-                403 -> RelayProblem.REGISTRATION_REFUSED
-                413 -> RelayProblem.TOO_LARGE
-                429 -> RelayProblem.TOO_MANY
-                else -> RelayProblem.RELAY_ERROR
-            }
-            null to (problem to e.status)
-        } catch (_: IOException) {
-            null to (RelayProblem.NETWORK to null)
-        } catch (_: SerializationException) {
-            null to (RelayProblem.RELAY_ERROR to null)
-        } catch (_: IllegalArgumentException) {
-            // An unexpected JSON shape from the relay, or a bad address that slipped through.
-            null to (RelayProblem.RELAY_ERROR to null)
-        } catch (_: RuntimeException) {
-            null to (RelayProblem.PHONE_ERROR to null)
-        }
+    /** A failure as a problem and, for an HTTP answer, its status. */
+    private fun problemOf(e: Exception): Pair<RelayProblem, Int?> = when (e) {
+        is RelayUnauthorizedException -> RelayProblem.UNAUTHORIZED to 401
+        is RelayHttpException -> when (e.status) {
+            403 -> RelayProblem.REGISTRATION_REFUSED
+            413 -> RelayProblem.TOO_LARGE
+            429 -> RelayProblem.TOO_MANY
+            else -> RelayProblem.RELAY_ERROR
+        } to e.status
+        is IOException -> RelayProblem.NETWORK to null
+        // An unexpected JSON shape from the relay, or a bad address that slipped through.
+        is IllegalArgumentException -> RelayProblem.RELAY_ERROR to null
+        else -> RelayProblem.PHONE_ERROR to null
     }
 
     /** The relay devices whose keys unwrap; one whose keys are lost is left out and must be paired again. */
@@ -486,6 +625,12 @@ class RelaySync(
         const val MAX_CHANGES_ENVELOPE_BYTES = (4L shl 20) + 64 * 1024
         const val MAX_CHANGES_PLAIN_BYTES = 4L shl 20
         private const val FULL_TEXT_TIMEOUT_MILLIS = 120_000L
+
+        /** How often a waiting session asks the relay about the Kobos. */
+        const val POLL_MILLIS = 3_000L
+
+        /** Asks in a row that may fail to reach the relay before a waiting session gives up. */
+        private const val MAX_POLL_FAILURES = 5
 
         private val BATCH = Regex("^(\\d{1,18})-(\\d{1,18})$")
 

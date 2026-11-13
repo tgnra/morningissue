@@ -48,6 +48,7 @@ import net.tgnra.morningissue.kobo.InstallId
 import net.tgnra.morningissue.kobo.KoboImages
 import net.tgnra.morningissue.relay.AndroidKeystoreWrapper
 import net.tgnra.morningissue.relay.ImagePreparer
+import net.tgnra.morningissue.relay.RelayCleanupWorker
 import net.tgnra.morningissue.relay.RelaySettings
 import net.tgnra.morningissue.relay.RelaySync
 import net.tgnra.morningissue.sync.CandidateFetcher
@@ -233,7 +234,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
     override val editionScheduler: EditionScheduler get() = edition.scheduler
     override val releaseTimes: ReleaseTimes get() = edition.releaseTimes
     override val editionPrinter: EditionPrinter by lazy {
-        EditionPrinter(appScope, earlyBuild = { EarlyBuild.from(appContext, this) }, clock = clock)
+        EditionPrinter(appScope, earlyBuild = { EarlyBuild.from(this) }, clock = clock)
     }
 
     override val editions: EditionRepository by lazy { RoomEditionRepository(database, editionPublisher, clock) }
@@ -246,7 +247,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
         originals = CoilDiskOriginals { imageLoader.diskCache },
     )
 
-    override val relaySync: RelaySync by lazy {
+    private val relaySyncLazy = lazy {
         RelaySync(
             database = database,
             settings = RelaySettings(appContext.settingsDataStore),
@@ -259,6 +260,11 @@ class DefaultAppContainer(context: Context) : AppContainer {
             clock = clock,
             allowLocalHttp = (appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0,
             scope = appScope,
+            onLeft = { RelayCleanupWorker.enqueue(appContext) },
         )
     }
+    override val relaySync: RelaySync by relaySyncLazy
+
+    /** Relay sync if anything has used it yet; a session can only be open if so. */
+    val relaySyncIfMade: RelaySync? get() = if (relaySyncLazy.isInitialized()) relaySync else null
 }

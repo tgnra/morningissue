@@ -439,7 +439,10 @@ data class SyncPeerEntity(
     @ColumnInfo(defaultValue = "0") val ackedSeq: Long = 0,
     /** When the row was made: the first pairing, of either kind. */
     val pairedAt: Instant,
-    /** When events from the device were last merged; null until then. */
+    /**
+     * When the device last synced with the phone: it finished its part of a sync session, or
+     * its events were merged. The Sync screen shows it as last seen; null until then.
+     */
     val lastSyncAt: Instant? = null,
     /** The short side of its screen from its relay pairing code; null when it is not paired for relay sync. */
     val relayWidth: Int? = null,

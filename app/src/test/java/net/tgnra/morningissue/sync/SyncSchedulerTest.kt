@@ -27,7 +27,6 @@ import org.junit.runner.RunWith
 class SyncSchedulerTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val originalProvider = SyncWorker.syncerProvider
-    private val originalRelay = SyncWorker.relayDone
 
     @Before
     fun setUp() {
@@ -38,7 +37,6 @@ class SyncSchedulerTest {
     @After
     fun tearDown() {
         SyncWorker.syncerProvider = originalProvider
-        SyncWorker.relayDone = originalRelay
     }
 
     private fun infos(name: String): List<WorkInfo> = WorkManager.getInstance(context).getWorkInfosForUniqueWork(name).get()
@@ -101,20 +99,6 @@ class SyncSchedulerTest {
         // No subscriptions is not a failure.
         SyncWorker.syncerProvider = { FakeSyncer(SyncReport()) }
         assertEquals(ListenableWorker.Result.success(), runWorker())
-    }
-
-    @Test
-    fun workerRunsRelayDoneAfterTheSyncAndIgnoresItsFailure() {
-        val syncer = FakeSyncer(SyncReport(feedsChecked = 3))
-        SyncWorker.syncerProvider = { syncer }
-        var relayRuns = 0
-        SyncWorker.relayDone = {
-            relayRuns++
-            assertEquals(1, syncer.calls)
-            throw java.io.IOException("relay down")
-        }
-        assertEquals(ListenableWorker.Result.success(), runWorker())
-        assertEquals(1, relayRuns)
     }
 
     @Test

@@ -29,6 +29,10 @@ abstract class SyncPeerDao {
     @Query("UPDATE sync_peer SET ackedSeq = :ackedSeq, lastSyncAt = :at WHERE deviceId = :deviceId")
     abstract suspend fun setAcked(deviceId: String, ackedSeq: Long, at: Instant)
 
+    /** Records that [deviceId] finished its part of a sync session: it fetched the package and its changes were merged. */
+    @Query("UPDATE sync_peer SET lastSyncAt = :at WHERE deviceId = :deviceId")
+    abstract suspend fun setLastSync(deviceId: String, at: Instant)
+
     @Query("UPDATE sync_peer SET name = :name, relayWidth = :width, relayAuthKey = :authKey, relayEncKey = :encKey, relayPairedAt = :at WHERE deviceId = :deviceId")
     protected abstract suspend fun replaceRelayKeys(deviceId: String, name: String, width: Int, authKey: String, encKey: String, at: Instant)
 

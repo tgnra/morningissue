@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,7 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
@@ -41,16 +42,16 @@ import java.time.Instant
 import java.time.ZoneId
 import net.tgnra.morningissue.R
 import net.tgnra.morningissue.data.db.SyncPeerEntity
+import net.tgnra.morningissue.relay.KoboStage
 import net.tgnra.morningissue.relay.PairingParse
 import net.tgnra.morningissue.relay.PairingProblem
 import net.tgnra.morningissue.relay.RelayAddress
-import net.tgnra.morningissue.relay.RelayDeviceStatus
-import net.tgnra.morningissue.relay.RelayGroupStatus
 import net.tgnra.morningissue.relay.RelayPairingUri
 import net.tgnra.morningissue.relay.RelayProblem
 import net.tgnra.morningissue.relay.RelayProgress
 import net.tgnra.morningissue.relay.RelayResult
-import net.tgnra.morningissue.relay.RelayTask
+import net.tgnra.morningissue.relay.RelaySession
+import net.tgnra.morningissue.relay.SessionStage
 import net.tgnra.morningissue.ui.LocalAppContainer
 import net.tgnra.morningissue.ui.components.DialogButtons
 import net.tgnra.morningissue.ui.components.HairlineRule
@@ -67,9 +68,10 @@ import net.tgnra.morningissue.ui.theme.MorningIssueTheme
 
 /**
  * Sync with Kobo, from Settings: the relay's address for typing on the Kobo (built into the app,
- * not changed here), the paired Kobos (scanned from their codes, or pasted), what the relay
- * says about each, and Publish and Done. The work runs on the app's scope, so it carries on if
- * the screen is left.
+ * not changed here), the paired Kobos (scanned from their codes, or pasted), and the sync
+ * session: Start builds and uploads the package, then waits while each Kobo syncs, showing how
+ * far each one is. The session lives on the app's scope, but leaving the app cancels it, so the
+ * screen stays on while it is open.
  */
 @Composable
 fun KoboSyncScreen(onBack: () -> Unit) {
@@ -87,14 +89,16 @@ fun KoboSyncScreen(onBack: () -> Unit) {
     val config by relay.config.collectAsStateWithLifecycle(initialValue = null)
     val peers by relay.peers.collectAsStateWithLifecycle(initialValue = emptyList())
     val activity by relay.activity.collectAsStateWithLifecycle()
-    var status by remember { mutableStateOf<RelayGroupStatus?>(null) }
+    val session = activity.session
     var lostKeys by remember { mutableStateOf(emptySet<String>()) }
 
-    // What the relay says about each Kobo, asked again whenever a task ends or the devices change.
-    LaunchedEffect(config?.address, peers, activity.running) {
-        if (activity.running != null) return@LaunchedEffect
-        lostKeys = relay.devicesWithLostKeys()
-        status = if (config?.isConfigured == true && peers.isNotEmpty()) relay.status() else null
+    LaunchedEffect(peers) { lostKeys = relay.devicesWithLostKeys() }
+
+    // Only while a session is open: the screen going dark would stop the app, and so the session.
+    val view = LocalView.current
+    DisposableEffect(view, session != null) {
+        view.keepScreenOn = session != null
+        onDispose { view.keepScreenOn = false }
     }
 
     var scanning by rememberSaveable { mutableStateOf(false) }
@@ -162,64 +166,62 @@ fun KoboSyncScreen(onBack: () -> Unit) {
             }
 
             SettingsSection(stringResource(R.string.relay_devices)) {
+                val idle = session == null
                 Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    PaperButton(stringResource(R.string.relay_scan), ::scan, primary = true, enabled = activity.running == null)
+                    PaperButton(stringResource(R.string.relay_scan), ::scan, primary = true, enabled = idle)
                 }
                 cameraNote?.let { Text(it, style = type.label, color = colors.inkSecondary, modifier = Modifier.padding(top = 8.dp)) }
-                PasteCode(enabled = activity.running == null, onPair = relay::startPair)
+                PasteCode(enabled = idle, onPair = relay::startPair)
                 if (peers.isEmpty()) {
                     Text(stringResource(R.string.relay_none), style = type.body, color = colors.inkSecondary, modifier = Modifier.padding(top = 18.dp))
-                } else if (status?.problem != null) {
-                    Text(stringResource(R.string.relay_status_unavailable), style = type.label, color = colors.inkSecondary, modifier = Modifier.padding(top = 18.dp))
                 }
                 peers.forEachIndexed { index, peer ->
                     if (index > 0) HairlineRule()
                     PeerRow(
                         peer = peer,
-                        status = status?.devices?.get(peer.deviceId),
-                        hasPackage = status?.hasPackage == true,
+                        stage = session?.kobos?.get(peer.deviceId),
                         keysLost = peer.deviceId in lostKeys,
                         now = now,
                         zone = zone,
                         use24Hour = use24Hour,
                         onForget = { relay.startForget(peer.deviceId) },
-                        enabled = activity.running == null,
+                        enabled = idle,
                     )
                 }
             }
 
             SettingsSection(stringResource(R.string.relay_sync)) {
-                val idle = activity.running == null && config?.isConfigured == true
-                Setting(stringResource(R.string.relay_publish), stringResource(R.string.relay_publish_detail)) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        PaperButton(stringResource(R.string.relay_publish), relay::startPublish, primary = true, enabled = idle && peers.isNotEmpty())
-                        Text(
-                            config?.lastPublishedAt?.let { stringResource(R.string.relay_last_published, PaperFormat.syncTime(it, now, zone, use24Hour)) }
-                                ?: stringResource(R.string.relay_never_published),
-                            style = type.label,
-                            color = colors.inkSecondary,
-                        )
+                Setting(stringResource(R.string.relay_start), stringResource(R.string.relay_start_detail)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (session == null) {
+                            val usable = peers.any { it.deviceId !in lostKeys }
+                            PaperButton(
+                                stringResource(R.string.relay_start),
+                                { relay.startSession() },
+                                primary = true,
+                                enabled = config?.isConfigured == true && usable,
+                            )
+                        } else {
+                            if (session.stage == SessionStage.WAITING) {
+                                PaperButton(stringResource(R.string.relay_finish_now), relay::finishNow, primary = true)
+                            }
+                            val stopping = session.stage == SessionStage.FINISHING || session.stage == SessionStage.CANCELLING
+                            PaperButton(stringResource(R.string.relay_cancel), relay::cancel, enabled = !stopping)
+                        }
                     }
                 }
-                Setting(stringResource(R.string.relay_done), stringResource(R.string.relay_done_detail)) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        PaperButton(stringResource(R.string.relay_done), relay::startDone, enabled = idle && peers.isNotEmpty())
-                        Text(
-                            config?.lastDoneAt?.let { stringResource(R.string.relay_last_done, PaperFormat.syncTime(it, now, zone, use24Hour)) }
-                                ?: stringResource(R.string.relay_never_done),
-                            style = type.label,
-                            color = colors.inkSecondary,
-                        )
+                if (session != null) {
+                    Text(stringResource(R.string.relay_keep_open), style = type.label, color = colors.accent, modifier = Modifier.padding(top = 12.dp))
+                    session.paired?.let {
+                        Text(stringResource(R.string.relay_result_paired, it), style = type.label, color = colors.inkSecondary, modifier = Modifier.padding(top = 8.dp))
                     }
                 }
-                val line = activity.progress?.let { progressLine(it, activity.running, resources, context) }
-                    ?: activity.running?.let { resources.getString(if (it == RelayTask.PAIR) R.string.relay_progress_pairing else R.string.relay_progress_connecting) }
-                    ?: activity.last?.let { resultLine(it, resources, context) }
+                val line = session?.let { sessionLine(it, resources, context) } ?: activity.last?.let { resultLine(it, resources, context) }
                 line?.let {
                     NoticeLine(
                         it,
                         Modifier.padding(top = 18.dp).semantics { liveRegion = LiveRegionMode.Polite },
-                        isError = activity.running == null && (activity.last is RelayResult.Failed || activity.last is RelayResult.PairingRefused),
+                        isError = session == null && (activity.last is RelayResult.Failed || activity.last is RelayResult.PairingRefused),
                     )
                 }
             }
@@ -233,7 +235,7 @@ private fun PasteCode(enabled: Boolean, onPair: (String) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Box(Modifier.weight(1f)) {
             PaperTextField(text, { text = it }, stringResource(R.string.relay_paste_hint), isUrl = true, onImeAction = {
-                if (text.isNotBlank()) {
+                if (enabled && text.isNotBlank()) {
                     onPair(text)
                     text = ""
                 }
@@ -249,8 +251,8 @@ private fun PasteCode(enabled: Boolean, onPair: (String) -> Unit) {
 @Composable
 private fun PeerRow(
     peer: SyncPeerEntity,
-    status: RelayDeviceStatus?,
-    hasPackage: Boolean,
+    /** Where it is in the open session; null when none is open. */
+    stage: KoboStage?,
     keysLost: Boolean,
     now: Instant,
     zone: ZoneId,
@@ -270,54 +272,72 @@ private fun PeerRow(
             Text(peer.name, style = type.headlineSmall, color = colors.ink)
             if (keysLost) {
                 Text(stringResource(R.string.relay_keys_lost), style = type.label, color = colors.accent)
-            } else if (status != null) {
+            } else if (stage != null) {
                 Text(
-                    status.lastSeenAt?.let { stringResource(R.string.relay_last_seen, PaperFormat.syncTime(it, now, zone, use24Hour)) }
+                    stringResource(
+                        when (stage) {
+                            KoboStage.WAITING -> R.string.relay_kobo_waiting
+                            KoboStage.DOWNLOADED -> R.string.relay_kobo_downloaded
+                            KoboStage.COLLECTED -> R.string.relay_kobo_collected
+                        },
+                    ),
+                    style = type.label,
+                    color = if (stage == KoboStage.COLLECTED) colors.ink else colors.inkSecondary,
+                )
+            } else {
+                Text(
+                    peer.lastSyncAt?.let { stringResource(R.string.relay_last_seen, PaperFormat.syncTime(it, now, zone, use24Hour)) }
                         ?: stringResource(R.string.relay_never_seen),
                     style = type.label,
                     color = colors.inkSecondary,
                 )
-                if (hasPackage) {
-                    Text(
-                        stringResource(if (status.hasCurrentPackage) R.string.relay_has_package else R.string.relay_no_package),
-                        style = type.label,
-                        color = colors.inkSecondary,
-                    )
-                }
-                if (status.pendingChanges > 0) {
-                    Text(pluralStringResource(R.plurals.relay_pending, status.pendingChanges, status.pendingChanges), style = type.label, color = colors.inkSecondary)
-                }
             }
         }
         PaperButton(stringResource(R.string.relay_forget), onForget, Modifier.semantics { contentDescription = forget }, enabled = enabled)
     }
 }
 
-private fun progressLine(progress: RelayProgress, task: RelayTask?, resources: Resources, context: android.content.Context): String = when (progress) {
-    RelayProgress.Connecting -> resources.getString(if (task == RelayTask.PAIR) R.string.relay_progress_pairing else R.string.relay_progress_connecting)
-    is RelayProgress.PreparingImages -> resources.getString(R.string.relay_progress_images, progress.done, progress.total)
-    is RelayProgress.Uploading -> resources.getString(R.string.relay_progress_uploading, Formatter.formatShortFileSize(context, progress.bytes))
-    RelayProgress.Publishing -> resources.getString(R.string.relay_progress_publishing)
-    is RelayProgress.Collecting -> resources.getString(R.string.relay_progress_collecting, progress.done, progress.total)
+/** Where the open session is, in plain words. */
+internal fun sessionLine(session: RelaySession, resources: Resources, context: android.content.Context): String = when (session.stage) {
+    SessionStage.PREPARING -> when (val progress = session.progress) {
+        is RelayProgress.PreparingImages -> resources.getString(R.string.relay_progress_images, progress.done, progress.total)
+        else -> resources.getString(R.string.relay_stage_preparing)
+    }
+    SessionStage.UPLOADING -> when (val progress = session.progress) {
+        is RelayProgress.Uploading -> resources.getString(
+            R.string.relay_progress_uploading,
+            Formatter.formatShortFileSize(context, progress.sent),
+            Formatter.formatShortFileSize(context, progress.total),
+        )
+        else -> resources.getString(R.string.relay_stage_preparing)
+    }
+    SessionStage.PUBLISHING -> resources.getString(R.string.relay_stage_publishing)
+    SessionStage.WAITING -> if (session.kobos.size == 1) {
+        resources.getString(R.string.relay_stage_waiting_one)
+    } else {
+        resources.getString(R.string.relay_stage_waiting, session.kobos.values.count { it == KoboStage.COLLECTED }, session.kobos.size)
+    }
+    SessionStage.FINISHING -> resources.getString(R.string.relay_stage_finishing)
+    SessionStage.CANCELLING -> resources.getString(R.string.relay_stage_cancelling)
 }
 
-/** The last task's result in plain words. */
+/** How the last session or pairing ended, in plain words. */
 internal fun resultLine(result: RelayResult, resources: Resources, context: android.content.Context): String = when (result) {
-    is RelayResult.Published -> resources.getQuantityString(
-        R.plurals.relay_result_published, result.devices,
-        result.devices, Formatter.formatShortFileSize(context, result.bytes), result.editions, result.saved, result.images,
-    )
-    is RelayResult.NoDevices -> resources.getString(R.string.relay_result_no_devices)
-    is RelayResult.Collected -> buildList {
+    is RelayResult.Synced -> buildList {
+        add(
+            when {
+                result.early -> resources.getString(R.string.relay_result_finished_early, result.synced, result.kobos)
+                result.kobos == 1 -> resources.getString(R.string.relay_result_synced_one)
+                else -> resources.getString(R.string.relay_result_synced_all, result.kobos)
+            },
+        )
         add(if (result.events > 0) resources.getQuantityString(R.plurals.relay_result_collected, result.events, result.events) else resources.getString(R.string.relay_result_nothing))
         if (result.dropped > 0) add(resources.getQuantityString(R.plurals.relay_result_dropped, result.dropped, result.dropped))
         if (result.left > 0) add(resources.getQuantityString(R.plurals.relay_result_left, result.left, result.left))
     }.joinToString(" ")
-    is RelayResult.Paired -> when {
-        result.toldRelay -> resources.getString(R.string.relay_result_paired, result.name)
-        result.problem == null -> resources.getString(R.string.relay_result_paired_no_address, result.name)
-        else -> resources.getString(R.string.relay_result_paired_not_told, result.name, problemLine(result.problem, null, resources))
-    }
+    is RelayResult.NoDevices -> resources.getString(R.string.relay_result_no_devices)
+    is RelayResult.Cancelled -> resources.getString(if (result.byLeaving) R.string.relay_result_left_app else R.string.relay_result_cancelled)
+    is RelayResult.Paired -> resources.getString(R.string.relay_result_paired, result.name)
     is RelayResult.PairingRefused -> resources.getString(
         when (result.problem) {
             PairingProblem.NOT_A_CODE -> R.string.relay_code_not_a_code
@@ -325,12 +345,7 @@ internal fun resultLine(result: RelayResult, resources: Resources, context: andr
             PairingProblem.BAD_FIELDS -> R.string.relay_code_bad
         },
     )
-    is RelayResult.Forgotten -> result.problem?.let { resources.getString(R.string.relay_result_forgotten_not_told, problemLine(it, null, resources)) }
-        ?: resources.getString(R.string.relay_result_forgotten)
-    is RelayResult.Failed -> resources.getString(
-        if (result.task == RelayTask.DONE) R.string.relay_failed_done else R.string.relay_failed_publish,
-        problemLine(result.problem, result.status, resources),
-    )
+    is RelayResult.Failed -> resources.getString(R.string.relay_failed, problemLine(result.problem, result.status, resources))
 }
 
 internal fun problemLine(problem: RelayProblem, status: Int?, resources: Resources): String = when (problem) {

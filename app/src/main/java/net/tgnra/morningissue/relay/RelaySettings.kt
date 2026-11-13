@@ -3,30 +3,26 @@ package net.tgnra.morningissue.relay
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import java.time.Instant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import net.tgnra.morningissue.BuildConfig
 
-/** The relay the app syncs through, and what the phone remembers about it. */
+/** The relay the app syncs through. */
 data class RelayConfig(
     /** The relay's address as built into the app; empty when the build has none. */
     val address: String = "",
     /** Sent when creating the group, for a relay that asks for one; empty for none. */
     val registrationToken: String = "",
-    /** When the last package was published, and when Done last ran to the end. */
-    val lastPublishedAt: Instant? = null,
-    val lastDoneAt: Instant? = null,
 ) {
     val isConfigured: Boolean get() = address.isNotBlank()
 }
 
 /**
- * Relay sync's part of the settings store: the owner secret `O`, made once per install, which
- * address the group was last registered at, and when Publish and Done last finished.
+ * Relay sync's part of the settings store: the owner secret `O`, made once per install, and
+ * whether the group an earlier version left on the relay has been deleted.
  *
  * The address and the registration token are the build's (`BuildConfig.RELAY_ADDRESS` and
  * `RELAY_TOKEN`, from the build's properties; see `app/build.gradle.kts`) and cannot be changed
@@ -38,14 +34,7 @@ class RelaySettings(
     private val address: String = BuildConfig.RELAY_ADDRESS,
     private val registrationToken: String = BuildConfig.RELAY_TOKEN,
 ) {
-    val config: Flow<RelayConfig> = dataStore.data.map { prefs ->
-        RelayConfig(
-            address = address,
-            registrationToken = registrationToken,
-            lastPublishedAt = prefs[LAST_PUBLISHED]?.let(Instant::ofEpochMilli),
-            lastDoneAt = prefs[LAST_DONE]?.let(Instant::ofEpochMilli),
-        )
-    }
+    val config: Flow<RelayConfig> = dataStore.data.map { RelayConfig(address = address, registrationToken = registrationToken) }
 
     suspend fun current(): RelayConfig = config.first()
 
@@ -60,25 +49,21 @@ class RelaySettings(
         return secret
     }
 
-    /** The relay address the group is known to exist at, so `PUT /v1/group` is sent only the first time. */
-    suspend fun registeredAt(): String? = dataStore.data.first()[REGISTERED]
+    /** Whether the owner secret has been made: without one, this install never had a group. */
+    suspend fun hasOwnerSecret(): Boolean = dataStore.data.first()[OWNER] != null
 
-    suspend fun setRegisteredAt(address: String?) {
-        dataStore.edit { if (address == null) it.remove(REGISTERED) else it[REGISTERED] = address }
-    }
+    /**
+     * Whether the group an earlier version kept on the relay between syncs has been deleted.
+     * Since sessions, the relay holds the group only while one is open.
+     */
+    suspend fun leftoverGroupCleared(): Boolean = dataStore.data.first()[LEFTOVER_CLEARED] == true
 
-    suspend fun setLastPublished(at: Instant) {
-        dataStore.edit { it[LAST_PUBLISHED] = at.toEpochMilli() }
-    }
-
-    suspend fun setLastDone(at: Instant) {
-        dataStore.edit { it[LAST_DONE] = at.toEpochMilli() }
+    suspend fun setLeftoverGroupCleared() {
+        dataStore.edit { it[LEFTOVER_CLEARED] = true }
     }
 
     private companion object {
         val OWNER = stringPreferencesKey("relay_owner_secret")
-        val REGISTERED = stringPreferencesKey("relay_registered_at")
-        val LAST_PUBLISHED = longPreferencesKey("relay_last_published")
-        val LAST_DONE = longPreferencesKey("relay_last_done")
+        val LEFTOVER_CLEARED = booleanPreferencesKey("relay_leftover_group_cleared")
     }
 }

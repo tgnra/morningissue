@@ -27,7 +27,7 @@ class EarlyBuildWorker(
     constructor(context: Context, params: WorkerParameters) : this(context, params, null)
 
     override suspend fun doWork(): Result {
-        val build = earlyBuild ?: EarlyBuild.from(applicationContext, applicationContext.appContainer)
+        val build = earlyBuild ?: EarlyBuild.from(applicationContext.appContainer)
         val outcome = build.run()
         if (outcome.error != null) {
             Log.w(TAG, "Early build failed; the stand will offer Print now", outcome.error)

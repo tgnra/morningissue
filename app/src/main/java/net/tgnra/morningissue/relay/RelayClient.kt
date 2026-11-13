@@ -73,12 +73,6 @@ data class ChangesList(val changes: List<ChangeInfo> = emptyList())
 data class ChangeInfo(val id: String, val kid: String, val batch: String, val size: Long = 0, val receivedAt: String? = null)
 
 @Serializable
-data class DoneRequest(val changes: List<String>)
-
-@Serializable
-data class DoneResponse(val deletedChanges: Int = 0, val packageDeleted: Boolean = false)
-
-@Serializable
 private data class ErrorBody(val error: String? = null)
 
 /**
@@ -127,8 +121,9 @@ class RelayClient(
      * relay. One request never carries more than a part, so a proxy's request size limit (such
      * as Cloudflare's 100 MB) doesn't bound the package, and a dropped connection costs one part:
      * a part is sent again up to [PART_ATTEMPTS] times after a network failure or a `5xx`.
+     * [onPart] is told the bytes sent so far after each part.
      */
-    suspend fun uploadPackage(packageId: String, envelope: File, sha256: ByteArray) {
+    suspend fun uploadPackage(packageId: String, envelope: File, sha256: ByteArray, onPart: (sent: Long, total: Long) -> Unit = { _, _ -> }) {
         val size = envelope.length()
         val parts = maxOf(1L, (size + partBytes - 1) / partBytes).toInt()
         for (n in 0 until parts) {
@@ -140,6 +135,7 @@ class RelayClient(
             while (true) {
                 try {
                     sendBody("PUT", path, partSha, { FileSlice(envelope, offset, length) }, uploadHttp) { }
+                    onPart(offset + length, size)
                     break
                 } catch (e: IOException) {
                     val retryable = e !is RelayHttpException || e.status >= 500
@@ -178,11 +174,7 @@ class RelayClient(
         if (e.status == 404) null else throw e
     }
 
-    suspend fun done(ids: List<String>): DoneResponse {
-        val body = json.encodeToString(DoneRequest(ids)).toByteArray()
-        return send("POST", "/v1/group/done", body) { json.decodeFromString<DoneResponse>(it.bodyText()) }
-    }
-
+    /** `DELETE /v1/group`: the group and everything in it. */
     suspend fun deleteGroup() {
         send("DELETE", "/v1/group", null) { }
     }

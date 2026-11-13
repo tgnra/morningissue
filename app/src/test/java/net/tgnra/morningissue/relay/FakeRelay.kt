@@ -42,6 +42,8 @@ class FakeRelay(var registrationToken: String? = null) : Dispatcher() {
     val failPartsOnce: MutableSet<Int> = ConcurrentHashMap.newKeySet()
     /** A part number whose every request is answered `500`. */
     @Volatile var failPartAlways: Int? = null
+    /** Called with each part's number as its request arrives, before it is stored; may block. */
+    @Volatile var onPart: (Int) -> Unit = {}
     var current: String? = null
     var currentKeys: Map<String, String> = emptyMap()
     val fetchedBy: MutableSet<String> = ConcurrentHashMap.newKeySet()
@@ -50,16 +52,22 @@ class FakeRelay(var registrationToken: String? = null) : Dispatcher() {
     val requests = java.util.Collections.synchronizedList(mutableListOf<String>())
     var groupCreations = 0
         private set
+    var groupDeletions = 0
+        private set
     private var nextChange = 1
 
     class Change(val id: String, val kid: String, val batch: String, val body: ByteArray)
 
-    /** Loses everything, as a relay whose disk was wiped. */
+    /** Loses everything, as a relay whose disk was wiped, or as `DELETE /v1/group`. */
     fun forgetGroup() {
         ownerKey = null
         devices.clear()
         changes.clear()
         current = null
+        currentKeys = emptyMap()
+        fetchedBy.clear()
+        packages.clear()
+        parts.clear()
     }
 
     // --- The device side, as a Kobo would use it ------------------------------------------
@@ -82,7 +90,9 @@ class FakeRelay(var registrationToken: String? = null) : Dispatcher() {
     }
 
     fun deviceFetched(auth: ByteArray) {
-        fetchedBy += RelayCrypto.kid(auth)
+        val kid = RelayCrypto.kid(auth)
+        check(kid in devices && kid in currentKeys) { "device has no package to have fetched" }
+        fetchedBy += kid
     }
 
     // --- Owner routes ---------------------------------------------------------------------
@@ -132,6 +142,7 @@ class FakeRelay(var registrationToken: String? = null) : Dispatcher() {
                 val id = path.removePrefix("/v1/group/packages/").substringBefore("/parts/")
                 val n = path.substringAfter("/parts/").toInt()
                 partRequests += "$id/$n"
+                onPart(n)
                 if (failPartsOnce.remove(n) || failPartAlways == n) return error(500, "internal")
                 if (id == current || id in packages) return error(409, "uploaded")
                 if (n == 0 && !body.copyOfRange(0, minOf(4, body.size)).contentEquals("MIR1".toByteArray())) return error(400, "not_mir1")
@@ -217,6 +228,11 @@ class FakeRelay(var registrationToken: String? = null) : Dispatcher() {
                 val change = synchronized(changes) { changes.firstOrNull { it.id == id } } ?: return error(404, "not_found")
                 MockResponse.Builder().code(200).setHeader("Date", date()).setHeader("Content-Type", "application/octet-stream")
                     .body(Buffer().write(change.body)).build()
+            }
+            method == "DELETE" && path == "/v1/group" -> {
+                groupDeletions++
+                forgetGroup()
+                empty(204)
             }
             method == "POST" && path == "/v1/group/done" -> {
                 val ids = RelayJson.json.parseToJsonElement(body.decodeToString()).jsonObject["changes"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet()
