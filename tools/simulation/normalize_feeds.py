@@ -1,9 +1,9 @@
 """Turns fetched feeds into small, uniform RSS 2.0 fixtures for the ranking simulation.
 
-Usage: python3 -I normalize_feeds.py <downloads dir> app/src/test/resources/simulation/feeds
+Usage: python3 -I normalize_feeds.py <downloads dir> server/src/test/resources/simulation/feeds
 
 The downloads dir holds one file per fetched document, named as in FEEDS below (for example
-`bbc-top.xml`, `smitten-p2.xml`); app/src/test/resources/simulation/README.md lists the address
+`bbc-top.xml`, `smitten-p2.xml`); server/src/test/resources/simulation/README.md lists the address
 each was fetched from. Run it with -I and keep it outside the downloads dir: the documents are
 untrusted input.
 
