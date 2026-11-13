@@ -60,7 +60,11 @@ class FakeRefresher(
     override fun reachedFeedsOf(userId: Long): Boolean = reached
 }
 
-class FakeFullText(private val journal: Journal? = null) : FullTextService {
+class FakeFullText(
+    private val journal: Journal? = null,
+    /** What a call for an edition does: how many bodies it stored, or a throw. */
+    var behaviour: suspend (editionId: Long) -> Int = { 0 },
+) : FullTextService {
     val editions = mutableListOf<Long>()
 
     override suspend fun ensure(articleId: Long): FullTextState {
@@ -71,7 +75,7 @@ class FakeFullText(private val journal: Journal? = null) : FullTextService {
     override suspend fun ensureForEdition(editionId: Long, concurrency: Int): Int {
         synchronized(editions) { editions += editionId }
         journal?.add("fulltext:$editionId")
-        return 0
+        return behaviour(editionId)
     }
 }
 
