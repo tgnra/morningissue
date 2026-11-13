@@ -1,0 +1,17 @@
+# The server image builds with -PserverOnly: only the Gradle files, core/, server/ and assets/ matter.
+build
+**/build
+.gradle
+**/.gradle
+app/build
+kobo/target
+app
+macrobenchmark
+kobo
+relay
+design
+.idea
+.git
+.claude
+result
+result-*

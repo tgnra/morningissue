@@ -51,6 +51,11 @@ data class KoboHelloResponse(
     val username: String,
     /** The server's public URL, if configured. */
     val server: String? = null,
+    /**
+     * The account's `dbId`, as in the manifest. A Kobo paired again compares it with the one it
+     * holds, so it spots a server that was reset before uploading stale events.
+     */
+    val dbId: String? = null,
 )
 
 /**

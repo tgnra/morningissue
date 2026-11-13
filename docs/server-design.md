@@ -1061,3 +1061,51 @@ Phase 1 landed on `self-hosted` in four commits (core extraction, archive additi
 - `FeedRefresher.refresh` returns a `RefreshReport` (`reachedFeeds`). `reachedFeedsOf(userId)` replaces the pseudo-code's `lastReportCoversUserFeeds`.
 - `EditionService.bundle` and `saved` return DTOs. The manifest's `version` hashes their `ApiJson` encoding.
 - `KoboImageService.writeZip(userId, request, output)` streams the zip.
+
+---
+
+## Phase 2 deviations (W-C)
+
+W-C (HTTP, auth, config and packaging) landed on `ws/server-http`. Where it differs from the sections above, or settles something they left open:
+
+**API additions.**
+- `GET /kobo/hello` answers `{"username","server","dbId"}`: `KoboHelloResponse.dbId` (optional) is new in core, so a Kobo paired again spots a reset server before it uploads stale events.
+- A service that is not wired yet answers `501 {"error":"not_implemented"}` (`http.NOT_IMPLEMENTED`); an unexpected exception answers `500 {"error":"internal"}`. Neither is an `ApiError` code; a full server never sends 501.
+
+**Auth rules settled.**
+- A missing or malformed `Authorization` header is `401 unauthenticated`. A token the server does not know (or a revoked one) is `401 unknown` on the endpoints a Kobo may call and `401 unauthenticated` on phone-only ones.
+- A token of a disabled account is `403 account_disabled`, and so is a correct password for one.
+- The order of checks is token, then device kind (`forbidden_for_device`), then the lockout (`password_change_required`). The lockout applies to Kobo tokens too: `reset-password` leaves Kobos paired, and they get 403 until the new password is changed.
+- Login refuses `device.kind = KOBO` (400) and a device ID over 64 characters. A device ID seen before under another account (or as the other kind) is taken over with `acked_seq = 0`; under the same account it keeps `acked_seq` and `created_at` and is un-revoked.
+- Revoked devices stay as rows with `revoked_at` and are left out of `GET /devices`. Pairing the same Kobo again (same secret) un-revokes it. `DELETE /devices/{id}` of an unknown, revoked or other account's device is 404.
+- `POST /auth/password` also answers `weak_password` when the new password equals the current one.
+- The login rate limit is in memory, counts names case-insensitively whether or not they exist, and is cleared by a successful login. An unknown name spends the same PBKDF2 time as a known one.
+- Password hashes are stored as `pbkdf2-sha256$<iterations>$<b64 salt>$<b64 hash>`. Generated passwords use the alphabet `abcdefghijkmnpqrstuvwxyz23456789`.
+- `last_seen_at` is written at most once a minute per device, from an in-memory throttle; pairing does not set it.
+
+**Limits.**
+- More than 500 events, or more than 100 image URLs, is `413 too_large`. A Kobo image width outside 160..2048 is 400.
+- `/kobo/images` bodies may be up to 4 MB; `/opml` 5 MB; `/import` `import.maxMb`; everything else 1 MB. A declared `Content-Length` over the limit is refused before the body is read, and chunked bodies are counted as they arrive.
+- Page sizes: `/editions`, `/feeds/{id}/articles` and `/search` take `limit` 1..200; `/articles` 1..500 (default 100); `/sync/manifest` `editions` 1..30. Out of range is 400.
+- An unparsable `X-Events-Through` is `400 events_through_required`.
+
+**Imports.** The upload is streamed to `<dataDir>/imports/<userId>-<key>.zip` (via a `.part` file), not `<key>.zip`, so two accounts' keys cannot collide. `Idempotency-Key` must match `[A-Za-z0-9-]{1,64}`. The route deletes the file when the service refuses or answers an earlier report; once a job starts, the import service owns it.
+
+**ETags.** Bundles and the saved shelf carry `ETag: "<hex SHA-256 of the ApiJson text>"`, computed by the route, and answer 304 to a matching `If-None-Match`.
+
+**Config.** Unknown keys are logged and ignored. User names must match `[A-Za-z0-9][A-Za-z0-9_.-]{0,63}` (they name files) and be unique. `prePrintMaxAgeMinutes` sits under `[refresh]`, as in 7.1. Blank environment variables are ignored.
+
+**Command line.** `--config` may come anywhere; `--version` and `--help` exist. `import <user> <file.zip>` imports with `mode=replace` (an empty account only); `import --merge` merges. `reset-password` writes the new password file as well as printing it.
+
+**Wiring (for integration).**
+- `http.ServerServices` is the service set the routes take (all fifteen route-facing services, including `KoboImageService`); a service left out is a 501 stub. `http.HttpOptions` carries the imports directory and limits; `httpOptions(config)` builds it.
+- `Application.morningIssue(services, options)` installs the API. `Main.kt` has `interface Container : AutoCloseable { config; database; services; start() }` and `class AccountsContainer(config)`, which wires the real `DbAuthService` and `DbDeviceService`. Integration writes `ServerContainer(config) : Container` (with `start()` launching the scheduler) and changes `main` to `Cli(::ServerContainer)`.
+- `serve` creates the data dir, points `java.io.tmpdir` at `<dataDir>/tmp`, bootstraps users, calls `start()`, then serves.
+- `DeviceDao.byId` and `DeviceDao.touch` look devices up by their globally unique ID without `user_id`; `UserScopedQueryTest` should allow-list them. `byTokenHash` joins `users` on `user_id`.
+
+**Packaging.**
+- The Dockerfile names its base images fully (`docker.io/library/eclipse-temurin:21-jdk|jre`), so rootless Podman without a registries config builds it too. `.dockerignore` also leaves out `app`, `macrobenchmark`, `kobo`, `relay`, `design`, `.git` and `.claude`.
+- nixpkgs' `gradle_9` is 9.8 while the wrapper is 9.4.1; the build works with it. The package's source is a fileset of the Gradle files, `core/`, `server/` and `assets/`, so app or Kobo changes do not rebuild it.
+- **The NixOS service sets `java.io.tmpdir=/tmp` (its `PrivateTmp`), not `<dataDir>/tmp`.** Current systemd mounts a `DynamicUser` state directory `noexec` (an idmapped mount), so the bundled SQLite's native library extracted there fails to load ("failed to map segment"); the VM test found it. Docker and plain installs still use `<dataDir>/tmp`.
+- The module uses `StateDirectory` only for the default data dir (`ReadWritePaths` otherwise), and adds more hardening than listed (`ProtectHome`, `PrivateDevices`, kernel and namespace protections, an empty capability set, `UMask=0077`).
+- The VM test sets `node.pkgsReadOnly = false`, because `nixosModules.default` adds the overlay. It checks `GET /settings` is no longer 403 after the password change, accepting 200 or 501 until the settings service is wired; integration should tighten that to 200.

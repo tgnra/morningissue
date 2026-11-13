@@ -1,0 +1,9 @@
+{
+  "description": "A Kobo's bearer token from the secret S in its pairing code: token = b64url(HKDF-SHA256(S, salt = empty, info = \"morningissue server token v1\", 32 bytes)), unpadded. The server stores tokenSha256Hex, the hex SHA-256 of the token's UTF-8 text, and never S.",
+  "info": "morningissue server token v1",
+  "secretHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "secret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "pairingUri": "morningissue:pair?v=2&s=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&d=b7e2-41aa&n=Kobo%20Libra%202&w=1264",
+  "token": "gLYEzapDfvjcIu5h42jFUFPx46QBYg0sKsGaedJRfzc",
+  "tokenSha256Hex": "fc27ecea41821dbf6c80ee0f797b450c9eb03525dcd0c4bdc67c8d9dc441a89b"
+}
