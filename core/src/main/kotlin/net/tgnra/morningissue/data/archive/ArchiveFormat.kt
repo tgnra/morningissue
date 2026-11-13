@@ -1,7 +1,12 @@
 package net.tgnra.morningissue.data.archive
 
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import net.tgnra.morningissue.model.AppSettings
+import net.tgnra.morningissue.model.ReleaseChange
 
 /**
  * The archive file: a zip holding four entries, read in this order.
@@ -20,6 +25,13 @@ import kotlinx.serialization.json.Json
  *   fields were added without raising the version: files written before them import as posts
  *   without categories.
  * - `editions.jsonl`: one [ArchiveEdition] per line, with its items.
+ * - `settings.json`, optional: one [ArchiveSettings], the schedule and edition settings the
+ *   phone had, so that a server account that has none yet can take them on. Older files have
+ *   no such entry; older readers ignore it.
+ *
+ * Feeds' `muteUntil` and editions' `pageViewsTracked` and `pageViews` were added, with
+ * `settings.json`, for moving a library to a self-hosted server, again without raising the
+ * version. Readers ignore what they do not know.
  *
  * Feeds and posts carry a number that is only meaningful inside the file; posts point at
  * their feed, and edition items at their post, by it. Times are epoch milliseconds, dates ISO
@@ -36,6 +48,7 @@ object ArchiveFormat {
     const val FEEDS = "feeds.jsonl"
     const val POSTS = "posts.jsonl"
     const val EDITIONS = "editions.jsonl"
+    const val SETTINGS = "settings.json"
 
     val json = Json {
         ignoreUnknownKeys = true
@@ -67,6 +80,8 @@ data class ArchiveFeed(
     /** A `FeedStatus` name; absent in version 1 files, whose feeds were all subscriptions. */
     val status: String = "SUBSCRIBED",
     val discoveredAt: Long? = null,
+    /** Until when the feed is muted (left out of editions); absent when it is not. */
+    val muteUntil: Long? = null,
 )
 
 @Serializable
@@ -130,7 +145,77 @@ data class ArchiveEdition(
     val openedAt: Long? = null,
     val finishedAt: Long? = null,
     val items: List<ArchiveItem> = emptyList(),
+    /** Whether the edition recorded page views; absent in files written before it was exported, read as untracked. */
+    val pageViewsTracked: Boolean? = null,
+    /** The pages the reader looked at; absent when there are none or the file predates it. */
+    val pageViews: List<ArchivePageView>? = null,
 )
+
+/** Time on one page of an edition, as in `edition_page_view`. */
+@Serializable
+data class ArchivePageView(
+    val page: Int,
+    /** Total time on screen, in milliseconds. */
+    val ms: Long,
+    /** When the page was first shown, epoch milliseconds. */
+    val firstSeenAt: Long,
+)
+
+/**
+ * `settings.json`: the phone's schedule and edition settings. Device-only settings (theme,
+ * display, greyscale, storage budget) are left out. Times of day are `HH:mm`.
+ */
+@Serializable
+data class ArchiveSettings(
+    val resetTime: String,
+    /** An `EditionLength` name. */
+    val editionLength: String,
+    val eveningEnabled: Boolean,
+    val eveningTime: String,
+    /** The IANA time zone the phone was in, such as `Europe/London`. */
+    val timeZone: String,
+    val onboardingDone: Boolean,
+    /** Releases (epoch milliseconds) for which a run found nothing new to print, newest first. */
+    val nothingNewFor: List<Long> = emptyList(),
+    /** How the last change of the reset time takes effect; absent if it was never changed. */
+    val resetChange: ArchiveReleaseChange? = null,
+    /** How the last change of the Evening edition's time, or switching it on, takes effect. */
+    val eveningChange: ArchiveReleaseChange? = null,
+) {
+    companion object {
+        /** What the archive keeps of [settings], with the phone's [zone]. */
+        fun of(settings: AppSettings, zone: ZoneId): ArchiveSettings = ArchiveSettings(
+            resetTime = settings.resetTime.format(TIME_OF_DAY),
+            editionLength = settings.editionLength.name,
+            eveningEnabled = settings.eveningEditionEnabled,
+            eveningTime = settings.eveningEditionTime.format(TIME_OF_DAY),
+            timeZone = zone.id,
+            onboardingDone = settings.onboardingDone,
+            nothingNewFor = settings.nothingNewFor.map { it.toEpochMilli() },
+            resetChange = settings.resetChange?.let(ArchiveReleaseChange::of),
+            eveningChange = settings.eveningChange?.let(ArchiveReleaseChange::of),
+        )
+
+        private val TIME_OF_DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    }
+}
+
+/** A `ReleaseChange`, in epoch milliseconds. */
+@Serializable
+data class ArchiveReleaseChange(
+    val settled: Long? = null,
+    val kept: Long? = null,
+    val from: Long,
+) {
+    /** The model's form. */
+    fun toReleaseChange(): ReleaseChange =
+        ReleaseChange(settled?.let(Instant::ofEpochMilli), kept?.let(Instant::ofEpochMilli), Instant.ofEpochMilli(from))
+
+    companion object {
+        fun of(change: ReleaseChange): ArchiveReleaseChange =
+            ArchiveReleaseChange(change.settled?.toEpochMilli(), change.kept?.toEpochMilli(), change.from.toEpochMilli())
+    }
+}
 
 @Serializable
 data class ArchiveItem(

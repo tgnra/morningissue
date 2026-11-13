@@ -12,6 +12,7 @@ import java.io.OutputStream
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -29,6 +30,7 @@ import net.tgnra.morningissue.data.db.FeedEntity
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.repository.AffinityLearner
 import net.tgnra.morningissue.engine.RankingConfig
+import net.tgnra.morningissue.model.AppSettings
 import net.tgnra.morningissue.model.ArticleCategories
 import net.tgnra.morningissue.model.ContentBlocks
 import net.tgnra.morningissue.model.ContentSource
@@ -101,6 +103,10 @@ class RoomArchiveTransfer(
     private val clock: Clock,
     private val config: RankingConfig = RankingConfig.Default,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** The settings written to `settings.json`; null writes no such entry. Import ignores the entry. */
+    private val settings: (suspend () -> AppSettings)? = null,
+    /** The time zone written with the settings: the phone's own. */
+    private val zone: () -> ZoneId = { ZoneId.systemDefault() },
 ) : ArchiveTransfer {
     private val json = ArchiveFormat.json
     private val feedDao = database.feedDao()
@@ -114,6 +120,8 @@ class RoomArchiveTransfer(
     // --- Export ----------------------------------------------------------------------------
 
     override suspend fun export(output: OutputStream, onProgress: (ArchiveProgress) -> Unit): ExportReport = withContext(dispatcher) {
+        // Read before the transaction: the settings are not in the database.
+        val archivedSettings = settings?.invoke()?.let { ArchiveSettings.of(it, zone()) }
         // One read transaction, so the file is the library at one moment.
         database.withReadTransaction {
             val now = clock.instant()
@@ -149,6 +157,7 @@ class RoomArchiveTransfer(
                             n = feed.id, url = feed.url, title = feed.title, siteUrl = feed.siteUrl, iconUrl = feed.iconUrl,
                             tags = details.tags.map { it.name }, sliderStep = feed.sliderStep.name, addedAt = feed.addedAt.toEpochMilli(),
                             status = feed.status.name, discoveredAt = feed.discoveredAt?.toEpochMilli(),
+                            muteUntil = feed.muteUntil?.toEpochMilli(),
                         ),
                     ),
                 )
@@ -184,9 +193,17 @@ class RoomArchiveTransfer(
                 val items = archiveDao.items(edition.id).map {
                     ArchiveItem(it.articleId, it.page, it.slot, it.kind.name, it.score, it.section, it.reason)
                 }
-                line(json.encodeToString(edition.toArchive(items)))
+                val pageViews = editionDao.getPageViews(edition.id)
+                    .map { ArchivePageView(it.page, it.msVisible, it.firstSeenAt.toEpochMilli()) }
+                line(json.encodeToString(edition.toArchive(items, pageViews)))
             }
             end()
+
+            if (archivedSettings != null) {
+                begin(ArchiveFormat.SETTINGS)
+                line(json.encodeToString(archivedSettings))
+                end()
+            }
 
             // Writes the zip's directory; the caller closes the stream itself.
             zip.finish()
@@ -207,10 +224,11 @@ class RoomArchiveTransfer(
         editionsRunUnopened, leadCount,
     )
 
-    private fun EditionEntity.toArchive(items: List<ArchiveItem>) = ArchiveEdition(
+    private fun EditionEntity.toArchive(items: List<ArchiveItem>, pageViews: List<ArchivePageView>) = ArchiveEdition(
         date = date.toString(), kind = kind.name, cutoffAt = cutoffAt.toEpochMilli(), releaseAt = releaseAt.toEpochMilli(),
         builtAt = builtAt.toEpochMilli(), length = length.name, number = number, openedAt = openedAt?.toEpochMilli(),
         finishedAt = finishedAt?.toEpochMilli(), items = items,
+        pageViewsTracked = pageViewsTracked, pageViews = pageViews.takeIf { it.isNotEmpty() },
     )
 
     // --- Import ----------------------------------------------------------------------------

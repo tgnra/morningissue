@@ -7,6 +7,8 @@ import java.io.ByteArrayOutputStream
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -23,6 +25,7 @@ import net.tgnra.morningissue.data.signals.TraitsBackfill
 import net.tgnra.morningissue.data.storage.RoomStorageRepository
 import net.tgnra.morningissue.edition.FakeSettings
 import net.tgnra.morningissue.edition.MutableClock
+import net.tgnra.morningissue.model.AppSettings
 import net.tgnra.morningissue.model.ArticleCategories
 import net.tgnra.morningissue.model.ArticleCategory
 import net.tgnra.morningissue.model.ArticleTraitRules
@@ -34,6 +37,7 @@ import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.EnclosureKind
 import net.tgnra.morningissue.model.ItemKind
+import net.tgnra.morningissue.model.ReleaseChange
 import net.tgnra.morningissue.model.RichText
 import net.tgnra.morningissue.model.SliderStep
 import org.junit.After
@@ -569,5 +573,48 @@ class ArchiveTransferTest {
         val news = posts.single { it.guid == "news-1" }
         assertTrue(news.categories.isEmpty())
         assertNull(news.enclosure)
+    }
+
+    @Test
+    fun theExportCarriesMutesPageViewsAndTheSettingsForTheServer() = runBlocking<Unit> {
+        val library = seed(source)
+        source.feedDao().updateMuteUntil(library.news, day(40))
+        source.editionDao().recordPageView(library.editions[0], 1, 4_000, day(1).plusSeconds(70))
+        source.editionDao().recordPageView(library.editions[0], 1, 1_500, day(1).plusSeconds(90))
+        val settings = AppSettings(
+            resetTime = LocalTime.of(5, 45), editionLength = EditionLength.LONG, eveningEditionEnabled = true,
+            onboardingDone = true, nothingNewFor = listOf(day(2)),
+            resetChange = ReleaseChange(settled = day(1), kept = null, from = day(3)),
+        )
+        val out = ByteArrayOutputStream()
+        RoomArchiveTransfer(source, clock, settings = { settings }, zone = { ZoneId.of("Europe/London") }).export(out)
+        val entries = LinkedHashMap<String, List<String>>()
+        ZipInputStream(ByteArrayInputStream(out.toByteArray())).use { zip ->
+            generateSequence { zip.nextEntry }.forEach { entries[it.name] = zip.readBytes().decodeToString().trim().lines() }
+        }
+
+        val feeds = entries.getValue("feeds.jsonl").map { ArchiveFormat.json.decodeFromString<ArchiveFeed>(it) }
+        assertEquals(day(40).toEpochMilli(), feeds.single { it.n == library.news }.muteUntil)
+        assertNull(feeds.single { it.n == library.blog }.muteUntil)
+
+        val editions = entries.getValue("editions.jsonl").map { ArchiveFormat.json.decodeFromString<ArchiveEdition>(it) }
+        val first = editions.single { it.number == 1 }
+        assertEquals(false, first.pageViewsTracked)
+        assertEquals(listOf(ArchivePageView(1, 5_500, day(1).plusSeconds(70).toEpochMilli())), first.pageViews)
+        assertNull(editions.single { it.number == 2 }.pageViews)
+
+        val written = ArchiveFormat.json.decodeFromString<ArchiveSettings>(entries.getValue("settings.json").single())
+        assertEquals(
+            ArchiveSettings(
+                resetTime = "05:45", editionLength = "LONG", eveningEnabled = true, eveningTime = "18:00",
+                timeZone = "Europe/London", onboardingDone = true, nothingNewFor = listOf(day(2).toEpochMilli()),
+                resetChange = ArchiveReleaseChange(settled = day(1).toEpochMilli(), kept = null, from = day(3).toEpochMilli()),
+            ),
+            written,
+        )
+        assertEquals(settings.resetChange, written.resetChange!!.toReleaseChange())
+
+        // Today's reader ignores all of it.
+        assertEquals(12, import(target, out.toByteArray()).postsImported)
     }
 }

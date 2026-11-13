@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import net.tgnra.morningissue.data.archive.ArchiveController
 import net.tgnra.morningissue.data.archive.RoomArchiveTransfer
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
@@ -181,7 +182,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
     override val articles: ArticleRepository by lazy { RoomArticleRepository(database, clock) }
     override val storage: StorageRepository by lazy { RoomStorageRepository(database, settings, clock, images = images) }
     override val archive: ArchiveController by lazy {
-        ArchiveController(appScope, appContext.contentResolver, RoomArchiveTransfer(database, clock), storage)
+        ArchiveController(appScope, appContext.contentResolver, RoomArchiveTransfer(database, clock, settings = { settings.settings.first() }), storage)
     }
 
     override val embedder: EmbedderAsset by lazy { EmbedderAsset(appContext) }
