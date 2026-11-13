@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the feed-discovery catalogue the app ships: app/src/main/assets/discovery/catalogue.db.
+"""Builds the feed-discovery catalogue the app ships: assets/discovery/catalogue.db.
 
 Usage (NixOS; anywhere else any Python 3.11+ with numpy and defusedxml will do):
 
@@ -13,7 +13,7 @@ Subcommands:
     fixture   write the small deterministic catalogue the app's unit tests read
               (app/src/test/resources/discovery/catalogue-fixture.db)
     parity    write the inputs and Python vectors the app's CatalogueParityTest checks
-              against the Kotlin embedder (app/src/test/resources/discovery/parity.json)
+              against the Kotlin embedder (core/src/test/resources/discovery/parity.json)
 
 See README.md in this directory for the rules, the file format and how to rerun cheaply.
 Downloaded documents are untrusted data: they are parsed with defusedxml and the standard
@@ -46,10 +46,10 @@ import feedparse  # noqa: E402
 import fetch  # noqa: E402
 
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
-ASSET = os.path.join(REPO, "app", "src", "main", "assets", "embedding", "potion-base-8m.bin")
-DEFAULT_OUT = os.path.join(REPO, "app", "src", "main", "assets", "discovery", "catalogue.db")
+ASSET = os.path.join(REPO, "assets", "embedding", "potion-base-8m.bin")
+DEFAULT_OUT = os.path.join(REPO, "assets", "discovery", "catalogue.db")
 FIXTURE_OUT = os.path.join(REPO, "app", "src", "test", "resources", "discovery", "catalogue-fixture.db")
-PARITY_OUT = os.path.join(REPO, "app", "src", "test", "resources", "discovery", "parity.json")
+PARITY_OUT = os.path.join(REPO, "core", "src", "test", "resources", "discovery", "parity.json")
 DEFAULT_CACHE = os.path.join(HERE, ".cache")
 
 DAY_MS = 86_400_000

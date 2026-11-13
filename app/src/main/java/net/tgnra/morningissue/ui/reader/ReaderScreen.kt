@@ -334,15 +334,16 @@ private fun ArticleHeader(article: ReaderArticle, onOpenSource: (Long) -> Unit, 
 
     // The feed's picture leads the article unless the body already opens with it.
     val opensWithImage = article.blocks.take(2).any { it is ContentBlock.Image }
-    if (article.imageUrl != null && !opensWithImage) {
+    val imageUrl = article.imageUrl
+    if (imageUrl != null && !opensWithImage) {
         Spacer(Modifier.height(20.dp))
         // In the article a picture is shown whole: a tall one may take most of a screen.
         FramedImage(
-            article.imageUrl,
+            imageUrl,
             contentDescription = null,
             preferredRatio = 3f / 2f,
             tallestRatio = 0.6f,
-            onClick = { onOpenImage(article.imageUrl, null) },
+            onClick = { onOpenImage(imageUrl, null) },
         )
     }
 }

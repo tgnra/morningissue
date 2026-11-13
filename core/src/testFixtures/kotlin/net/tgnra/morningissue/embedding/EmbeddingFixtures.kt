@@ -14,11 +14,12 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The real asset and the reference output, shared by the embedding tests. These are plain JVM
- * tests: the asset is read from the source tree (Gradle runs unit tests in the module directory),
- * which is the point of [StaticEmbedder.load] taking a buffer and not a `Context`.
+ * tests: the asset is read from the top-level `assets/` (Gradle runs unit tests in the module
+ * directory, one level below the root), which is the point of [StaticEmbedder.load] taking a
+ * buffer and not a `Context`. They live in core's test fixtures so the app's tests share them.
  */
-internal object EmbeddingFixtures {
-    val assetFile = File("src/main/assets/${StaticEmbedder.ASSET_PATH}")
+object EmbeddingFixtures {
+    val assetFile = File("../assets/${StaticEmbedder.ASSET_PATH}")
 
     /** The asset memory-mapped, as on a device. */
     fun mapAsset(): ByteBuffer = RandomAccessFile(assetFile, "r").use {

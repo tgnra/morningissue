@@ -1,6 +1,6 @@
 # Discovery catalogue pipeline
 
-Builds `app/src/main/assets/discovery/catalogue.db`, the read-only SQLite file the app's
+Builds `assets/discovery/catalogue.db`, the read-only SQLite file the app's
 "Find sources" screen ranks from, entirely on the phone. The file is committed like the
 embedding asset; the Gradle build never touches the network. A GitHub Actions workflow
 (`.github/workflows/discovery-catalogue.yml`) rebuilds it monthly and opens a pull request.
@@ -87,7 +87,7 @@ lose to the plain feed, then more sources, more posts and the shorter address wi
 | `language` | The declared code, lower-cased, or `en` when the heuristic decided |
 | `tier`, `median_interval_hours` | `engine/Cadence.kt` exactly: the last 30 distinct publish times or the last 90 days, whichever is more; Firehose above 8 a day, Daily 1 to 8 a day, Weekly at least 1 a week, else Rare; Weekly and null below 5 times. Tier names are `CadenceTier`'s |
 | `posts_per_week` | 168 over the mean gap between posts in that same sample, the longest tenth of gaps left out (one stray old date cannot drag it down); below 5 dated posts, the posts of the last 90 days over 90 days |
-| `full_text_share` | The share of posts that look complete by `DefaultFullTextFetcher.looksComplete`: 250 words or more of body text, not ending like a teaser ("…", "Read more", "Continue reading", "appeared first on") |
+| `full_text_share` | The share of posts that look complete by `FullTextExtractor.looksComplete`: 250 words or more of body text, not ending like a teaser ("…", "Read more", "Continue reading", "appeared first on") |
 | `last_post_at` | The newest post's date (future dates are clamped to the build time, as sync does) |
 | `categories` | The plenaryapp category first (country lists count as "News"), then the channel's categories, then post categories used in at least two posts; generic ones ("Uncategorized", "Blog") dropped; at most 8 |
 | `source` | `plenary`, else `kagi`, else `hn`, among the lists that named the feed |
@@ -106,14 +106,14 @@ REAL scale (`int8 = round(v / scale)`, `scale = max|v| / 127`).
 
 The embedder is reimplemented in Python (`embedder.py`) rather than run from Kotlin. Reasons:
 
-- The embedder lives in the Android app module: running it from a script means a Gradle build
-  with the Android SDK (several minutes and a few GB), or keeping a separate JVM tools module in
-  sync with it. The Python port needs numpy and reads the app's own asset file, so the table and
-  vocabulary cannot drift; only the rules could.
+- The embedder lives in the Kotlin `:core` module: running it from a script means a Gradle
+  build (a JDK and a few hundred MB of dependencies), or a JVM tools module kept in sync with
+  it. The Python port needs numpy and reads the app's own asset file (`assets/embedding/`), so
+  the table and vocabulary cannot drift; only the rules could.
 - The rules are small and pinned by tests on both sides. `tests/test_pipeline.py` checks the
   port's piece IDs against `reference.json` (made by Hugging Face's own tokenizer) and that
-  `parity.json` is what the port writes now. The app's `CatalogueParityTest` reads
-  `app/src/test/resources/discovery/parity.json` (100 posts as title, summary and body, from
+  `parity.json` is what the port writes now. Core's `CatalogueParityTest` reads
+  `core/src/test/resources/discovery/parity.json` (100 posts as title, summary and body, from
   plain prose to CJK, Cyrillic, emoji, control characters and over-length text) and requires
   the same embeddable text, the same script verdict, and the same vector within cosine 0.999.
   When written, every text and verdict matched and the lowest cosine was 0.9999991.

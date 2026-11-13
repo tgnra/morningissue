@@ -24,7 +24,7 @@ component was 5e-7, which is the six-decimal rounding of the file.
 
 Outputs:
 
-- `app/src/test/resources/embedding/reference.json`: for each sentence under "reference" in
+- `core/src/test/resources/embedding/reference.json`: for each sentence under "reference" in
   cases.json its piece IDs and float32 reference vector; for each under "tokenizer" (plus two
   generated over-length texts) its piece IDs.
 - On stdout, how far the app's int8 table moves a text's vector from the float one: cosine
@@ -48,7 +48,7 @@ import build_asset  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
-DEFAULT_OUT = os.path.join(REPO, "app", "src", "test", "resources", "embedding", "reference.json")
+DEFAULT_OUT = os.path.join(REPO, "core", "src", "test", "resources", "embedding", "reference.json")
 
 MAX_PIECES = 512
 

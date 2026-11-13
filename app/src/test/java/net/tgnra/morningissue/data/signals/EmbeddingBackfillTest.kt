@@ -195,4 +195,28 @@ class EmbeddingBackfillTest {
         assertNotNull(dao.getEmbedding(late))
         assertEquals(SignalsUpkeep.Result(), upkeep.run())
     }
+
+    @Test
+    fun aPostGetsAVectorOrAMarkSayingWhyNot() {
+        val embedder = EmbeddingFixtures.embedder
+        val english = EmbeddingBackfill.stored(embedder, "Heatwave pushes electricity demand to a record high", "Across southern Europe.", null)
+        assertEquals(StaticEmbedder.DIMENSIONS, english.size)
+        assertNull(StoredEmbedding.markOf(english))
+        assertNotNull(StoredEmbedding.vectorOf(english))
+
+        // The model would give this a vector (its vocabulary has Cyrillic letters); it must not be kept.
+        val russian = "Учёные обнаружили новую экзопланету"
+        assertNotNull(embedder.embed(russian))
+        val marked = EmbeddingBackfill.stored(embedder, russian, "В зоне обитаемости.", null)
+        assertEquals(StoredEmbedding.NON_LATIN, StoredEmbedding.markOf(marked))
+        assertNull(StoredEmbedding.vectorOf(marked))
+
+        val nothing = EmbeddingBackfill.stored(embedder, "🚀🚀🚀", null, null)
+        assertEquals(StoredEmbedding.NO_KNOWN_WORDS, StoredEmbedding.markOf(nothing))
+        assertNull(StoredEmbedding.vectorOf(nothing))
+        assertNull(StoredEmbedding.vectorOf(null))
+
+        // German passes the script test and is embedded, for what its vector is worth.
+        assertNull(StoredEmbedding.markOf(EmbeddingBackfill.stored(embedder, "Wissenschaftler entdecken einen neuen Exoplaneten", null, null)))
+    }
 }

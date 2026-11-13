@@ -201,7 +201,7 @@ private fun dateOf(instant: Instant): String = PaperFormat.shortDate(instant.atZ
 private fun flagDetail(item: FlaggedFeed): String? = when (item.flag) {
     HealthFlag.BROKEN -> when {
         item.lastHttpStatus == 410 -> stringResource(R.string.desk_detail_gone)
-        item.errorSince != null -> stringResource(R.string.desk_detail_failing_since, dateOf(item.errorSince))
+        item.errorSince != null -> stringResource(R.string.desk_detail_failing_since, dateOf(item.errorSince!!))
         else -> null
     }
     HealthFlag.MOVED -> stringResource(R.string.desk_detail_moved_to, item.feed.url)

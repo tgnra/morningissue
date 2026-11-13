@@ -1,6 +1,6 @@
 # Discovery catalogue sources
 
-Where the candidate feeds in `app/src/main/assets/discovery/catalogue.db` come from, and on
+Where the candidate feeds in `assets/discovery/catalogue.db` come from, and on
 what terms. The licence notice that ships in the APK is
 `app/src/main/assets/licenses/discovery-catalogue.txt`, next to the embedding model's.
 

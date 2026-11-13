@@ -92,6 +92,16 @@ android {
         getByName("debug") {
             assets.directories.add("schemas")
         }
+        // The embedding table and the discovery catalogue are shared with the server, in the
+        // top-level assets/.
+        getByName("main") {
+            assets.directories.add("$rootDir/assets")
+        }
+        // Fixtures of the code that moved to :core (feed documents, embedding references) that
+        // the app's own tests still read.
+        getByName("test") {
+            resources.directories.add("$rootDir/core/src/test/resources")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -129,6 +139,7 @@ room3 {
 }
 
 dependencies {
+    implementation(project(":core"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -168,6 +179,7 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.zxing.core)
 
+    testImplementation(testFixtures(project(":core")))
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)

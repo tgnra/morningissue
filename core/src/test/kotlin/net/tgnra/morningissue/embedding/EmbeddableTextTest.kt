@@ -1,11 +1,7 @@
 package net.tgnra.morningissue.embedding
 
-import net.tgnra.morningissue.data.signals.EmbeddingBackfill
-import net.tgnra.morningissue.data.signals.StoredEmbedding
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -78,29 +74,5 @@ class EmbeddableTextTest {
         assertEquals(EmbeddableText.MAX_WORDS, cut.size)
         assertEquals(listOf("One", "two", "word1"), cut.take(3))
         assertEquals("word198", cut.last())
-    }
-
-    @Test
-    fun aPostGetsAVectorOrAMarkSayingWhyNot() {
-        val embedder = EmbeddingFixtures.embedder
-        val english = EmbeddingBackfill.stored(embedder, "Heatwave pushes electricity demand to a record high", "Across southern Europe.", null)
-        assertEquals(StaticEmbedder.DIMENSIONS, english.size)
-        assertNull(StoredEmbedding.markOf(english))
-        assertNotNull(StoredEmbedding.vectorOf(english))
-
-        // The model would give this a vector (its vocabulary has Cyrillic letters); it must not be kept.
-        val russian = "Учёные обнаружили новую экзопланету"
-        assertNotNull(embedder.embed(russian))
-        val marked = EmbeddingBackfill.stored(embedder, russian, "В зоне обитаемости.", null)
-        assertEquals(StoredEmbedding.NON_LATIN, StoredEmbedding.markOf(marked))
-        assertNull(StoredEmbedding.vectorOf(marked))
-
-        val nothing = EmbeddingBackfill.stored(embedder, "🚀🚀🚀", null, null)
-        assertEquals(StoredEmbedding.NO_KNOWN_WORDS, StoredEmbedding.markOf(nothing))
-        assertNull(StoredEmbedding.vectorOf(nothing))
-        assertNull(StoredEmbedding.vectorOf(null))
-
-        // German passes the script test and is embedded, for what its vector is worth.
-        assertNull(StoredEmbedding.markOf(EmbeddingBackfill.stored(embedder, "Wissenschaftler entdecken einen neuen Exoplaneten", null, null)))
     }
 }

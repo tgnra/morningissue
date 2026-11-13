@@ -1,13 +1,13 @@
 """A Python copy of the app's text embedding: `EmbeddableText`, `WordPieceTokenizer` and
-`StaticEmbedder` (app/src/main/java/net/tgnra/morningissue/embedding/).
+`StaticEmbedder` (core/src/main/kotlin/net/tgnra/morningissue/embedding/).
 
-It reads the very asset the app ships (`app/src/main/assets/embedding/potion-base-8m.bin`), so
+It reads the very asset the app ships (`assets/embedding/potion-base-8m.bin`), so
 the table and the vocabulary are the same bytes. The rules are ported line by line; where the
 Kotlin code relies on a JVM detail (ASCII-only `\\s` in regexes, `Char.isWhitespace`, rounding in
 `roundToInt`) the detail is copied too, and commented.
 
 Parity with Kotlin is checked, not assumed: `build_catalogue.py parity` writes
-`app/src/test/resources/discovery/parity.json`, and the app's `CatalogueParityTest` embeds the
+`core/src/test/resources/discovery/parity.json`, and core's `CatalogueParityTest` embeds the
 same inputs with the real `StaticEmbedder` and fails below cosine 0.999.
 """
 

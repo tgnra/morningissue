@@ -141,27 +141,10 @@ class FullTextFetcherTest {
 
     @Test
     fun longFeedTextThatEndsLikeAnExcerptIsFetched() = runBlocking<Unit> {
-        assertTrue(DefaultFullTextFetcher.looksComplete(paragraphs(300)))
-        assertFalse(DefaultFullTextFetcher.looksComplete(paragraphs(300, "Continue reading →")))
-        assertFalse(DefaultFullTextFetcher.looksComplete(paragraphs(300, "The post Ferries appeared first on Example Journal.")))
-        assertFalse(DefaultFullTextFetcher.looksComplete(paragraphs(300, "and so on…")))
-        assertFalse(DefaultFullTextFetcher.looksComplete(paragraphs(100)))
-
+        // The rule itself is tested in core's FullTextExtractorTest.
         val id = article("a", feedBlocks = paragraphs(300, "Read more"))
         assertEquals(FullTextResult.Stored, fullText.ensureFullText(id))
         assertEquals(1, routes.hits("/article"))
-    }
-
-    @Test
-    fun teasersAreShortBodiesThatSendTheReaderToThePage() {
-        assertTrue(DefaultFullTextFetcher.isTeaser(paragraphs(40, "Read in full on Analog.Cafe.")))
-        assertTrue(DefaultFullTextFetcher.isTeaser(paragraphs(40, "Continue reading →")))
-        assertTrue(DefaultFullTextFetcher.isTeaser(paragraphs(40, "Read the full story at Example")))
-        assertTrue(DefaultFullTextFetcher.isTeaser(paragraphs(40, "and so on…")))
-        assertFalse(DefaultFullTextFetcher.isTeaser(paragraphs(40)))
-        // Long text is the article, unless it too ends by sending the reader away.
-        assertFalse(DefaultFullTextFetcher.isTeaser(paragraphs(300)))
-        assertFalse(DefaultFullTextFetcher.looksComplete(paragraphs(300, "Read in full on Analog.Cafe.")))
     }
 
     @Test

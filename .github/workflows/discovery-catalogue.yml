@@ -1,4 +1,4 @@
-# Rebuilds the feed-discovery catalogue (app/src/main/assets/discovery/catalogue.db) from its
+# Rebuilds the feed-discovery catalogue (assets/discovery/catalogue.db) from its
 # source lists and opens a pull request with the new file. Monthly, and by hand from
 # Actions > Discovery catalogue > Run workflow. The Gradle build never fetches anything: the
 # catalogue only changes through a reviewed pull request like this one.
@@ -62,20 +62,15 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Install Android SDK packages
-        run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
-
+      # The embedder is in :core, a plain JVM module, so no Android SDK is needed.
       - name: Check vector parity with the app's embedder
-        run: ./gradlew testDebugUnitTest --tests 'net.tgnra.morningissue.embedding.CatalogueParityTest'
+        run: ./gradlew -PserverOnly :core:test --tests 'net.tgnra.morningissue.embedding.CatalogueParityTest'
 
       - name: Open a pull request
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet -- app/src/main/assets/discovery/catalogue.db; then
+          if git diff --quiet -- assets/discovery/catalogue.db; then
             echo "The catalogue is unchanged."
             exit 0
           fi
@@ -83,13 +78,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898237+github-actions[bot]@users.noreply.github.com"
           git switch -c "$branch"
-          git add app/src/main/assets/discovery/catalogue.db
+          git add assets/discovery/catalogue.db
           git commit -m "Rebuild the discovery catalogue"
           git push origin "$branch"
           python -I - > /tmp/body.md <<'EOF'
           import json
           r = json.load(open("tools/discovery/report.json"))
-          print("Monthly rebuild of `app/src/main/assets/discovery/catalogue.db` by `tools/discovery/build_catalogue.py`.\n")
+          print("Monthly rebuild of `assets/discovery/catalogue.db` by `tools/discovery/build_catalogue.py`.\n")
           print("- Feeds fetched: %d; answered: %d; kept after filters: %d; after deduplication: %d" % (
               r["fetched"], r["answered_with_body"], r["kept_after_filters"], r["after_dedupe"]))
           print("- Catalogue: %d feeds in %d clusters; file size %.2f MB" % (r["seed"], len(r["clusters"]), r["asset_bytes"] / 1e6))

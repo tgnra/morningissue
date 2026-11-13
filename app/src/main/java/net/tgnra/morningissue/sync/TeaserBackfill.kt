@@ -29,7 +29,7 @@ import net.tgnra.morningissue.model.ContentBlocks
 /**
  * Once, after the upgrade that taught the syncer to fetch teaser posts' pages: goes through
  * the posts already stored and fetches the page of each one whose feed body is only a teaser
- * ([DefaultFullTextFetcher.isTeaser]), as a sync now does for new posts. Only subscribed
+ * ([FullTextExtractor.isTeaser]), as a sync now does for new posts. Only subscribed
  * feeds' posts from the last [RankingConfig.maxAgeDays] days, the ones an edition can still
  * print; older ones are fetched when opened, as before.
  */
@@ -54,7 +54,7 @@ class TeaserBackfill(
             if (batch.isEmpty()) return stored
             afterId = batch.last().articleId
             val teasers = withContext(dispatcher) {
-                batch.filter { DefaultFullTextFetcher.isTeaser(ContentBlocks.decode(it.blocksJson)) }.map { it.articleId }
+                batch.filter { FullTextExtractor.isTeaser(ContentBlocks.decode(it.blocksJson)) }.map { it.articleId }
             }
             stored += coroutineScope {
                 teasers.map { id -> async { permits.withPermit { fullText.ensureFullText(id) } } }.awaitAll()

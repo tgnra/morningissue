@@ -26,7 +26,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class BundledCatalogueTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
-    private val asset = File("src/main/assets/discovery/catalogue.db")
+    private val asset = File("../assets/discovery/catalogue.db")
     private lateinit var installDir: File
 
     @Before

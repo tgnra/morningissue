@@ -23,6 +23,10 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Morning Issue"
-include(":app")
-include(":macrobenchmark")
+include(":core", ":server")
+// `-PserverOnly` leaves out the Android modules, so the server builds with no Android SDK
+// (Docker, Nix): ./gradlew -PserverOnly :server:installDist
+if (!providers.gradleProperty("serverOnly").isPresent) {
+    include(":app", ":macrobenchmark")
+}
  

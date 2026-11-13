@@ -50,7 +50,7 @@ class DefaultFeedSyncer(
     private val config: RankingConfig = RankingConfig.Default,
     private val parallelism: Int = DEFAULT_PARALLELISM,
     private val parseDispatcher: CoroutineDispatcher = Dispatchers.Default,
-    /** Fetches the page of a new post whose feed body is only a teaser ([DefaultFullTextFetcher.isTeaser]). */
+    /** Fetches the page of a new post whose feed body is only a teaser ([FullTextExtractor.isTeaser]). */
     private val fullText: FullTextFetcher? = null,
 ) : FeedSyncer {
     private val feedDao = database.feedDao()
@@ -164,7 +164,8 @@ class DefaultFeedSyncer(
                 feedDao.updateSyncState(feed.id, result.etag, result.lastModified, now)
                 feedDao.updateSiteInfo(feed.id, parsed.siteUrl, parsed.iconUrl)
                 // A feed added without a title was given its host name; use the real one.
-                if (parsed.title != null && feed.title == FeedUrls.hostOf(feed.url)) feedDao.updateTitle(feed.id, parsed.title)
+                val parsedTitle = parsed.title
+                if (parsedTitle != null && feed.title == FeedUrls.hostOf(feed.url)) feedDao.updateTitle(feed.id, parsedTitle)
                 healthDao.recordSuccess(feed.id, if (moved) 301 else result.status, articleDao.latestPublishedAt(feed.id))
                 updateCadence(feed.id, now)
                 Outcome(newArticles = added.count)
@@ -229,7 +230,7 @@ class DefaultFeedSyncer(
                 )
                 NewPost(
                     item, article, content.blocks.takeIf { it.isNotEmpty() }?.let(ContentBlocks::encode),
-                    teaser = fullText != null && item.url != null && DefaultFullTextFetcher.isTeaser(content.blocks),
+                    teaser = fullText != null && item.url != null && FullTextExtractor.isTeaser(content.blocks),
                 )
             }
         }
