@@ -8,7 +8,6 @@ kobo/target
 app
 macrobenchmark
 kobo
-relay
 design
 .idea
 .git

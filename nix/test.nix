@@ -60,10 +60,9 @@ pkgs.testers.runNixOSTest {
     call("POST", "/auth/password", {"current": password, "new": "a much longer password"}, token=token, expect=204)
     machine.fail("test -e /var/lib/morningissue/initial-passwords/alice.txt")
 
-    # Settings belong to the editions workstream: 200 once it is wired, 501 until then. Either
-    # way the lockout is gone.
-    status = machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -H 'Authorization: Bearer {token}' {api}/settings").strip()
-    assert status in ("200", "501"), status
+    # The lockout is gone, and the settings service answers.
+    settings = call("GET", "/settings", token=token)
+    assert "resetTime" in settings, settings
     account = call("GET", "/account", token=token)
     assert account["mustChangePassword"] is False, account
 

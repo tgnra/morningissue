@@ -1,6 +1,6 @@
-# Runs the unit tests (the shared :core module, the self-hosted :server and the app, the 180-day
-# ranking simulation among them), the Kobo reader's tests and the relay server's tests on every
-# push and pull request.
+# Runs the unit tests (the shared :core module, the self-hosted :server with the 180-day ranking
+# simulation and the end-to-end test, and the app) and the Kobo reader's tests on every push and
+# pull request.
 # The simulation's per-persona reports (how affinity and W moved) and the test reports are kept
 # as workflow artifacts, so a failing ranking check can be diagnosed from the run's page.
 name: Tests
@@ -45,14 +45,14 @@ jobs:
           "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
 
       - name: Run unit tests
-        run: ./gradlew :core:test :server:test testDebugUnitTest -PsimulationReport
+        run: ./gradlew :core:test :server:test :app:testDebugUnitTest -PsimulationReport
 
       - name: Upload the ranking simulation reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: ranking-simulation-reports
-          path: app/build/reports/simulation/
+          path: server/build/reports/simulation/
           if-no-files-found: ignore
 
       - name: Upload the test reports
@@ -66,7 +66,7 @@ jobs:
             app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: ignore
 
-  # The Kobo reader's tests: sync against a fake relay, the phone's golden fixtures, and the
+  # The Kobo reader's tests: sync against a fake server, the phone's golden fixtures, and the
   # screenshot walks at every supported screen size.
   kobo-tests:
     runs-on: ubuntu-latest
@@ -86,24 +86,3 @@ jobs:
           name: kobo-screens
           path: kobo/target/screens/
           if-no-files-found: ignore
-
-  # The relay server's tests: the shared test vectors and the HTTP API, under the race detector.
-  relay-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Check out
-        uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: relay/go.mod
-          cache-dependency-path: relay/go.mod
-
-      - name: Run the relay tests
-        working-directory: relay
-        run: |
-          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
-          go vet ./...
-          go test -race ./...
