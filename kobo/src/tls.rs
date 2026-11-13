@@ -1,9 +1,9 @@
-//! TLS for `https://` relays: rustls with the ring provider and the Mozilla roots
+//! TLS for `https://` servers: rustls with the ring provider and the Mozilla roots
 //! (webpki-roots).
 //!
 //! Certificate validity needs roughly the right time, and a Kobo's clock can be badly wrong.
 //! The time the client believes is the system clock plus the offset learnt from the last
-//! `Date` header the relay sent, and never earlier than the build time.
+//! `Date` header the server sent, and never earlier than the build time.
 
 use rustls::client::ClientConnection;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -47,7 +47,7 @@ impl TimeProvider for KoboTime {
 }
 
 /// A certificate that was not valid at the time the Kobo believes: its clock is wrong (or
-/// the relay's certificate really has expired).
+/// the server's certificate really has expired).
 #[derive(Debug)]
 pub struct ClockWrong(pub String);
 

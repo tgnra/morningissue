@@ -1,10 +1,13 @@
-//! A sync: what it reports and how it fails. A sync goes through the relay
-//! ([`crate::relay`], `docs/relay-sync.md`), the only way this Kobo syncs with the phone.
+//! A sync: what it reports and how it fails. A sync talks HTTPS (or HTTP) to the Morning
+//! Issue server ([`crate::server`], `docs/kobo-sync.md`, "Transport"), with a bearer token
+//! derived from the secret in this Kobo's pairing code. No phone is involved once the phone
+//! has registered the code with the server.
 //!
 //! Every file write is atomic, so an interrupted sync leaves whole files: the editions that
 //! were installed, and the earlier ones for the rest.
 
 use crate::config::Config;
+use crate::settings::Settings;
 use std::fmt;
 use std::io;
 use std::sync::Arc;
@@ -14,23 +17,24 @@ use std::time::Duration;
 pub enum SyncError {
     Storage(String),
     TimedOut,
-    /// This Kobo has never shown its pairing code, so it has no secret to sign with.
+    /// This Kobo has never shown its pairing code, so it has no secret to make a token from.
     NotPaired,
-    /// The relay address in `config.json` cannot be used.
-    RelayAddress(String),
-    /// The relay answered `401 unknown`: the phone has not listed this Kobo yet (`waiting`,
-    /// it never has), or does not list it right now. The relay group exists only while a
-    /// Sync session is open on the phone, so between sessions every request gets this, just
-    /// as a Kobo the phone removed does; the Kobo can't tell the two apart.
-    RelayNotListed { waiting: bool },
-    /// The relay could not be reached, or the connection broke.
-    Relay(String),
-    /// The relay answered something unexpected.
-    RelayProtocol(String),
-    /// The relay's certificate was not valid at the time the Kobo believes.
+    /// No server address: neither typed in Settings nor in `config.json`.
+    NoServer,
+    /// The server address cannot be used.
+    ServerAddress(String),
+    /// The server answered `401 unknown`: it doesn't know this Kobo's token. `waiting`: it
+    /// never has, so the phone has not registered the pairing code yet. Otherwise this Kobo
+    /// was removed from the account.
+    NotListed { waiting: bool },
+    /// The server could not be reached, or the connection broke.
+    Server(String),
+    /// The server answered something unexpected.
+    ServerProtocol(String),
+    /// The server's certificate was not valid at the time the Kobo believes.
     Clock,
-    /// The package or its key failed to decrypt or made no sense; nothing was installed.
-    Integrity(String),
+    /// The server kept answering `409 events_pending` after the events were uploaded again.
+    EventsPending,
 }
 
 impl fmt::Display for SyncError {
@@ -39,14 +43,15 @@ impl fmt::Display for SyncError {
             SyncError::Storage(e) => write!(f, "Could not save to the Kobo ({e})."),
             SyncError::TimedOut => write!(f, "Sync took too long and stopped."),
             SyncError::NotPaired => write!(f, "Not paired yet: tap Pair with phone in Settings and scan the code with Morning Issue on the phone."),
-            SyncError::RelayAddress(e) => write!(f, "The relay address in config.json can\u{2019}t be used: {e}"),
-            SyncError::RelayNotListed { waiting: true } => write!(f, "Waiting for the phone: scan the code under Pair with phone in Settings with Morning Issue, and keep the phone\u{2019}s Sync screen open."),
-            SyncError::RelayNotListed { waiting: false } => write!(f, "The phone isn\u{2019}t syncing. Press Start in Sync on the phone, then sync again. If this Kobo was removed from the phone, pair again in Settings."),
-            SyncError::Relay(e) if e.contains("timed out") || e.contains("temporarily unavailable") => write!(f, "The relay took too long to answer."),
-            SyncError::Relay(_) => write!(f, "Can\u{2019}t reach the relay."),
-            SyncError::RelayProtocol(e) => write!(f, "The relay sent something unexpected ({e})."),
-            SyncError::Clock => write!(f, "The Kobo\u{2019}s clock is wrong, so the relay\u{2019}s certificate can\u{2019}t be checked. Connect to Wi-Fi in Nickel to set the clock, then sync again."),
-            SyncError::Integrity(e) => write!(f, "The relay\u{2019}s package failed its check and was not installed ({e})."),
+            SyncError::NoServer => write!(f, "No server address yet: type it under Pairing in Settings, or put \u{201c}server\u{201d} in config.json."),
+            SyncError::ServerAddress(e) => write!(f, "The server address can\u{2019}t be used: {e}"),
+            SyncError::NotListed { waiting: true } => write!(f, "Waiting for the phone: scan the code under Pair with phone in Settings with Morning Issue."),
+            SyncError::NotListed { waiting: false } => write!(f, "This Kobo was removed from your account; pair again."),
+            SyncError::Server(e) if e.contains("timed out") || e.contains("temporarily unavailable") => write!(f, "The server took too long to answer."),
+            SyncError::Server(_) => write!(f, "Can\u{2019}t reach the server."),
+            SyncError::ServerProtocol(e) => write!(f, "The server sent something unexpected ({e})."),
+            SyncError::Clock => write!(f, "The Kobo\u{2019}s clock is wrong, so the server\u{2019}s certificate can\u{2019}t be checked. Connect to Wi-Fi in Nickel to set the clock, then sync again."),
+            SyncError::EventsPending => write!(f, "The server didn\u{2019}t take this Kobo\u{2019}s reading history. Sync again later."),
         }
     }
 }
@@ -59,7 +64,7 @@ impl From<io::Error> for SyncError {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct SyncReport {
-    /// The relay's address.
+    /// The server's address.
     pub address: String,
     pub wiped: bool,
     pub events_sent: usize,
@@ -73,17 +78,17 @@ pub struct SyncReport {
 /// What a running sync has got to, so the reader can show what arrived.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Progress {
-    /// The relay has a package for this Kobo, at this address.
+    /// The server sent its manifest; it is at this address.
     Connected { address: String },
     /// An edition was saved; the reader can show it.
     Edition(i64),
     /// The saved list changed on the Kobo.
     Saved,
-    /// These pictures are about to be installed.
+    /// These pictures are about to be fetched.
     ImagesQueued(Vec<String>),
     /// A picture was stored.
     Image(String),
-    /// The package has no copy of this picture.
+    /// The server has no copy of this picture.
     ImageMissing(String),
 }
 
@@ -92,26 +97,33 @@ pub type ProgressFn = Arc<dyn Fn(Progress) + Send + Sync>;
 pub struct Options {
     /// How long to wait for any one response.
     pub request_timeout: Duration,
+    /// How long to wait for a picture zip, which the server may have to prepare first.
+    pub image_timeout: Duration,
     /// The whole sync gives up after this.
     pub deadline: Duration,
-    /// The pictures to take from a package are this wide: the screen's short side in pixels.
+    /// Pictures are asked for this wide: the screen's short side in pixels.
     pub image_width: u32,
     /// Told as each part arrives, on the sync's own thread.
     pub progress: Option<ProgressFn>,
-    /// The relay's address (`http[s]://host[:port][/prefix]`), from
-    /// [`Config::relay_address`].
-    pub relay: String,
+    /// The server's address (`http[s]://host[:port][/prefix]`): `server` in `config.json`,
+    /// else the one typed in Settings. None when there is neither.
+    pub server: Option<String>,
 }
 
 impl Options {
-    pub fn from_config(c: &Config) -> Options {
-        Options { request_timeout: Duration::from_secs(30), deadline: Duration::from_secs(600), image_width: 1264, progress: None, relay: c.relay_address() }
+    pub fn new(server: Option<String>) -> Options {
+        Options { request_timeout: Duration::from_secs(30), image_timeout: Duration::from_secs(120), deadline: Duration::from_secs(600), image_width: 1264, progress: None, server }
+    }
+
+    pub fn from_config(c: &Config, s: &Settings) -> Options {
+        Options::new(c.server_or(s.server.as_deref()))
     }
 }
 
-/// Runs a whole sync through the relay. The outcome (time or error) is saved in the state for
+/// Runs a whole sync with the server. The outcome (time or error) is saved in the state for
 /// the home screen. A Kobo that has never shown its pairing code fails at once with
-/// [`SyncError::NotPaired`], without a request.
+/// [`SyncError::NotPaired`], and one with no server address with [`SyncError::NoServer`],
+/// without a request.
 pub fn sync(store: &crate::store::Store, opts: &Options) -> Result<SyncReport, SyncError> {
-    crate::relay::sync(store, opts)
+    crate::server::sync(store, opts)
 }

@@ -1,5 +1,5 @@
-//! Just enough HTTP/1.1 for the relay: one request per connection, Content-Length or chunked
-//! bodies, no redirects. A relay may be `http://` or `https://` (TLS through [`crate::tls`]).
+//! Just enough HTTP/1.1 for the server: one request per connection, Content-Length or chunked
+//! bodies, no redirects. A server may be `http://` or `https://` (TLS through [`crate::tls`]).
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -20,13 +20,13 @@ impl Response {
 }
 
 /// Bodies held in memory larger than this are refused: no bundle or stored image comes near
-/// it. Streamed bodies (a relay package) are not held in memory.
+/// it. Streamed bodies (a picture zip) are not held in memory.
 const MAX_BODY: u64 = 64 << 20;
-/// A streamed body larger than this is refused (the relay's own package limit is 512 MiB).
+/// A streamed body larger than this is refused.
 const MAX_STREAM: u64 = 2 << 30;
 
-/// Where a relay is: `http://` or `https://`, a host, a port and an optional path prefix
-/// (`https://example.org/relay` puts every path under `/relay`).
+/// Where a server is: `http://` or `https://`, a host, a port and an optional path prefix
+/// (`https://example.org/news` puts every path under `/news`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Endpoint {
     pub tls: bool,
@@ -133,7 +133,7 @@ impl Sink for Vec<u8> {
     }
 }
 
-/// A request to a relay. With a sink, a `200` or `206` body is copied there instead of being
+/// A request to the server. With a sink, a `200` or `206` body is copied there instead of being
 /// held in memory.
 pub fn call(ep: &Endpoint, c: &Call, timeout: Duration, sink: Option<&mut dyn Sink>) -> io::Result<Response> {
     let host = ep.host.trim_start_matches('[').trim_end_matches(']');

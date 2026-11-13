@@ -143,6 +143,7 @@ fn today_caption_h(ctx: &Ctx) -> f32 {
 }
 
 /// The front cover on its shelf with its caption, centred in `col` with its top at `y`.
+#[allow(clippy::too_many_arguments)]
 fn today_display(ctx: &Ctx, canvas: &mut Canvas, b: &Bundle, col: Rect, y: i32, cover_w: i32, today: Option<Date>, hits: &mut Hits) {
     let cover_h = (cover_w as f32 / COVER_ASPECT).round() as i32;
     let r = Rect::new(col.x + (col.w - cover_w) / 2, y, cover_w, cover_h);
@@ -565,42 +566,51 @@ pub struct SettingsView<'s> {
     pub sensor: bool,
     /// Reset was tapped: show what it erases, with Erase everything and Cancel.
     pub reset_armed: bool,
-    /// The relay in use (the default, or `relay` in `config.json`), shown, not changed here.
-    pub relay_address: &'s str,
-    /// Where pairing stands, in a sentence ([`relay_note`]).
-    pub relay_note: String,
+    /// The server address in use: typed here, or `server` in `config.json`.
+    pub server_address: Option<&'s str>,
+    /// It comes from `config.json`, which can't be changed here.
+    pub server_from_config: bool,
+    /// Where pairing stands, in a sentence ([`pairing_note`]).
+    pub pairing_note: String,
 }
 
 /// Why Wi-Fi the reader turned on stays on and the sync is tried again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Retry {
-    /// The relay could not be reached, or the connection broke.
+    /// The server could not be reached, or the connection broke.
     Unreachable,
-    /// The relay doesn't list this Kobo yet: the phone lists it once it has scanned the code
-    /// and its Sync session has uploaded the package.
+    /// The server doesn't know this Kobo yet: the phone registers it once it has scanned the
+    /// code.
     Waiting,
 }
 
-/// Where pairing stands, for Settings and the pairing screen.
-pub fn relay_note(state: &crate::store::State) -> String {
-    let s = match (state.relay_secret.is_some(), state.relay_seen, state.relay_not_listed) {
-        (false, _, _) => "Not paired yet. Tap Pair with phone and scan the code with Morning Issue on the phone.",
-        (true, true, true) => "The phone isn\u{2019}t syncing now: press Start in Sync on the phone. If it removed this Kobo, pair again.",
-        (true, false, _) => "Waiting for the phone: scan the code under Pair with phone with Morning Issue, and keep its Sync screen open.",
-        (true, true, false) => "Paired. Syncs through the relay.",
+/// What Settings adds when the address is plain `http://`.
+pub const PLAIN_HTTP_WARNING: &str = "The address is http://, so this Kobo\u{2019}s token is sent unencrypted.";
+
+/// Where pairing stands, for Settings, given the server address in use.
+pub fn pairing_note(state: &crate::store::State, server: Option<&str>) -> String {
+    let s = match (server.is_some(), state.secret.is_some(), state.server_seen, state.server_not_listed) {
+        (false, _, _, _) => "Type the server address first: the one Morning Issue on the phone uses.",
+        (true, false, _, _) => "Not paired yet. Tap Pair with phone and scan the code with Morning Issue on the phone.",
+        (true, true, false, _) => "Waiting for the phone: scan the code under Pair with phone with Morning Issue.",
+        (true, true, true, true) => "This Kobo was removed from your account. Pair with phone again.",
+        (true, true, true, false) => "Paired. Syncs with the server on its own; the phone needn\u{2019}t be open.",
     };
-    s.to_string()
+    match server {
+        Some(a) if crate::server::is_plain_http(a) => format!("{s} {PLAIN_HTTP_WARNING}"),
+        _ => s.to_string(),
+    }
 }
 
-/// The pairing screen's note: `asking` while it asks the relay whether the phone has scanned
-/// the code (online, and not paired yet).
-pub fn pair_note(state: &crate::store::State, asking: bool) -> String {
-    // Listed before, but not now: usually no Sync session is open on the phone.
-    let idle = state.relay_seen && state.relay_not_listed;
-    let s = match (asking, idle) {
-        (true, true) => "Waiting for the phone\u{2026} press Start in Sync on the phone, or scan this code again if it removed this Kobo. The Kobo notices within a few seconds and syncs.",
-        (true, false) => "Waiting for the phone\u{2026} keep the phone\u{2019}s Sync screen open. Once it has scanned this code and uploaded, the Kobo notices within a few seconds and syncs.",
-        (false, _) if state.relay_seen && !idle => "Paired. Syncs through the relay.",
+/// The pairing screen's note: `asking` while it asks the server whether the phone has
+/// registered the code (online, with a server address, and not paired yet).
+pub fn pair_note(state: &crate::store::State, asking: bool, server: Option<&str>) -> String {
+    let removed = state.server_seen && state.server_not_listed;
+    let s = match (asking, removed) {
+        (true, true) => "This Kobo was removed from your account. Scan this code again with Morning Issue; the Kobo notices within a few seconds and syncs.",
+        (true, false) => "Waiting for the phone\u{2026} once Morning Issue has scanned this code, the Kobo notices within a few seconds and syncs. The phone needn\u{2019}t stay open.",
+        (false, _) if state.server_seen && !removed => "Paired. Syncs with the server on its own.",
+        (false, _) if server.is_none() => "Scan this code with Morning Issue, then type the server address in Settings.",
         (false, _) => "Offline. Once the phone has scanned this code, go back and tap Turn on Wi-Fi and sync.",
     };
     s.to_string()
@@ -635,6 +645,7 @@ fn mark(ctx: &Ctx, canvas: &mut Canvas, x: f32, cy: f32, on: bool, round: bool) 
 }
 
 /// One choice row: a mark and its label; returns its tap target.
+#[allow(clippy::too_many_arguments)]
 fn choice(ctx: &Ctx, canvas: &mut Canvas, x: i32, y: &mut f32, w: i32, label: &str, on: bool, round: bool) -> Rect {
     let row = ctx.m.bar();
     let cy = *y + row / 2.0;
@@ -739,8 +750,8 @@ fn settings_body(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView, breaks: &mut 
     let note = match (s.wifi_job, s.online) {
         (Some(true), _) => "Turning Wi-Fi on and joining a network saved in the Kobo\u{2019}s Wi-Fi settings\u{2026}",
         (Some(false), _) => "Turning Wi-Fi off\u{2026}",
-        (None, true) if s.retrying == Some(Retry::Unreachable) => "Wi-Fi stays on until the relay answers. Turn Wi-Fi off to stop trying.",
-        (None, true) if s.retrying == Some(Retry::Waiting) => "Wi-Fi stays on until the phone has told the relay about this Kobo, which it does once its upload is done. Turn Wi-Fi off to stop trying.",
+        (None, true) if s.retrying == Some(Retry::Unreachable) => "Wi-Fi stays on until the server answers. Turn Wi-Fi off to stop trying.",
+        (None, true) if s.retrying == Some(Retry::Waiting) => "Wi-Fi stays on until the phone has paired this Kobo with the server. Turn Wi-Fi off to stop trying.",
         (None, true) if s.wifi_auto => "Wi-Fi turns off again when the sync is done.",
         (None, true) => "Turn Wi-Fi off to save the battery; Morning Issue can turn it on again to sync.",
         (None, false) if s.slept => "Wi-Fi was turned off when the Kobo went to sleep. Turn on Wi-Fi and sync turns it on, syncs, and turns it off again.",
@@ -754,21 +765,27 @@ fn settings_body(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView, breaks: &mut 
     section(ctx, canvas, x, &mut y, w, "PAIRING");
     let bh = (m.bar() * 0.82).round() as i32;
     {
-        // Pair with phone, with the relay's address beside it when it fits on one line.
+        // Pair with phone, with the server's address beside it: typed on the keyboard (a tap
+        // opens it), or from config.json, which can't be changed here.
         let pw = button_w(ctx, "Pair with phone").min(w / 2);
         let pr = Rect::new(x, y as i32, pw, bh);
         button(ctx, canvas, pr, "Pair with phone", false, true);
         hits.push((target(ctx, pr), Action::OpenPair));
         let ax = x + pw + m.pt(12.0) as i32;
         let aw = (x + w - ax).max(1);
-        let st = ctx.ty.caption.color(MUTED);
-        let addr = format!("Relay: {}", s.relay_address.split_once("://").map_or(s.relay_address, |(_, a)| a));
-        if ctx.fonts.width(&addr, &st) <= aw as f32 {
-            let l = ctx.line(&addr, st, aw as f32, Align::Left);
-            l.draw(ctx.fonts, canvas, ax as f32, y + (bh as f32 - l.height()) / 2.0);
+        let addr = match (s.server_address, s.server_from_config) {
+            (Some(a), false) => format!("Server: {a}"),
+            (Some(a), true) => format!("Server: {a} (config.json)"),
+            (None, _) => "Type the server address\u{2026}".to_string(),
+        };
+        let st = if s.server_address.is_some() { ctx.ty.caption.color(BLACK) } else { ctx.ty.label.color(MUTED) };
+        let l = ctx.para(&text::plain(&addr, st), aw as f32, Align::Left, 1.2, Some(2));
+        l.draw(ctx.fonts, canvas, ax as f32, y + (bh as f32 - l.height()) / 2.0);
+        if !s.server_from_config {
+            hits.push((Rect::new(ax, y as i32, aw, bh), Action::ServerTyped));
         }
         y += bh as f32 + m.pt(4.0);
-        let n = ctx.para(&text::plain(&s.relay_note, ctx.ty.caption.color(MUTED)), w as f32, Align::Left, 1.35, Some(2));
+        let n = ctx.para(&text::plain(&s.pairing_note, ctx.ty.caption.color(MUTED)), w as f32, Align::Left, 1.35, Some(3));
         n.draw(ctx.fonts, canvas, x as f32, y);
         y += n.height();
     }
@@ -868,23 +885,121 @@ fn settings_body(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView, breaks: &mut 
 }
 
 // --------------------------------------------------------------------------------------------
+// The server address keyboard
+
+/// Letters, digits and what an address needs; a key's label is what it types.
+pub const KEYBOARD: [&[&str]; 5] = [
+    &["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+    &["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+    &["a", "s", "d", "f", "g", "h", "j", "k", "l", "-"],
+    &["z", "x", "c", "v", "b", "n", "m", ".", ":", "/"],
+    &["https://", "http://", "\u{232b}", "OK"],
+];
+
+pub fn draw_server_keyboard(ctx: &Ctx, canvas: &mut Canvas, typed: &str, error: Option<&str>) -> Hits {
+    let m = &ctx.m;
+    canvas.clear(WHITE);
+    let mut hits = top_bar(ctx, canvas, "Cancel", "Server address", None);
+    let c = m.content();
+    let field_w = (m.inch(6.0) as i32).min(c.w);
+    let x = c.x + (c.w - field_w) / 2;
+    let mut y = c.y as f32 + m.pt(12.0);
+    let fh = (m.bar() * 1.05).round() as i32;
+    let field = Rect::new(x, y as i32, field_w, fh);
+    canvas.frame(field, ctx.hair() * 2, BLACK);
+    let st = ctx.ty.label.size(ctx.ty.label.size * 1.15);
+    let room = field_w as f32 - m.pt(24.0);
+    // The end of a long address, where the typing is.
+    let mut shown: &str = typed;
+    while !shown.is_empty() && ctx.fonts.width(shown, &st) > room {
+        let next = shown.char_indices().nth(1).map(|(i, _)| i).unwrap_or(shown.len());
+        shown = &shown[next..];
+    }
+    let t = ctx.line(if shown.is_empty() { " " } else { shown }, st, room, Align::Left);
+    let tx = field.x as f32 + m.pt(10.0);
+    t.draw(ctx.fonts, canvas, tx, field.y as f32 + (fh as f32 - t.height()) / 2.0);
+    let caret_x = tx + if shown.is_empty() { 0.0 } else { ctx.fonts.width(shown, &st) } + m.pt(2.0);
+    canvas.vline(caret_x as i32, field.y + fh / 5, fh * 3 / 5, dp(ctx, 1.5).round().max(2.0) as i32, BLACK);
+    y += fh as f32 + m.pt(6.0);
+    let hint = match error {
+        Some(e) => ctx.para(&text::plain(e, ctx.ty.caption.italic().color(BLACK)), field_w as f32, Align::Left, 1.35, Some(3)),
+        None => ctx.para(
+            &text::plain("The address Morning Issue on the phone uses. Without http:// or https://, a name gets https://. OK with nothing typed clears it.", ctx.ty.caption.color(MUTED)),
+            field_w as f32,
+            Align::Left,
+            1.35,
+            Some(3),
+        ),
+    };
+    hint.draw(ctx.fonts, canvas, x as f32, y);
+    y += ctx.ty.caption.size * 1.35 * 3.0 + m.pt(8.0);
+
+    let gap = m.pt(5.0);
+    let cols = 10.0;
+    let kw = ((field_w as f32 - (cols - 1.0) * gap) / cols).floor();
+    let kh = ((c.bottom() as f32 - y - 4.0 * gap) / 5.0).min(m.inch(0.5)).max(m.bar() * 0.8).floor();
+    let key_style = ctx.ty.label.size(ctx.ty.label.size * 1.2);
+    for (ri, row) in KEYBOARD.iter().enumerate() {
+        let last = ri + 1 == KEYBOARD.len();
+        let mut kx = x as f32;
+        for k in row.iter() {
+            // The last row: the two schemes three keys wide, backspace two, OK two.
+            let span = if !last { 1.0 } else if k.contains("//") { 3.0 } else { 2.0 };
+            let r = Rect::new(kx as i32, (y + ri as f32 * (kh + gap)) as i32, (kw * span + gap * (span - 1.0)) as i32, kh as i32);
+            kx += kw * span + gap * span;
+            let ok = *k == "OK";
+            if ok {
+                canvas.fill(r, BLACK);
+            } else {
+                canvas.frame(r, ctx.hair() * 2, BLACK);
+            }
+            if *k == "\u{232b}" {
+                let cy = r.y as f32 + r.h as f32 / 2.0;
+                let cx = r.x as f32 + r.w as f32 / 2.0;
+                let s = key_style.size * 0.5;
+                canvas.chevron(cx - s * 0.6, cy, s * 1.4, -1.0, BLACK);
+                canvas.stroke(cx - s * 0.9, cy, cx + s * 1.1, cy, (s / 4.0).max(1.5), BLACK);
+                hits.push((r, Action::KeyDelete));
+                continue;
+            }
+            let style = if ok { ctx.ty.ui.color(WHITE) } else if k.len() > 1 { ctx.ty.ui } else { key_style };
+            let l = ctx.line(k, style, r.w as f32, Align::Center);
+            l.draw(ctx.fonts, canvas, r.x as f32, r.y as f32 + (r.h as f32 - l.height()) / 2.0);
+            let action = if ok {
+                Action::KeyOk
+            } else if k.len() > 1 {
+                Action::KeyText(k.to_string())
+            } else {
+                Action::KeyChar(k.chars().next().unwrap())
+            };
+            hits.push((r, action));
+        }
+    }
+    hits
+}
+
+// --------------------------------------------------------------------------------------------
 // The pairing code
 
 /// The pairing code full-screen, as large as fits with its quiet zone, and what to do with it.
-pub fn draw_pair(ctx: &Ctx, canvas: &mut Canvas, uri: &str, relay: &str, note: &str) -> Hits {
+pub fn draw_pair(ctx: &Ctx, canvas: &mut Canvas, uri: &str, server: Option<&str>, note: &str) -> Hits {
     let m = &ctx.m;
     canvas.clear(WHITE);
     let hits = top_bar(ctx, canvas, "Settings", "Pair with phone", None);
     let c = m.content();
     let w = c.w as f32;
     let how = ctx.para(
-        &text::plain("On the phone, open Morning Issue\u{2019}s Kobo settings and scan this code to pair this Kobo.", ctx.ty.standfirst),
+        &text::plain("On the phone, open Morning Issue\u{2019}s Kobo settings and scan this code to add this Kobo to your account.", ctx.ty.standfirst),
         w,
         Align::Center,
         1.35,
         None,
     );
-    let addr = ctx.para(&text::plain(&format!("Relay: {relay}"), ctx.ty.caption.color(BLACK)), w, Align::Center, 1.35, Some(2));
+    let addr = match server {
+        Some(a) => format!("Server: {a}"),
+        None => "No server address yet.".to_string(),
+    };
+    let addr = ctx.para(&text::plain(&addr, ctx.ty.caption.color(BLACK)), w, Align::Center, 1.35, Some(2));
     let status = ctx.para(&text::plain(note, ctx.ty.caption.color(MUTED)), w, Align::Center, 1.35, Some(3));
     let gap = m.pt(10.0);
     let text_h = how.height() + addr.height() + status.height() + gap * 3.0;
@@ -1032,8 +1147,8 @@ pub const OFFLINE_SINCE_SLEEP: &str = "Offline since sleep. Turn on Wi-Fi and sy
 /// sync is tried again.
 pub fn retry_status(why: Retry) -> &'static str {
     match why {
-        Retry::Unreachable => "Wi-Fi on. Can\u{2019}t reach the relay; trying again every few seconds",
-        Retry::Waiting => "Wi-Fi on. Waiting for the phone; trying again every few seconds",
+        Retry::Unreachable => "Wi-Fi on. Can\u{2019}t reach the server; trying again every few seconds",
+        Retry::Waiting => "Wi-Fi on. Waiting for the phone to pair this Kobo; trying again every few seconds",
     }
 }
 
@@ -1046,7 +1161,7 @@ pub const WIFI_CANNOT_START: &str = "Could not turn Wi-Fi on.";
 /// What a running sync shows.
 #[derive(Clone, Debug, Default)]
 pub struct SyncShow {
-    /// The relay has a package for this Kobo.
+    /// The server has sent its manifest.
     pub connected: bool,
     pub images_done: usize,
     pub images_total: usize,

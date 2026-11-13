@@ -30,33 +30,33 @@ pub struct State {
     pub last_sync_at: Option<i64>,
     /// Why the last attempt failed; None when it succeeded.
     pub last_error: Option<String>,
-    /// True time minus Kobo clock in milliseconds, from the relay's `Date` header. Added to
+    /// The protocol of the manifest `db_id` came from. A `db_id` from before server sync
+    /// (`relay/1`, or none written) names the phone's database, whose IDs mean nothing to the
+    /// server: the first server sync wipes before it uploads anything.
+    pub db_protocol: Option<String>,
+    /// True time minus Kobo clock in milliseconds, from the server's `Date` header. Added to
     /// event times so they are true UTC even when the Kobo's clock is off.
     pub clock_offset_ms: i64,
-    /// Relay sync (`docs/relay-sync.md`): the device secret `S`, base64url. Made once, when
-    /// Pair through relay is first opened, and never dropped by a state write; only Reset
-    /// erases it.
-    pub relay_secret: Option<String>,
-    // Earlier versions kept `relayUploadedSeq` and `relayUnackedSince` here; every sync now
-    // uploads all unacknowledged events, so they are ignored when an old state.json loads.
-    /// The ID of the package last installed.
-    pub relay_package: Option<String>,
-    /// `POST …/fetched` was answered for that package.
-    pub relay_fetched: bool,
-    /// `acked[deviceId]` in that package's manifest. Events stay in `events.jsonl` until it
-    /// covers them, and every sync uploads all of them above it.
-    pub relay_acked: i64,
-    /// A signed request to the relay has been accepted since the secret was made.
-    pub relay_seen: bool,
-    /// The relay's last answer was `401 unknown`: this Kobo is not listed right now. Once it
-    /// has been seen, that is usually because no Sync session is open on the phone (the
-    /// relay group exists only during one), and only sometimes because the phone removed
-    /// this Kobo; the two look the same. Earlier versions saved it as `relayUnpaired`.
-    #[serde(alias = "relayUnpaired")]
-    pub relay_not_listed: bool,
+    /// The device secret `S`, base64url, from which the server token is derived. Made once,
+    /// when the pairing code is first shown, and never dropped by a state write; only Reset
+    /// erases it. Versions that synced through the relay wrote it as `relaySecret`.
+    #[serde(alias = "relaySecret")]
+    pub secret: Option<String>,
+    /// The highest event `seq` the server has said it merged. Events at or below it are
+    /// deleted from `events.jsonl`; every sync uploads the ones above it. Read from
+    /// `relayAcked` too.
+    #[serde(alias = "relayAcked")]
+    pub acked: i64,
+    /// The server has accepted this Kobo's token since the secret was made. (The relay
+    /// versions' `relaySeen` is not carried over: the relay letting this Kobo in says nothing
+    /// about the server.)
+    pub server_seen: bool,
+    /// The server's last answer was `401 unknown`: it does not know this Kobo's token. Before
+    /// `server_seen` that means the phone has not paired it yet; after, that it was removed.
+    pub server_not_listed: bool,
 }
 
-/// One line of `events.jsonl`, in the shape a changes batch carries (`docs/relay-sync.md`).
+/// One line of `events.jsonl`, in the shape `POST /api/v1/sync/events` carries.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
@@ -190,13 +190,13 @@ impl Store {
     pub fn save_state(&self, state: &State) -> io::Result<()> {
         let _guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
         self.ensure_dirs()?;
-        // A sync thread's copy of the state may predate the relay secret the reader just
-        // made for the pairing code; the secret must survive that copy being saved.
+        // A sync thread's copy of the state may predate the secret the reader just made for
+        // the pairing code; the secret must survive that copy being saved.
         let kept;
-        let state = if state.relay_secret.is_none() {
-            match self.read_state_file().and_then(|s| s.relay_secret) {
+        let state = if state.secret.is_none() {
+            match self.read_state_file().and_then(|s| s.secret) {
                 Some(secret) => {
-                    kept = State { relay_secret: Some(secret), ..state.clone() };
+                    kept = State { secret: Some(secret), ..state.clone() };
                     &kept
                 }
                 None => state,
@@ -212,28 +212,34 @@ impl Store {
         fs::read(self.state_path()).ok().and_then(|b| serde_json::from_slice(&b).ok())
     }
 
-    /// The relay secret `S` (base64url), made from the kernel's random source the first time.
-    pub fn ensure_relay_secret(&self) -> io::Result<String> {
+    /// The device secret `S` (base64url), made from the kernel's random source the first time.
+    pub fn ensure_secret(&self) -> io::Result<String> {
         let state = self.load_state()?;
-        if let Some(s) = state.relay_secret {
+        if let Some(s) = state.secret {
             return Ok(s);
         }
         let _guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
         let mut state = self.read_state_file().unwrap_or(state);
-        if let Some(s) = state.relay_secret {
+        if let Some(s) = state.secret {
             return Ok(s);
         }
         let secret = crate::crypto::b64url(&crate::crypto::random::<32>()?);
-        state.relay_secret = Some(secret.clone());
-        state.relay_seen = false;
-        state.relay_not_listed = false;
+        state.secret = Some(secret.clone());
+        state.server_seen = false;
+        state.server_not_listed = false;
         let bytes = serde_json::to_vec_pretty(&state).map_err(io::Error::other)?;
         atomic_write(&self.state_path(), &bytes)?;
         Ok(secret)
     }
 
-    /// Where a relay package is downloaded and decrypted.
-    pub fn relay_dir(&self) -> PathBuf {
+    /// Where a picture zip is written while it downloads and is installed.
+    pub fn incoming_dir(&self) -> PathBuf {
+        self.data().join("incoming")
+    }
+
+    /// Where versions that synced through the relay downloaded packages; removed at the next
+    /// sync.
+    pub fn old_relay_dir(&self) -> PathBuf {
         self.data().join("relay")
     }
 
@@ -347,7 +353,7 @@ impl Store {
     }
 
     /// Removes every edition, image and unsent event (a `dbId` change). Keeps the device ID,
-    /// the relay secret and the seq counter, which only goes up.
+    /// the secret and the seq counter, which only goes up.
     pub fn wipe(&self, state: &mut State) -> io::Result<()> {
         let next = self.next_seq(state)?;
         for dir in [self.editions_dir(), self.images_dir()] {
@@ -388,7 +394,7 @@ impl Store {
             for entry in rd.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 let id = name.strip_suffix(".json").and_then(|s| s.parse::<i64>().ok());
-                if id.map_or(true, |id| !keep.contains(&id)) {
+                if id.is_none_or(|id| !keep.contains(&id)) {
                     let _ = fs::remove_file(entry.path());
                 }
             }

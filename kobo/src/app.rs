@@ -7,7 +7,8 @@
 //! - showing or hiding the reading chrome or the "Aa" popover, and anything a sync brings
 //!   (an edition, a picture, the status line), redraws only the pixels that changed, without
 //!   a flash; pictures arriving in a burst are drawn together, at most every two seconds;
-//! - Like and Save redraw just what changed with the fast black-and-white waveform.
+//! - Like and Save, and each key typed on the server address keyboard, redraw just what
+//!   changed with the fast black-and-white waveform.
 
 use crate::canvas::{Canvas, Rect};
 use crate::config::Config;
@@ -66,19 +67,20 @@ const WAKE_TOUCH_GUARD_MS: u64 = 500;
 
 // Wi-Fi turned on by the reader. "Turn on Wi-Fi and sync" in Settings runs the radio's "on"
 // job, syncs once the Kobo has an address, and turns Wi-Fi off again when that sync ends. A
-// sync that got through the relay is a success even when it brought nothing. If the relay
-// can't be reached (or broke off), or is still waiting for the phone to list this Kobo,
-// Wi-Fi stays on and the sync is tried again every RETRY_MS, until one gets through or Turn
-// Wi-Fi off is tapped. Sleep (including the idle timeout) ends it as always, by turning Wi-Fi
-// off. Any other failure turns Wi-Fi off. A Kobo that has never shown its pairing code
-// doesn't turn Wi-Fi on at all: the button opens the code instead.
+// sync that got through to the server is a success even when it brought nothing. If the
+// server can't be reached (or broke off), or doesn't know this Kobo yet because the phone
+// hasn't registered its pairing code, Wi-Fi stays on and the sync is tried again every
+// RETRY_MS, until one gets through or Turn Wi-Fi off is tapped. Sleep (including the idle
+// timeout) ends it as always, by turning Wi-Fi off. Any other failure turns Wi-Fi off. A Kobo
+// with no server address, or that has never shown its pairing code, doesn't turn Wi-Fi on at
+// all: the button opens the address keyboard, or the code, instead.
 const RETRY_MS: u64 = 5_000;
 
-// While the pairing code is shown (and the Kobo is online, and not paired already), the
-// relay is asked every PAIR_POLL_MS whether the phone lists this Kobo yet: one signed
-// `GET /v1/package`, answered `401 unknown` until the phone has scanned the code and sent the
-// relay its device list, which it does in a Sync session just before publishing the package
-// (so this can last through the phone's upload). Once it is listed, the reader goes back to Settings and syncs.
+// While the pairing code is shown (and the Kobo is online, has a server address, and is not
+// paired already), the server is asked every PAIR_POLL_MS whether it knows this Kobo yet:
+// `GET /api/v1/kobo/hello`, answered `401 unknown` until the phone has scanned the code and
+// registered it. Once it is known, the reader goes back to Settings and syncs. The phone does
+// not need to stay open.
 const PAIR_POLL_MS: u64 = 5_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,11 +123,15 @@ struct Art {
     pos: usize,
 }
 
+// Views sit on a short stack, so the size of the reading ones costs nothing worth boxing for.
+#[allow(clippy::large_enum_variant)]
 enum View {
     Home,
     Settings,
     /// The pairing code, with the URI it shows.
     Pair { uri: String },
+    /// The server address keyboard: what is typed so far, and why OK refused it.
+    ServerKeys { typed: String, error: Option<String> },
     Saved { screens: Vec<Screen>, pos: usize },
     Edition(Ed),
     Article(Art),
@@ -157,7 +163,7 @@ enum SyncMsg {
 /// How a sync ended, for Wi-Fi the reader turned on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Finish {
-    /// Through the relay, even with nothing new.
+    /// Through to the server, even with nothing new.
     Ok,
     /// Worth trying again, for this reason.
     Retry(Retry),
@@ -168,15 +174,14 @@ enum Finish {
 fn finish_of(r: &Result<sync::SyncReport, SyncError>) -> Finish {
     match r {
         Ok(_) => Finish::Ok,
-        // A relay that can't be reached (or broke off).
-        Err(SyncError::Relay(_)) => Finish::Retry(Retry::Unreachable),
-        // One that has not been told about this Kobo yet, which the phone does as soon as it
-        // has scanned the code (or at its next publish, if it couldn't reach the relay then).
-        Err(SyncError::RelayNotListed { waiting: true }) => Finish::Retry(Retry::Waiting),
-        // Never paired, or listed before but not now: the phone has no Sync session open (or
-        // removed this Kobo), and the user has to press Start there (or pair again), which
-        // trying again doesn't do. Nor does it help with a relay that answers something unexpected,
-        // a certificate the clock can't check, or a package that fails its check.
+        // A server that can't be reached (or broke off).
+        Err(SyncError::Server(_)) => Finish::Retry(Retry::Unreachable),
+        // One that doesn't know this Kobo yet, which it does as soon as the phone has scanned
+        // the code.
+        Err(SyncError::NotListed { waiting: true }) => Finish::Retry(Retry::Waiting),
+        // Never paired, removed from the account (pair again), no address, a server that
+        // answers something unexpected, a certificate the clock can't check: trying again
+        // doesn't help.
         Err(_) => Finish::Failed,
     }
 }
@@ -197,8 +202,11 @@ pub struct Options {
     /// Start a sync as soon as the home screen is up (when online).
     pub sync_on_start: bool,
     /// Told what can be touched after every frame, for scripted tests.
-    pub hit_probe: Option<Box<dyn Fn(&[(Rect, String)])>>,
+    pub hit_probe: Option<HitProbe>,
 }
+
+/// Told what can be touched after a frame.
+pub type HitProbe = Box<dyn Fn(&[(Rect, String)])>;
 
 pub struct App {
     display: Box<dyn Display>,
@@ -243,10 +251,10 @@ pub struct App {
     retry: Option<Retry>,
     /// Why turning Wi-Fi on did not lead to a connection, until the next try.
     wifi_error: Option<String>,
-    /// The pairing code is shown and the relay has not listed this Kobo: the next time to
-    /// ask it is due then (monotonic ms).
+    /// The pairing code is shown and the server doesn't know this Kobo: the next time to ask
+    /// it is due then (monotonic ms).
     pair_poll_at: Option<u64>,
-    /// Asking the relay whether it lists this Kobo; true once it does.
+    /// Asking the server whether it knows this Kobo; true once it does.
     pair_probe: Option<Receiver<bool>>,
     /// Settings > Reset was tapped and awaits Erase everything or Cancel.
     reset_armed: bool,
@@ -258,7 +266,7 @@ pub struct App {
     network: Box<dyn Fn() -> NetStatus>,
     net: NetStatus,
     sync_on_start: bool,
-    hit_probe: Option<Box<dyn Fn(&[(Rect, String)])>>,
+    hit_probe: Option<HitProbe>,
     stack: Vec<View>,
     chrome: bool,
     popover: bool,
@@ -585,7 +593,7 @@ impl App {
                 ui::draw_home(&ctx, &mut canvas, &ui::Home { editions: &self.editions, today: self.today(), status, status_is_error: err })
             }
             View::Settings => {
-                let relay = self.config.relay_address();
+                let server = self.server_address();
                 let (last, err) = ui::status_line(&self.state, self.clock.wall_ms(), None, true);
                 let view = ui::SettingsView {
                     wifi: self.net.describe(),
@@ -601,17 +609,20 @@ impl App {
                     orientation: self.orientation(),
                     sensor: self.follow_sensor,
                     reset_armed: self.reset_armed,
-                    relay_address: &relay,
-                    relay_note: ui::relay_note(&self.state),
+                    server_address: server.as_deref(),
+                    server_from_config: self.config.server_address().is_some(),
+                    pairing_note: ui::pairing_note(&self.state, server.as_deref()),
                 };
                 let (hits, pages) = ui::draw_settings(&ctx, &mut canvas, &view, self.settings_page);
                 settings_pages = pages;
                 hits
             }
             View::Pair { uri } => {
-                let note = ui::pair_note(&self.state, self.pair_polling());
-                ui::draw_pair(&ctx, &mut canvas, uri, &self.config.relay_address(), &note)
+                let server = self.server_address();
+                let note = ui::pair_note(&self.state, self.pair_polling(), server.as_deref());
+                ui::draw_pair(&ctx, &mut canvas, uri, server.as_deref(), &note)
             }
+            View::ServerKeys { typed, error } => ui::draw_server_keyboard(&ctx, &mut canvas, typed, error.as_deref()),
             View::Saved { screens, pos } => {
                 let s = &screens[*pos];
                 layout::draw(&s.els, &self.fonts, &self.images, &mut canvas);
@@ -914,28 +925,67 @@ impl App {
 
     /// This Kobo has never shown its pairing code, so it has no secret to sync with.
     fn never_paired(&self) -> bool {
-        self.state.relay_secret.is_none()
+        self.state.secret.is_none()
+    }
+
+    /// The server to sync with: `server` in `config.json`, else the one typed in Settings.
+    fn server_address(&self) -> Option<String> {
+        self.config.server_or(self.settings.server.as_deref())
+    }
+
+    /// Whether the server has accepted this Kobo's token and not refused it since.
+    fn paired(&self) -> bool {
+        self.state.server_seen && !self.state.server_not_listed
     }
 
     /// Shows the pairing code, making the secret the first time. While it is shown and the
-    /// Kobo is online, [`App::poll_pairing`] asks the relay whether the phone has scanned it.
+    /// Kobo is online, [`App::poll_pairing`] asks the server whether the phone has registered
+    /// it.
     fn open_pair(&mut self) -> io::Result<()> {
-        match self.store.ensure_relay_secret() {
+        match self.store.ensure_secret() {
             Ok(secret) => {
                 if let Ok(st) = self.store.load_state() {
                     self.state = st;
                 }
                 let (bw, bh) = self.display.base_size();
-                let uri = crate::relay::pair_uri(&secret, &self.state.device_id, &self.config.device_name(), bw.min(bh).max(1) as u32);
-                if !(self.state.relay_seen && !self.state.relay_not_listed) {
+                let uri = crate::server::pair_uri(&secret, &self.state.device_id, &self.config.device_name(), bw.min(bh).max(1) as u32);
+                if !self.paired() {
                     self.pair_poll_at = Some(self.clock.mono_ms() + PAIR_POLL_MS);
                 }
                 self.net = (self.network)();
                 self.push(View::Pair { uri })
             }
             Err(e) => {
-                eprintln!("relay: cannot make the pairing secret: {e}");
+                eprintln!("pair: cannot make the pairing secret: {e}");
                 Ok(())
+            }
+        }
+    }
+
+    /// Opens the server address keyboard with the typed address (not one from `config.json`).
+    fn open_server_keys(&mut self) -> io::Result<()> {
+        let typed = self.settings.server.clone().unwrap_or_default();
+        self.push(View::ServerKeys { typed, error: None })
+    }
+
+    /// OK on the keyboard: nothing typed forgets the address; anything else is checked and
+    /// kept, or refused with the reason.
+    fn server_typed(&mut self) -> io::Result<()> {
+        let View::ServerKeys { typed, .. } = self.top() else { return Ok(()) };
+        let typed = typed.trim().to_string();
+        let parsed = if typed.is_empty() { Ok(None) } else { crate::server::parse_address(&typed).map(Some) };
+        match parsed {
+            Ok(a) => {
+                eprintln!("settings: server address {}", a.as_deref().unwrap_or("forgotten"));
+                self.settings.server = a;
+                self.save_settings();
+                self.back()
+            }
+            Err(e) => {
+                if let View::ServerKeys { error, .. } = self.top_mut() {
+                    *error = Some(e);
+                }
+                self.show(Show::Touch)
             }
         }
     }
@@ -1022,7 +1072,9 @@ impl App {
                 let next = if by > 0 { (cur / 10 + 1) * 10 } else { ((cur + 9) / 10 - 1) * 10 };
                 self.set_light(warmth, next)?;
             }
-            // Without a pairing secret no sync can happen: both open the pairing code instead.
+            // Without a server address, or a pairing secret, no sync can happen: both open the
+            // keyboard, or the pairing code, instead.
+            Action::SyncNow | Action::WifiAndSync if self.server_address().is_none() => self.open_server_keys()?,
             Action::SyncNow | Action::WifiAndSync if self.never_paired() => self.open_pair()?,
             Action::SyncNow => {
                 self.start_sync();
@@ -1055,6 +1107,33 @@ impl App {
                 }
             }
             Action::OpenPair => self.open_pair()?,
+            Action::ServerTyped => self.open_server_keys()?,
+            Action::KeyChar(c) => {
+                if let View::ServerKeys { typed, error } = self.top_mut() {
+                    if typed.len() < 200 {
+                        typed.push(c);
+                    }
+                    *error = None;
+                }
+                self.show(Show::Touch)?;
+            }
+            Action::KeyText(t) => {
+                if let View::ServerKeys { typed, error } = self.top_mut() {
+                    if typed.len() + t.len() <= 200 {
+                        typed.push_str(&t);
+                    }
+                    *error = None;
+                }
+                self.show(Show::Touch)?;
+            }
+            Action::KeyDelete => {
+                if let View::ServerKeys { typed, error } = self.top_mut() {
+                    typed.pop();
+                    *error = None;
+                }
+                self.show(Show::Touch)?;
+            }
+            Action::KeyOk => self.server_typed()?,
             Action::Reset | Action::ResetCancel => {
                 self.reset_armed = a == Action::Reset;
                 self.show(Show::Touch)?;
@@ -1337,7 +1416,7 @@ impl App {
             return;
         }
         let (tx, rx) = mpsc::channel();
-        let mut opts = sync::Options::from_config(&self.config);
+        let mut opts = sync::Options::new(self.server_address());
         let (bw, bh) = self.display.base_size();
         opts.image_width = bw.min(bh).max(1) as u32;
         let ptx = tx.clone();
@@ -1360,7 +1439,7 @@ impl App {
             };
             match &r {
                 Ok(r) => eprintln!(
-                    "synced through {}: {} events sent, editions fetched {:?}, removed {:?}, saved list {}, {} images installed, {} not in the package",
+                    "synced with {}: {} events sent, editions fetched {:?}, removed {:?}, saved list {}, {} images installed, {} not on the server",
                     r.address,
                     r.events_sent,
                     r.editions_fetched,
@@ -1462,8 +1541,8 @@ impl App {
         Ok(())
     }
 
-    /// After a sync on Wi-Fi the reader turned on: off again, or try again later if the relay
-    /// can't be reached or is waiting for the phone.
+    /// After a sync on Wi-Fi the reader turned on: off again, or try again later if the
+    /// server can't be reached or doesn't know this Kobo yet.
     fn after_sync(&mut self, f: Finish) {
         if !self.wifi_auto {
             return;
@@ -1497,14 +1576,14 @@ impl App {
         Ok(())
     }
 
-    /// While the pairing code is shown, asks the relay every PAIR_POLL_MS whether the phone
-    /// lists this Kobo yet. Once it does, or a sync meanwhile got through the relay, the
-    /// reader goes back to Settings, syncing (after a sync, it has synced already).
+    /// While the pairing code is shown, asks the server every PAIR_POLL_MS whether it knows
+    /// this Kobo yet. Once it does, or a sync meanwhile got through, the reader goes back to
+    /// Settings, syncing (after a sync, it has synced already).
     fn poll_pairing(&mut self) -> io::Result<()> {
         let on_pair = matches!(self.top(), View::Pair { .. });
         if let Some(rx) = &self.pair_probe {
-            let listed = match rx.try_recv() {
-                Ok(listed) => listed,
+            let known = match rx.try_recv() {
+                Ok(known) => known,
                 Err(mpsc::TryRecvError::Empty) => return Ok(()),
                 Err(mpsc::TryRecvError::Disconnected) => false,
             };
@@ -1512,8 +1591,8 @@ impl App {
             if let Ok(s) = self.store.load_state() {
                 self.state = s;
             }
-            if listed && on_pair {
-                eprintln!("relay: the phone lists this Kobo now; syncing");
+            if known && on_pair {
+                eprintln!("pair: the server knows this Kobo now; syncing");
                 self.pair_poll_at = None;
                 self.back()?;
                 self.start_sync();
@@ -1534,8 +1613,8 @@ impl App {
         if self.sync.is_some() || self.wifi_job.is_some() {
             return Ok(());
         }
-        if self.state.relay_seen && !self.state.relay_not_listed {
-            eprintln!("relay: a sync got through the relay; the pairing code is done");
+        if self.paired() {
+            eprintln!("pair: a sync got through to the server; the pairing code is done");
             self.pair_poll_at = None;
             return self.back();
         }
@@ -1545,33 +1624,31 @@ impl App {
         }
         self.pair_poll_at = Some(now + PAIR_POLL_MS);
         self.net = (self.network)();
-        if !self.net.online() {
-            return Ok(());
-        }
+        let Some(server) = self.server_address().filter(|_| self.net.online()) else { return Ok(()) };
         let (tx, rx) = mpsc::channel();
         let home = self.store.home.clone();
-        let opts = sync::Options::from_config(&self.config);
+        let opts = sync::Options::new(Some(server));
         let spawned = std::thread::Builder::new().name("pair".into()).spawn(move || {
-            let listed = match crate::relay::listed(&Store::new(&home), &opts) {
-                Ok(listed) => listed,
+            let known = match crate::server::hello(&Store::new(&home), &opts) {
+                Ok(known) => known,
                 Err(e) => {
-                    eprintln!("relay: cannot ask whether the phone lists this Kobo: {e}");
+                    eprintln!("pair: cannot ask the server whether it knows this Kobo: {e}");
                     false
                 }
             };
-            let _ = tx.send(listed);
+            let _ = tx.send(known);
         });
         match spawned {
             Ok(_) => self.pair_probe = Some(rx),
-            Err(e) => eprintln!("relay: cannot start asking: {e}"),
+            Err(e) => eprintln!("pair: cannot start asking: {e}"),
         }
         Ok(())
     }
 
-    /// Whether the pairing code is waiting for the phone and the relay is being asked, for
+    /// Whether the pairing code is waiting for the phone and the server is being asked, for
     /// the pairing screen.
     fn pair_polling(&self) -> bool {
-        self.pair_poll_at.is_some() && self.net.online()
+        self.pair_poll_at.is_some() && self.net.online() && self.server_address().is_some()
     }
 
     /// Whether the reader is turning Wi-Fi on or off, or trying the sync again, for tests.

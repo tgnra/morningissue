@@ -76,10 +76,11 @@ fn main() -> ExitCode {
     match cmd {
         "sync" => {
             let store = Store::new(&home);
-            match sync::sync(&store, &sync::Options::from_config(&config)) {
+            let settings = morningissue::settings::Settings::load(&store.settings_path());
+            match sync::sync(&store, &sync::Options::from_config(&config, &settings)) {
                 Ok(r) => {
                     println!(
-                        "synced through {}: {} events sent, editions fetched {:?}, removed {:?}, saved list {}, {} images installed, {} not in the package{}",
+                        "synced with {}: {} events sent, editions fetched {:?}, removed {:?}, saved list {}, {} images installed, {} not on the server{}",
                         r.address,
                         r.events_sent,
                         r.editions_fetched,
@@ -87,7 +88,7 @@ fn main() -> ExitCode {
                         if r.saved_fetched { "fetched" } else { "unchanged" },
                         r.images_fetched,
                         r.images_missing,
-                        if r.wiped { ", phone database changed: local data wiped" } else { "" }
+                        if r.wiped { ", server database changed: local data wiped" } else { "" }
                     );
                     ExitCode::SUCCESS
                 }

@@ -1,6 +1,6 @@
-//! Just enough of a zip reader for a relay package (`docs/relay-sync.md`, "Package contents"):
-//! the central directory (with zip64), and entries stored or deflated. The package has already
-//! been authenticated as a whole, so CRCs are not checked again.
+//! Just enough of a zip reader for the server's picture zips (`POST /api/v1/kobo/images`,
+//! `docs/kobo-sync.md`, "Pictures"): the central directory (with zip64), and entries stored or
+//! deflated. CRCs are not checked; a damaged picture simply does not decode.
 
 use std::collections::HashMap;
 use std::fs::File;

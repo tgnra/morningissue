@@ -100,6 +100,7 @@ enum Role {
 }
 
 /// The text of a story (headline, standfirst, byline) `w` wide at (x, y); returns its height.
+#[allow(clippy::too_many_arguments)]
 fn story_text(ctx: &Ctx, a: &Article, x: f32, y0: f32, w: f32, role: Role, with_image: bool, els: &mut Vec<El>) -> f32 {
     let ty = &ctx.ty;
     let read = is_read(a);

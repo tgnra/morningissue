@@ -219,8 +219,11 @@ pub struct ScriptInput {
     /// Marks reached, in order; the harness saves a picture for each.
     pub marks: Rc<RefCell<Vec<String>>>,
     /// Called at each mark with its name.
-    pub on_mark: Option<Box<dyn FnMut(&str)>>,
+    pub on_mark: Option<OnMark>,
 }
+
+/// Called at a mark with its name.
+pub type OnMark = Box<dyn FnMut(&str)>;
 
 impl ScriptInput {
     pub fn new(steps: Vec<Step>, base: (i32, i32), shared: Rc<Shared>) -> ScriptInput {

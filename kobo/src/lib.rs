@@ -1,4 +1,5 @@
-//! Morning Issue for Kobo: syncs editions from the phone and reads them on e-ink.
+//! Morning Issue for Kobo: syncs editions from the Morning Issue server and reads them on
+//! e-ink.
 //!
 //! The reader draws into an 8-bit grey [`canvas::Canvas`] and talks to the hardware only
 //! through [`device::Display`], [`device::Input`] and [`device::Clock`], so the same screens
@@ -22,8 +23,8 @@ pub mod model;
 pub mod net;
 pub mod profile;
 pub mod qr;
-pub mod relay;
 pub mod screens;
+pub mod server;
 pub mod settings;
 pub mod store;
 pub mod sync;

@@ -104,9 +104,9 @@ pub fn apply_saved(saved: &mut SavedList, e: &Event, find: impl Fn(i64) -> Optio
     if e.kind == "saved" {
         let key = id.to_string();
         if e.value.as_ref().and_then(Value::as_bool) == Some(true) {
-            if !saved.articles.contains_key(&key) {
+            if let std::collections::btree_map::Entry::Vacant(slot) = saved.articles.entry(key) {
                 let Some(a) = find(id) else { return };
-                saved.articles.insert(key, a);
+                slot.insert(a);
             }
             if !saved.order.contains(&id) {
                 saved.order.insert(0, id);
