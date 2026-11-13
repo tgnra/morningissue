@@ -149,7 +149,7 @@ abstract class ArticleDao {
 
     /** One article as [userId] sees it, whether or not they may; check [isVisible]. */
     @Query("$ROW_SELECT WHERE a.id = :articleId")
-    abstract suspend fun row(userId: Long, articleId: Long): UserArticleRow?
+    abstract suspend fun row(userId: Long, articleId: Long): ArticleViewRow?
 
     /** Whether [userId] may see the article: they subscribe to its feed (either status), or have engagement or an edition item for it. */
     @Query("SELECT EXISTS (SELECT 1 FROM article a WHERE a.id = :articleId AND $VISIBLE)")
@@ -157,15 +157,15 @@ abstract class ArticleDao {
 
     /** A feed's posts, newest published first, before [before]. */
     @Query("$ROW_SELECT WHERE a.feedId = :feedId AND a.publishedAt < :before ORDER BY a.publishedAt DESC, a.id DESC LIMIT :limit")
-    abstract suspend fun forFeed(userId: Long, feedId: Long, before: Instant, limit: Int): List<UserArticleRow>
+    abstract suspend fun forFeed(userId: Long, feedId: Long, before: Instant, limit: Int): List<ArticleViewRow>
 
     /** The user's Saved shelf, newest saved first, saved before [before]. */
     @Query("$ROW_SELECT WHERE g.savedAt IS NOT NULL AND g.savedAt < :before ORDER BY g.savedAt DESC, a.id DESC LIMIT :limit")
-    abstract suspend fun saved(userId: Long, before: Instant, limit: Int): List<UserArticleRow>
+    abstract suspend fun saved(userId: Long, before: Instant, limit: Int): List<ArticleViewRow>
 
     /** The user's Liked shelf, newest Liked first, Liked before [before]. */
     @Query("$ROW_SELECT WHERE g.likedAt IS NOT NULL AND g.likedAt < :before ORDER BY g.likedAt DESC, a.id DESC LIMIT :limit")
-    abstract suspend fun liked(userId: Long, before: Instant, limit: Int): List<UserArticleRow>
+    abstract suspend fun liked(userId: Long, before: Instant, limit: Int): List<ArticleViewRow>
 
     /**
      * Full-text search over the articles [userId] can see ([VISIBLE]). [match] is FTS4 MATCH
@@ -210,7 +210,7 @@ abstract class ArticleDao {
                 "OR EXISTS (SELECT 1 FROM edition_item vi JOIN edition ve ON ve.id = vi.editionId " +
                 "WHERE ve.user_id = :userId AND vi.articleId = a.id))"
 
-        /** Shared projection for [UserArticleRow] as `:userId` sees it; append a WHERE clause. */
+        /** Shared projection for [ArticleViewRow] as `:userId` sees it; append a WHERE clause. */
         const val ROW_SELECT =
             "SELECT a.*, COALESCE(s.title_override, f.title) AS feedTitle, f.iconUrl AS feedIconUrl, s.status AS feedStatus, " +
                 "g.openedAt AS openedAt, g.readFraction AS readFraction, g.readAt AS readAt, g.savedAt AS savedAt, g.likedAt AS likedAt " +
@@ -221,7 +221,7 @@ abstract class ArticleDao {
 }
 
 /** An article with its feed's name and one user's relation to it; engagement columns are null without a row. */
-data class UserArticleRow(
+data class ArticleViewRow(
     @Embedded val article: ArticleEntity,
     val feedTitle: String,
     val feedIconUrl: String?,
@@ -235,7 +235,7 @@ data class UserArticleRow(
 )
 
 data class UserSearchRow(
-    @Embedded val row: UserArticleRow,
+    @Embedded val row: ArticleViewRow,
     val snippet: String?,
 )
 

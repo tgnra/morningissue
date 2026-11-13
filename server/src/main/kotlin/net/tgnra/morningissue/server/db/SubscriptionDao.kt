@@ -143,7 +143,7 @@ abstract class SubscriptionDao {
 
     /** Every (user, feed) subscription in SUBSCRIBED status: health checks and refresh reports go by it. */
     @Query("SELECT user_id, feed_id FROM subscription WHERE status = 'SUBSCRIBED' ORDER BY user_id, feed_id")
-    abstract suspend fun subscribedPairs(): List<UserFeedRow>
+    abstract suspend fun subscribedPairs(): List<UserFeedPair>
 
     /**
      * Discovered subscriptions (feeds a user only looked into) older than [before] on which the
@@ -157,7 +157,7 @@ abstract class SubscriptionDao {
             "WHERE g.user_id = s.user_id AND a.feedId = s.feed_id " +
             "AND (g.savedAt IS NOT NULL OR g.likedAt IS NOT NULL OR g.openedAt >= :before))",
     )
-    abstract suspend fun expiredDiscovered(before: Instant): List<UserFeedRow>
+    abstract suspend fun expiredDiscovered(before: Instant): List<UserFeedPair>
 
     companion object {
         /** Shared projection for [SubscriptionRow]; append a WHERE clause naming `s.user_id`. */

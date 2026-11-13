@@ -16,7 +16,7 @@ import net.tgnra.morningissue.model.ReadingTime
 import net.tgnra.morningissue.server.db.ArticleContentEntity
 import net.tgnra.morningissue.server.db.SubscriptionRow
 import net.tgnra.morningissue.server.db.TagEntity
-import net.tgnra.morningissue.server.db.UserArticleRow
+import net.tgnra.morningissue.server.db.ArticleViewRow
 
 /** Later than any stored time, and still representable in epoch milliseconds: "before" with no bound. */
 internal val END_OF_TIME: Instant = Instant.ofEpochMilli(Long.MAX_VALUE)
@@ -59,7 +59,7 @@ internal fun SubscriptionRow.toDto(tags: List<String>, now: Instant): FeedDto = 
 
 internal fun TagEntity.toDto(): TagDto = TagDto(id = id, name = name, affinity = affinity)
 
-internal fun UserArticleRow.toSummary(snippet: String? = null): ArticleSummaryDto = ArticleSummaryDto(
+internal fun ArticleViewRow.toSummary(snippet: String? = null): ArticleSummaryDto = ArticleSummaryDto(
     articleId = article.id,
     feedId = article.feedId,
     feedTitle = feedTitle,
@@ -81,7 +81,7 @@ internal fun UserArticleRow.toSummary(snippet: String? = null): ArticleSummaryDt
 )
 
 /** The bundle's article object, with the phone's optional fields, as `GET /articles/{id}` answers it. */
-internal fun UserArticleRow.toBundleArticle(content: ArticleContentEntity?): BundleArticleDto = BundleArticleDto(
+internal fun ArticleViewRow.toBundleArticle(content: ArticleContentEntity?): BundleArticleDto = BundleArticleDto(
     feedTitle = feedTitle,
     title = article.title,
     author = article.author,

@@ -178,7 +178,7 @@ data class FeedPostStatsRow(
 )
 
 /** A (user, feed) pair. */
-data class UserFeedRow(
+data class UserFeedPair(
     @ColumnInfo(name = "user_id") val userId: Long,
     @ColumnInfo(name = "feed_id") val feedId: Long,
 )
