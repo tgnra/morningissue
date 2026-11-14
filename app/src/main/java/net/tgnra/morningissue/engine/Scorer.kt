@@ -40,8 +40,13 @@ data class Score(
     val quietDays: Long? = null,
     /** The within-feed weight with the signal behind it; neutral unless a [WithinFeedSource] is set. */
     val within: WithinFeedWeight = WithinFeedWeight.Neutral,
-    /** N, the model-interest weight: 1 unless an [InterestSource] is set and the post was rated. */
+    /**
+     * N, the model-interest weight: 1 unless an [InterestSource] is set; the post's own rating's
+     * weight, or for an unrated post the reader's mean rating's ([Interest]).
+     */
     val n: Double = 1.0,
+    /** Whether [n] comes from the model's rating of this post, not the reader's mean. */
+    val rated: Boolean = false,
 ) {
     /** W, the within-feed multiplier: 1 unless the reader's record tells this feed's posts apart. */
     val w: Double get() = within.multiplier
@@ -108,6 +113,7 @@ class Scorer(
             quietDays = quietDays,
             within = withinFeed(feed, candidate),
             n = interest(candidate),
+            rated = interestSource.isRated(candidate.articleId),
         )
     }
 
@@ -201,11 +207,13 @@ class Scorer(
         baseReason(feed, candidate, score, kind) + interestNote(score)
 
     /**
-     * The model's part of the reason line, when N moved the post by at least
-     * `interestReasonMinShift`: a tail after the main reason, like "also in 2 other feeds".
-     * Empty otherwise, so with no model the line is exactly what it was.
+     * The model's part of the reason line, when the model rated this post and N moved it by at
+     * least `interestReasonMinShift`: a tail after the main reason, like "also in 2 other feeds".
+     * Empty otherwise (an unrated post's N, the reader's mean, says nothing about the post), so
+     * with no model the line is exactly what it was.
      */
     fun interestNote(score: Score): String = when {
+        !score.rated -> ""
         score.n - 1.0 >= config.interestReasonMinShift - EPSILON -> "; $INTEREST_UP"
         1.0 - score.n >= config.interestReasonMinShift - EPSILON -> "; $INTEREST_DOWN"
         else -> ""

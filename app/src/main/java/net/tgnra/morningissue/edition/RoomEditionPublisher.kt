@@ -367,9 +367,11 @@ class RoomEditionPublisher(
         val reprinted = reprintOf?.let { editionDao.getItems(it.id) }.orEmpty()
         val plan = plan(kind, releaseAt, now, reprintOf, reprinted, extraFeedIds) ?: return@withWriteTransaction null
 
-        // N from the ratings stored for these posts; none stored, or no model, and N is 1 throughout.
+        // N from the ratings stored for these posts, and for an unrated one the reader's mean
+        // rating; nothing stored, or no model, and N is 1 throughout.
         val ratings = interestRatings.of(plan.scored.map { it.articleId })
-        val scorer = Scorer(config, withinFeedSource = plan.within, interestSource = interest.source(ratings))
+        val mean = interestRatings.mean(now, config)
+        val scorer = Scorer(config, withinFeedSource = plan.within, interestSource = interest.source(ratings, mean))
         val builder = EditionBuilder(config, scorer)
 
         val draft = builder.build(
@@ -574,12 +576,26 @@ class RoomEditionPublisher(
     fun interface InterestRatings {
         suspend fun of(articleIds: Collection<Long>): Map<Long, Int>
 
+        /**
+         * The reader's mean rating as of [now]: the mean of the ratings given in the last
+         * `interestMeanWindowDays`, when there are at least `interestMeanMinRatings`; null
+         * otherwise, and always for a source without stored ratings.
+         */
+        suspend fun mean(now: Instant, config: RankingConfig): Double? = null
+
         companion object {
             val None = InterestRatings { emptyMap() }
 
             /** The ratings stored in [database] (`article_interest`), while [enabled] says so; none otherwise. */
-            fun stored(database: MorningIssueDatabase, enabled: suspend () -> Boolean) = InterestRatings { ids ->
-                if (enabled()) database.interestDao().ratingsOf(ids).mapValues { it.value.rating } else emptyMap()
+            fun stored(database: MorningIssueDatabase, enabled: suspend () -> Boolean) = object : InterestRatings {
+                override suspend fun of(articleIds: Collection<Long>): Map<Long, Int> =
+                    if (enabled()) database.interestDao().ratingsOf(articleIds).mapValues { it.value.rating } else emptyMap()
+
+                override suspend fun mean(now: Instant, config: RankingConfig): Double? = if (!enabled()) {
+                    null
+                } else {
+                    database.interestDao().meanSince(now.minus(Duration.ofDays(config.interestMeanWindowDays)), config.interestMeanMinRatings)
+                }
             }
         }
     }

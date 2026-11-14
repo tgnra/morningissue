@@ -11,6 +11,7 @@ import net.tgnra.morningissue.data.db.ArticleInterestEntity
 import net.tgnra.morningissue.data.db.EditionItemEntity
 import net.tgnra.morningissue.data.db.FeedEntity
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
+import net.tgnra.morningissue.engine.Interest
 import net.tgnra.morningissue.engine.Scorer
 import net.tgnra.morningissue.model.AppSettings
 import net.tgnra.morningissue.model.CadenceTier
@@ -141,6 +142,77 @@ class InterestPublisherTest {
         // The same stories are printed, only in another order.
         assertEquals(today.map { it.articleId }.toSet(), items.map { it.articleId }.toSet())
         assertTrue(ids.isNotEmpty())
+    }
+
+    /**
+     * [count] posts from long ago (not candidates: first seen 40 days back), rated [rating] at
+     * [ratedAt]: the reader's rating history, from which an unrated post's N is taken.
+     */
+    private suspend fun history(db: MorningIssueDatabase, count: Int, rating: Int, ratedAt: Instant) {
+        val feedId = db.feedDao().insert(FeedEntity(url = "https://example.com/old.xml", title = "Old", addedAt = morning.minus(Duration.ofDays(90))))
+        val seen = morning.minus(Duration.ofDays(40))
+        val ids = (0 until count).map { p ->
+            db.articleDao().insertNew(ArticleEntity(feedId = feedId, guid = "old-$p", title = "Old $p", publishedAt = seen, firstSeenAt = seen))!!
+        }
+        db.interestDao().upsert(ids.map { ArticleInterestEntity(it, rating, ratedAt, "hash") })
+    }
+
+    private fun stored(db: MorningIssueDatabase) = RoomEditionPublisher.InterestRatings.stored(db) { true }
+
+    @Test
+    fun unratedPostsTakeTheReadersMeanRating() = runTest {
+        val plain = database()
+        seed(plain)
+        val today = build(plain, publisher(plain))
+
+        // Twenty ratings in the last 30 days, all 1: every unrated post scores at N = 0.8. With
+        // nothing of this edition rated the order is untouched and only the scores scale.
+        val low = database()
+        seed(low)
+        history(low, 20, rating = 1, ratedAt = morning.minus(Duration.ofDays(29)))
+        val items = build(low, publisher(low, ratings = stored(low)))
+        assertEquals(today.map { it.articleId to it.kind }, items.map { it.articleId to it.kind })
+        today.zip(items).forEach { (before, after) -> assertEquals(before.score * 0.8, after.score, 1e-9) }
+        assertEquals("the mean is not the model's word on a post", today.map { it.reason }, items.map { it.reason })
+
+        // So a post the model rated a plain 3 now beats an unrated one it used to trail.
+        val rated = database()
+        seed(rated)
+        history(rated, 20, rating = 1, ratedAt = morning.minus(Duration.ofDays(1)))
+        val lead = today.single { it.kind == ItemKind.LEAD }
+        val challenger = today.filter { it.kind == ItemKind.FRONT }.first()
+        rate(rated, mapOf(challenger.articleId to 3))
+        val reordered = build(rated, publisher(rated, ratings = stored(rated)))
+        assertEquals(challenger.articleId, reordered.single { it.kind == ItemKind.LEAD }.articleId)
+        assertEquals(challenger.score, reordered.single { it.articleId == challenger.articleId }.score, 1e-9)
+        // The 3 counts in the mean too: (20 × 1 + 3) / 21.
+        val mean = Interest().weightOf(23.0 / 21.0)
+        assertEquals(lead.score * mean, reordered.single { it.articleId == lead.articleId }.score, 1e-9)
+    }
+
+    @Test
+    fun withTooFewRecentRatingsUnratedPostsStayAtOne() = runTest {
+        val plain = database()
+        seed(plain)
+        val today = build(plain, publisher(plain))
+
+        // Nineteen is too few.
+        val few = database()
+        seed(few)
+        history(few, 19, rating = 1, ratedAt = morning.minus(Duration.ofDays(1)))
+        assertEquals(today, build(few, publisher(few, ratings = stored(few))))
+
+        // Older than 30 days, they do not count.
+        val old = database()
+        seed(old)
+        history(old, 40, rating = 1, ratedAt = morning.minus(Duration.ofDays(31)))
+        assertEquals(today, build(old, publisher(old, ratings = stored(old))))
+
+        // Switched off, the history is ignored too.
+        val off = database()
+        seed(off)
+        history(off, 40, rating = 1, ratedAt = morning.minus(Duration.ofDays(1)))
+        assertEquals(today, build(off, publisher(off, ratings = RoomEditionPublisher.InterestRatings.stored(off) { false })))
     }
 
     @Test

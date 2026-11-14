@@ -3,7 +3,11 @@ package net.tgnra.morningissue.data.db
 import androidx.room3.Dao
 import androidx.room3.Query
 import androidx.room3.Upsert
+import java.time.Instant
 import net.tgnra.morningissue.ai.PostForRating
+
+/** How many ratings there are in a window, and their mean (null with none). */
+data class RatingSummary(val count: Int, val mean: Double?)
 
 /**
  * The on-device model's ratings (`article_interest`) and the little the model is told about the
@@ -34,6 +38,16 @@ abstract class InterestDao {
 
     @Query("SELECT COUNT(*) FROM article_interest")
     abstract suspend fun count(): Int
+
+    @Query("SELECT COUNT(*) AS count, AVG(rating) AS mean FROM article_interest WHERE ratedAt >= :since")
+    abstract suspend fun summarySince(since: Instant): RatingSummary
+
+    /**
+     * The mean of the ratings given at or after [since], when there are at least [minRatings]
+     * of them; null otherwise. What an unrated post's N is taken from (`engine/Interest`).
+     */
+    suspend fun meanSince(since: Instant, minRatings: Int): Double? =
+        summarySince(since).takeIf { it.count >= minRatings && it.count > 0 }?.mean
 
     @Query("DELETE FROM article_interest")
     abstract suspend fun deleteAll()

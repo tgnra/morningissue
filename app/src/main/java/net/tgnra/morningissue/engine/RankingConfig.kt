@@ -281,6 +281,10 @@ data class RankingConfig(
     val interestReasonMinShift: Double = 0.1,
     /** How many of a build's best candidates, by the score without N, the model is asked about. */
     val interestShortlist: Int = 40,
+    /** An unrated post takes the mean of the ratings stored over this many days... */
+    val interestMeanWindowDays: Long = 30,
+    /** ...once there are at least this many of them; with fewer it is 1. */
+    val interestMeanMinRatings: Int = 20,
 ) {
     companion object {
         val Default = RankingConfig()
