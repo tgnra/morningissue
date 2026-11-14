@@ -1,5 +1,6 @@
 package net.tgnra.morningissue.data.images
 
+import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ColorSpace
@@ -122,6 +123,8 @@ class ImageRecompressor(
 
     companion object {
         /** Lossy WebP by whichever name this Android has for it. */
+        // Lint cannot see that [sdk] is the guard.
+        @SuppressLint("NewApi")
         @Suppress("DEPRECATION")
         fun webpFormat(sdk: Int = Build.VERSION.SDK_INT): Bitmap.CompressFormat =
             if (sdk >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP

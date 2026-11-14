@@ -211,7 +211,7 @@ class FileImageStore(
         if (!fetched) return Result(Outcome.SKIPPED)
         val downloaded = original.length()
 
-        val head = original.inputStream().use { it.readNBytes(ImageFormats.HEAD_BYTES) }
+        val head = original.inputStream().use { ImageFormats.readHead(it) }
         val kind = ImageFormats.kindOf(head)
         if (kind == ImageKind.NOT_AN_IMAGE) return Result(Outcome.SKIPPED, downloaded)
         // What cannot or must not be re-encoded is kept as it came, if it is small enough.

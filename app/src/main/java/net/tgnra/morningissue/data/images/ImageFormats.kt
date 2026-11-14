@@ -23,6 +23,21 @@ object ImageFormats {
     /** How much of the file [kindOf] and [isAnimated] want to see. */
     const val HEAD_BYTES = 4096
 
+    /**
+     * Up to [HEAD_BYTES] from the start of [input]: fewer only when it ends first.
+     * (`InputStream.readNBytes(Int)` is Android 13 and later.)
+     */
+    fun readHead(input: java.io.InputStream): ByteArray {
+        val buffer = ByteArray(HEAD_BYTES)
+        var filled = 0
+        while (filled < HEAD_BYTES) {
+            val read = input.read(buffer, filled, HEAD_BYTES - filled)
+            if (read < 0) break
+            filled += read
+        }
+        return if (filled == HEAD_BYTES) buffer else buffer.copyOf(filled)
+    }
+
     fun kindOf(head: ByteArray): ImageKind = when {
         head.startsWith(0xFF, 0xD8, 0xFF) -> ImageKind.JPEG
         head.startsWith(0x89, 'P'.code, 'N'.code, 'G'.code) -> ImageKind.PNG
@@ -106,7 +121,7 @@ object ImageFormats {
     }
 
     private fun looksLikeSvg(head: ByteArray): Boolean {
-        val text = String(head, Charsets.ISO_8859_1).trimStart('﻿', 'ï', '»', '¿', ' ', '\n', '\r', '\t')
+        val text = String(head, Charsets.ISO_8859_1).trimStart('\uFEFF', 'ï', '»', '¿', ' ', '\n', '\r', '\t')
         if (!text.startsWith("<")) return false
         val tag = text.indexOf("<svg", ignoreCase = true)
         return tag >= 0 && !text.substring(0, tag).contains("<html", ignoreCase = true)
