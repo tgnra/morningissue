@@ -25,7 +25,8 @@ object SimulationReport {
     fun write(result: SimulationResult, findings: List<String> = emptyList()) {
         val dir = directory ?: return
         dir.mkdirs()
-        File(dir, "${result.persona.name}${if (result.seed == 1L) "" else "-seed${result.seed}"}.md").writeText(render(result, findings))
+        val suffix = (if (result.seed == 1L) "" else "-seed${result.seed}") + (if (result.withModel) "-with-model" else "")
+        File(dir, "${result.persona.name}$suffix.md").writeText(render(result, findings))
     }
 
     fun render(result: SimulationResult, findings: List<String> = emptyList()): String = buildString {

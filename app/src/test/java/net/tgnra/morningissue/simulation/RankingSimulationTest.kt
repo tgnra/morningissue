@@ -50,7 +50,41 @@ class RankingSimulationTest {
     // -- Scotland reader ------------------------------------------------------------------
 
     @Test
-    fun scotlandReader() = checks(runs[SCOTLAND]) { r ->
+    fun scotlandReader() = checks(runs[SCOTLAND]) { r -> scotlandChecks(r) }
+
+    /**
+     * The Scotland reader with a simulated on-device model rating the next edition's shortlist
+     * whenever the app is in the foreground (a rater that knows the persona's taste, with noise:
+     * see `Simulation.SimulatedNano`). N must not break what the ranking does without it, so
+     * every check of [scotlandReader] runs again, and the ratings must have reached the editions.
+     *
+     * One check is held to a smaller margin, and that is a finding about N, not noise. Only the
+     * posts first seen before the reader last had the app open get rated (AICore refuses the
+     * background), and most of this reader's posts are rated low, so a rated post is usually
+     * pushed down (N of 0.8 or 0.9) while an unrated one keeps N = 1. Business posts are rarely
+     * on a shortlist, so they stay unrated and gain a little on the rated posts around them.
+     * Measured: business posts on the front page or Top stories 39.1% of the time with the
+     * model, 37.7% without, against 48.0% for the random reader; the plain run's 10-point margin
+     * becomes 8.9. Measured coverage: 15.5% of front-page stories rated.
+     */
+    @Test
+    fun scotlandReaderWithAModel() = checks(runs.withModel) { r ->
+        scotlandChecks(r, businessMargin = 0.08)
+        val after = r.from(WARM_UP)
+        val front = after.flatMap { it.items }.filter { it.onFront }
+        val ratedShare = front.count { it.rating != null }.toDouble() / front.size
+        check(ratedShare >= 0.1, "at least 10% of front-page stories after the warm-up were rated by the model", ratedShare.pct())
+        val plainFront = runs[SCOTLAND].from(WARM_UP).share { day -> day.items.any { it.onFront && it.topic == "scotland" } }
+        val modelFront = after.share { day -> day.items.any { it.onFront && it.topic == "scotland" } }
+        check(modelFront >= plainFront - 0.02, "a Scottish story makes the front page at least as often as without the model", "${modelFront.pct()} vs ${plainFront.pct()}")
+        val football = after.flatMap { it.items }.filter { it.topic == "football" }
+        val footballFront = football.count { it.onFront }.toDouble() / football.size
+        val plainFootball = runs[SCOTLAND].from(WARM_UP).flatMap { it.items }.filter { it.topic == "football" }.let { f -> f.count { it.onFront }.toDouble() / f.size }
+        check(footballFront <= plainFootball + 0.02, "the football posts the reader never opens reach the front page no more often than without the model", "${footballFront.pct()} vs ${plainFootball.pct()}")
+    }
+
+    /** @param businessMargin how far below the random reader's business posts must stay; see [scotlandReaderWithAModel] */
+    private fun Checks.scotlandChecks(r: SimulationResult, businessMargin: Double = 0.1) {
         val after = r.from(WARM_UP)
         val affinity = r.meanAffinity(after)
         // Measured: BBC Scotland 0.61; Guardian UK 0.18; no other feed above 0.12.
@@ -87,7 +121,8 @@ class RankingSimulationTest {
         val persona = r.persona as ScotlandReader
         val control = runs[RANDOM].from(WARM_UP).flatMap { it.items }.filter { persona.topic(it.post) == "business" }
         val controlProminent = control.count { it.prominent }.toDouble() / control.size
-        check(prominent <= controlProminent - 0.1, "business posts reach the front page or Top stories at least 10 points less often than for a reader with no taste", "${prominent.pct()} vs ${controlProminent.pct()}")
+        val points = (businessMargin * 100).toInt()
+        check(prominent <= controlProminent - businessMargin, "business posts reach the front page or Top stories at least $points points less often than for a reader with no taste", "${prominent.pct()} vs ${controlProminent.pct()}")
         val businessLeads = after.count { day -> day.items.any { it.kind == ItemKind.LEAD && it.topic == "business" } }
         check(businessLeads == 0, "no business post leads the paper", "$businessLeads leads")
 

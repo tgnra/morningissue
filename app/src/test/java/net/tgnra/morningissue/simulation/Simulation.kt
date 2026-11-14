@@ -10,6 +10,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import net.tgnra.morningissue.ai.InterestRater
+import net.tgnra.morningissue.ai.NanoModel
+import net.tgnra.morningissue.ai.NanoStatus
+import net.tgnra.morningissue.ai.TasteProfile
 import net.tgnra.morningissue.data.db.FeedEntity
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.repository.AffinityLearner
@@ -24,6 +28,7 @@ import net.tgnra.morningissue.edition.FakeSettings
 import net.tgnra.morningissue.edition.MutableClock
 import net.tgnra.morningissue.edition.RoomEditionPublisher
 import net.tgnra.morningissue.embedding.EmbeddingFixtures
+import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.engine.WithinFeedSignalKind
 import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.sync.DefaultFeedSyncer
@@ -45,6 +50,8 @@ class ItemRecord(
     /** The page the story is on, and its section's name on a section page. */
     val page: Int = 0,
     val section: String? = null,
+    /** The simulated model's stored rating of the post when the edition was built; null when unrated. */
+    val rating: Int? = null,
 ) {
     var opened = false
     var read = false
@@ -83,6 +90,8 @@ class SimulationResult(
     val wallMillis: Long,
     /** Where the wall time went, by phase; for the report. */
     val phaseMillis: Map<String, Long> = emptyMap(),
+    /** Run with the simulated on-device model ([Simulation.withModel]). */
+    val withModel: Boolean = false,
 ) {
     /** A digest of everything the first [dayCount] days produced, for the determinism check. */
     fun digest(dayCount: Int = days.size): String {
@@ -125,6 +134,15 @@ class SimulationResult(
  *   in, since every post first seen between two builds is new in the second; and freshness is
  *   measured from the publish time. Syncing is most of the simulation's cost.)
  *
+ * **The on-device model** ([withModel]). A simulated Gemini Nano ([SimulatedNano]) rates the next
+ * edition's shortlist through the production `InterestRater` when the persona opens the app
+ * (the only time AICore would serve it), and the builds use the stored ratings as in the app.
+ * The persona's morning visit comes after that morning's build, and this simulation syncs only
+ * at 17:00 and 05:00, so the morning pass finds almost nothing new: with the model the reader
+ * also glances at the stand at 21:00, which rates what the 17:00 sync brought. Posts first seen
+ * at 05:00 go into the edition unrated, as they would in the app for a reader who has not opened
+ * it since. Without [withModel] nothing is rated and N is 1 throughout.
+ *
  * W is not stored by the app. After each build the model is learned once more, from the same
  * evidence the build used (`AffinityLearner.evidence` with the new edition still pending, as
  * of the build's instant, `WithinFeedLearner.learn` as of the release time), and every item of
@@ -136,6 +154,7 @@ class Simulation(
     private val seed: Long = 1,
     private val days: Int = DAYS,
     private val feeds: List<FeedSpec> = SimulatedFeeds.all,
+    private val withModel: Boolean = false,
 ) {
     suspend fun run(context: Context): SimulationResult {
         val started = System.nanoTime()
@@ -160,7 +179,15 @@ class Simulation(
                     },
                 ),
             )
-            val publisher = RoomEditionPublisher(db, settings, clock, zone = { ZoneOffset.UTC })
+            val publisher = RoomEditionPublisher(
+                db,
+                settings,
+                clock,
+                zone = { ZoneOffset.UTC },
+                interestRatings = if (withModel) RoomEditionPublisher.InterestRatings.stored(db) { true } else RoomEditionPublisher.InterestRatings.None,
+            )
+            val nano = SimulatedNano(persona, schedule, seed)
+            val rater = InterestRater(db, nano, clock, shortlist = { publisher.shortlist(RankingConfig.Default.interestShortlist) }, isForeground = { true })
             val editions = RoomEditionRepository(db, publisher, clock)
             val articles = RoomArticleRepository(db, clock)
             val earlyBuild = EarlyBuild(
@@ -224,6 +251,7 @@ class Simulation(
                     trust = model.text?.trust
                     val rows = db.editionDao().getItems(editionId)
                     val traits = withinFeed.traitsOf(rows.map { it.item.articleId }, model)
+                    val ratings = db.interestDao().ratingsOf(rows.map { it.item.articleId })
                     for (row in rows) {
                         val weight = traits[row.item.articleId]?.let(model::weight)
                         val post = postOf(row.item.articleId)
@@ -238,6 +266,7 @@ class Simulation(
                             topic = persona.topic(post),
                             page = row.item.page,
                             section = row.item.section,
+                            rating = ratings[row.item.articleId]?.rating,
                         )
                     }
                 }
@@ -250,6 +279,11 @@ class Simulation(
                 val visitMinutes = reader.nextInt(120).toLong()
                 if (visit != Visit.NONE) {
                     clock.now = midnight.plus(Duration.ofHours(7)).plus(Duration.ofMinutes(visitMinutes))
+                    // The newsstand comes to the foreground: the model rates the next edition's shortlist.
+                    if (withModel) {
+                        nano.day = day
+                        rater.rate()
+                    }
                     val current = db.editionDao().getLatestReleased(clock.now)
                     if (current != null) {
                         editions.markEditionOpened(current.id)
@@ -308,16 +342,55 @@ class Simulation(
                     clock.now = midnight.plus(Duration.ofHours(hour))
                     syncer.syncAll()
                 }
+                // With the model, the reader also glances at the stand in the evening (the app in
+                // the foreground for a moment), and the model rates what the 17:00 sync brought.
+                if (withModel) {
+                    clock.now = midnight.plus(Duration.ofHours(21))
+                    nano.day = day
+                    rater.rate()
+                }
 
                 phases[3] += System.nanoTime() - mark
                 records += DayRecord(day, editionId, visit, items, affinity, slope, trust, newPosts)
             }
             val phaseMillis = mapOf("early build" to phases[0], "W snapshot" to phases[1], "reading" to phases[2], "later syncs" to phases[3], "of which signals upkeep" to upkeepNanos)
                 .mapValues { it.value / 1_000_000 }
-            return SimulationResult(persona, seed, records, (System.nanoTime() - started) / 1_000_000, phaseMillis)
+            return SimulationResult(persona, seed, records, (System.nanoTime() - started) / 1_000_000, phaseMillis, withModel)
         } finally {
             scope.cancel()
             db.close()
+        }
+    }
+
+    /**
+     * A stand-in for Gemini Nano that knows the persona's taste, imperfectly: it rates a post
+     * `1 + 4 × (chance the persona opens it)`, plus noise with a standard deviation of 0.75 of
+     * a rating, rounded and held to 1..5. It finds each post of the prompt by its title. It is
+     * not a model of Nano's quality, only a rater that is mostly right, to check that N does
+     * not break what the ranking already does.
+     */
+    private class SimulatedNano(private val persona: Persona, schedule: PostSchedule, private val seed: Long) : NanoModel {
+        var day = 0
+        private val byTitle: Map<String, SimPost> = schedule.posts.values.flatten().groupBy { TasteProfile.clean(it.title) }.mapValues { it.value.first() }
+
+        override suspend fun status() = NanoStatus.AVAILABLE
+        override suspend fun download() = true
+
+        override suspend fun generate(prompt: String): String {
+            val ratings = LINE.findAll(prompt).mapNotNull { match ->
+                val number = match.groupValues[1]
+                val rest = match.groupValues[2]
+                // The title is what comes before one of the " (" that opens the feed's name.
+                val post = Regex(" \\(").findAll(rest).map { rest.substring(0, it.range.first) }.firstNotNullOfOrNull { byTitle[it] } ?: return@mapNotNull null
+                val noise = Random(seed * 31 + post.guid.hashCode()).nextGaussian() * 0.75
+                val rating = Math.round(1 + 4 * persona.interest(day, post).open + noise).toInt().coerceIn(1, 5)
+                "\"$number\": $rating"
+            }
+            return ratings.joinToString(", ", "{", "}")
+        }
+
+        private companion object {
+            val LINE = Regex("(?m)^(\\d+)\\. (.*)$")
         }
     }
 

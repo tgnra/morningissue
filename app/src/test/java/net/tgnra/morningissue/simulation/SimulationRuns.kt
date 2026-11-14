@@ -29,6 +29,8 @@ object SimulationRuns {
         val byPersona: Map<String, SimulationResult>,
         val repeat: SimulationResult,
         val otherSeed: SimulationResult,
+        /** The Scotland reader again, with the simulated on-device model rating its shortlists. */
+        val withModel: SimulationResult,
         val wallMillis: Long,
     ) {
         operator fun get(name: String): SimulationResult = byPersona.getValue(name)
@@ -48,10 +50,12 @@ object SimulationRuns {
         val full = personas.map { async(pool) { Simulation(it).run(context) } }
         val repeat = async(pool) { Simulation(ScotlandReader(), days = REPEAT_DAYS).run(context) }
         val otherSeed = async(pool) { Simulation(ScotlandReader(), seed = 2, days = OTHER_SEED_DAYS).run(context) }
+        val withModel = async(pool) { Simulation(ScotlandReader(), withModel = true).run(context) }
         val results = full.awaitAll().associateBy { it.persona.name }
-        Runs(results, repeat.await(), otherSeed.await(), (System.nanoTime() - started) / 1_000_000).also {
+        Runs(results, repeat.await(), otherSeed.await(), withModel.await(), (System.nanoTime() - started) / 1_000_000).also {
             println("Ranking simulation: ${results.size} personas × ${Simulation.DAYS} days and the determinism runs in ${it.wallMillis / 1000.0} s")
             for (result in results.values) println("  ${result.persona.name}: ${result.wallMillis / 1000.0} s ${result.phaseMillis}")
+            println("  ${it.withModel.persona.name} with the model: ${it.withModel.wallMillis / 1000.0} s ${it.withModel.phaseMillis}")
         }
     }
 }
