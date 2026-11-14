@@ -68,7 +68,7 @@ EXPECTED_DIM = 256
 
 DEFAULT_OUT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "..", "..", "assets", "embedding", "potion-base-8m.bin",
+    "..", "..", "app", "src", "main", "assets", "embedding", "potion-base-8m.bin",
 )
 
 

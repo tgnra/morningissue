@@ -50,7 +50,8 @@ fun DebugSettingsSection() {
                     onClick = {
                         run {
                             val settings = container.settings.settings.first()
-                            SampleDataSeeder(container.database, container.clock, settings.resetTime).seed()
+                            SampleDataSeeder(container.core.database, container.clock, settings.resetTime).seed()
+                                .also { container.signals.run() }
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -62,7 +63,8 @@ fun DebugSettingsSection() {
                     onClick = {
                         run {
                             val settings = container.settings.settings.first()
-                            SampleDataSeeder(container.database, container.clock, settings.resetTime, newestDaysBehind = 1).seed()
+                            SampleDataSeeder(container.core.database, container.clock, settings.resetTime, newestDaysBehind = 1).seed()
+                                .also { container.signals.run() }
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -72,7 +74,7 @@ fun DebugSettingsSection() {
                     text = "Clear all data",
                     onClick = {
                         run {
-                            SampleDataSeeder(container.database, container.clock, java.time.LocalTime.MIDNIGHT).clear()
+                            SampleDataSeeder(container.core.database, container.clock, java.time.LocalTime.MIDNIGHT).clear()
                             "Cleared."
                         }
                     },

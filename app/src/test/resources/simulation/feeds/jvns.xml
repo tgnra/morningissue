@@ -1,0 +1,391 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:mi="https://morningissue.invalid/fixture">
+<channel>
+<title>Julia Evans</title>
+<link>https://jvns.ca/</link>
+<item>
+<title>Replacing the old battery on rechargeable bike lights</title>
+<link>https://jvns.ca/blog/2026/09/27/replacing-the-old-battery-on-rechargeable-bike-lights/</link>
+<pubDate>Sun, 27 Sep 2026 00:00:00 GMT</pubDate>
+<mi:words>1109</mi:words>
+<description><![CDATA[<p>Hello! Recently I needed bike lights for my bike. And I remembered that I
+already had rechargeable bike lights that I bought ten years ago, that I hadn’t
+tried in a long time. I tried to recharge them, but after fully charging them,
+they only worked for maybe 5 minutes before they turned off again.</p>
+<p>I don’t know much about electronics, but I’ve been curious about whether it’s
+possible to fix old electronics for a long time, and this seemed like the
+perfect repair project because I might just need to replace the battery.</p>
+<p>So I went to the local queer makerspace where I’m a member to use the soldering iron and try to do it! I don’t know much about electronics and this post does not contain any safety …</p>]]></description>
+</item>
+<item>
+<title>Some more things about Django I&#x27;ve been enjoying</title>
+<link>https://jvns.ca/blog/2026/07/21/more-nice-django-things/</link>
+<pubDate>Tue, 21 Jul 2026 00:00:00 GMT</pubDate>
+<mi:words>1616</mi:words>
+<description><![CDATA[<p>Hello! I’m on a funny journey right now where I’m trying to learn how to make
+websites in a sort of 2010 style, where I have an SQL database and render some
+HTML on the backend.</p>
+<p>It’s kind of an interesting journey because it doesn’t necessarily feel “easy”
+to me to make websites in this way: I never learned how to do it in the 2000s or
+2010s, and there’s a lot I need to learn.</p>
+<p>So here are some Django features that make building this kind of site feel
+more achievable than when I was trying and failing to use Go’s standard library
+or Flask. And I’ll talk about a couple of issues with Django I’ve run into.</p>
+<h3>why learn to make websites like it’s 2010?</h3>
+<p>Previously the toolkit …</p><pre><code>Events.objects.approved()
+  .for_tab(tab)
+  .with_festivals(tab_params.festival_slugs)
+  .is_free(tab_params.free)
+  .is_outdoors(tab_params.outdoors)</code></pre>]]></description>
+</item>
+<item>
+<title>Learning a few things about running SQLite</title>
+<link>https://jvns.ca/blog/2026/07/17/learning-about-running-sqlite/</link>
+<pubDate>Fri, 17 Jul 2026 00:00:00 GMT</pubDate>
+<mi:words>1001</mi:words>
+<description><![CDATA[<p>Hello! I’ve been working on a Django site recently, and I decided to use SQLite
+as the database.
+When I was getting started with using SQLite as database for a website I read a <a href="https://alldjango.com/articles/definitive-guide-to-using-django-sqlite-in-production">bunch</a>
+of blog posts about how it is totally fine to use SQLite in production for a
+small site and I think it <em>is</em> totally fine, but what I did not fully appreciate
+is that SQLite is still a database, databases are complicated, and I do not know
+a lot about operating databases.</p>
+<p>So here are a couple of small things I’ve been learning about running SQLite. This is the 4th website I’ve used SQLite for, and I think this one is harder because with the power of the Django ORM I’ve been making the database …</p><pre><code>sqlite3 /data/calendar.db "VACUUM INTO '/tmp/calendar.sqlite'"
+gzip /tmp/calendar.sqlite
+
+# Upload backup to S3
+# Sometimes the backup gets OOM killed and so it stays locked, do an unlock
+restic -r s3://s3.amazonaws.com/some_bucket/ unlock
+# Do the backup &amp; prune old backups
+restic -r s3://s3.amazonaws.com/some_bucket/ backup /tmp/calendar.sqlite.gz
+restic -r s3://s3.amazonaws.com/some_bucket/ snapshots
+restic -r s3://s3.amazonaws.com/some_bucket/ forget -l 1 -H 6 -d 2 -w 2 -m 2 -y 2
+restic -r s3://s3.amazonaws.com/some_bucket/ prune</code></pre>]]></description>
+</item>
+<item>
+<title>Moving away from Tailwind, and learning to structure my CSS</title>
+<link>https://jvns.ca/blog/2026/05/15/moving-away-from-tailwind--and-learning-to-structure-my-css-/</link>
+<pubDate>Fri, 15 May 2026 00:00:00 GMT</pubDate>
+<mi:words>2066</mi:words>
+<description><![CDATA[<p>Hello! 8 years ago, I <a href="https://jvns.ca/blog/2018/11/01/tailwind--write-css-without-the-css/">wrote excitedly about discovering Tailwind</a>.</p>
+<p>At that time I really had no idea how to structure my CSS code and given the
+choice between a pile of complete chaos and Tailwind, I was really happy to choose
+Tailwind. It helped me make a lot of tiny sites!</p>
+<p>I spent the last week or so migrating a couple of sites away from Tailwind and
+towards more semantic HTML + vanilla CSS, and it was SO fun and SO interesting,
+so here are some things I learned!</p>
+<p>As usual I’m not a full-time frontend developer and so all of my CSS learning
+has happened in fits and starts over many years.</p>
+<h3>it turns out Tailwind taught me a lot</h3>
+<p>When I started thinking about structuring CSS, …</p><pre><code>* { box-sizing: border-box; }</code></pre>]]></description>
+</item>
+<item>
+<title>Links to CSS colour palettes</title>
+<link>https://jvns.ca/blog/2026/05/04/css-colour-palettes/</link>
+<pubDate>Mon, 04 May 2026 00:00:00 GMT</pubDate>
+<mi:words>277</mi:words>
+<description><![CDATA[<p>A while back I decided to stop using Tailwind for new projects and to just write
+vanilla CSS instead.</p>
+<p>But one thing I missed about Tailwind was the <a href="https://v2.tailwindcss.com/docs/customizing-colors#color-palette-reference">colour palette</a> (<a href="https://gist.github.com/jvns/9e59b2cd1fe12601084ba78dded072fe">here as CSS</a>).
+If I wanted a light blue I could just use <code>blue-100</code> and if I didn’t like it
+maybe try <code>blue-200</code> or <code>blue-50</code>. I’m not very good with colours so it makes
+a big difference to me to have a reasonable colour palette that somebody who is
+better at colour than me has thought about.</p>
+<p>But I’m also a little tired of those Tailwind colours, so I asked on Mastodon today what other colour palettes were out there. And then a friend said they wanted links to those colour palettes, so here’s a blog post …</p>]]></description>
+</item>
+<item>
+<title>Testing Vue components in the browser</title>
+<link>https://jvns.ca/blog/2026/05/02/testing-vue-components-in-the-browser/</link>
+<pubDate>Sat, 02 May 2026 00:00:00 GMT</pubDate>
+<mi:words>1717</mi:words>
+<description><![CDATA[<p>Hello! One of my long term projects on here is
+<a href="https://jvns.ca/#javascript">figuring out how to write frontend Javascript without using Node</a>
+or any other server JS runtime.</p>
+<p>One issue I run into a lot in my frontend JS projects is that I don’t know how
+to write tests for them. I’ve tried to use Playwright in the past, but it felt
+slow and unwieldy to be starting these new browser processes all the time, and
+it involved some Node code to orchestrate the tests.</p>
+<p>The result is that I just don’t test my frontend code which doesn’t feel great. Usually I don’t update my projects much either so it doesn’t come up that much, but it would be nice to be able to make changes with more confidence! So a way …</p><pre><code>const components = {
+  'Feedback': FeedbackComponent,
+  ...
+}
+window._components = components;</code></pre>]]></description>
+</item>
+<item>
+<title>Examples for the tcpdump and dig man pages</title>
+<link>https://jvns.ca/blog/2026/03/10/examples-for-the-tcpdump-and-dig-man-pages/</link>
+<pubDate>Tue, 10 Mar 2026 00:00:00 GMT</pubDate>
+<mi:words>666</mi:words>
+<description><![CDATA[<p>Hello! My big takeaway from last month’s <a href="https://jvns.ca/blog/2026/02/18/man-pages/">musings about man pages</a>
+was that examples in man pages are really great, so I worked on adding (or
+improving) examples to two of my favourite tools’ man pages.</p>
+<p>Here they are:</p>
+<ul>
+<li>the <a href="https://bind9.readthedocs.io/en/stable/manpages.html#dig-dns-lookup-utility">dig man page (now with examples)</a></li>
+<li>the <a href="https://www.tcpdump.org/manpages/tcpdump.1.html#lbAF">tcpdump man page examples</a> (this one is an update to the previous examples)</li>
+</ul>
+<h3>the goal: include the most basic examples</h3>
+<p>The goal here was really just to give the absolute most basic examples of how to
+use the tool, for people who use tcpdump or dig infrequently (or have never used
+it before!) and don’t remember how it works.</p>
+<p>So far saying “hey, I want to write an examples section for beginners and infrequent users of this tools” has been working really well. …</p>]]></description>
+</item>
+<item>
+<title>Notes on clarifying man pages</title>
+<link>https://jvns.ca/blog/2026/02/18/man-pages/</link>
+<pubDate>Wed, 18 Feb 2026 00:00:00 GMT</pubDate>
+<mi:words>1555</mi:words>
+<description><![CDATA[<p>Hello! After <a href="https://jvns.ca/blog/2026/01/08/a-data-model-for-git/">spending some time working on the Git man pages</a> last year,
+I’ve been thinking a little more about what makes a good man page.</p>
+<p>I’ve spent a lot of time writing cheat sheets for tools (tcpdump, git, dig, etc)
+which have a man page as their primary documentation. This is because I often
+find the man pages hard to navigate to get the information I want.</p>
+<p>Lately I’ve wondering – could the man page <em>itself</em> have an amazing cheat sheet
+in it? What might make a man page easier to use?
+I’m still very early in thinking about this but I wanted to write down some quick notes.</p>
+<p>I <a href="https://social.jvns.ca/@b0rk/116092583707187579">asked some people on Mastodon</a>for their favourite man pages, and here are some examples of interesting things I …</p><pre><code>ls [-@ABCFGHILOPRSTUWabcdefghiklmnopqrstuvwxy1%,]
+
+grep [-abcdDEFGHhIiJLlMmnOopqRSsUVvwXxZz]</code></pre>]]></description>
+</item>
+<item>
+<title>Some notes on starting to use Django</title>
+<link>https://jvns.ca/blog/2026/01/27/some-notes-on-starting-to-use-django/</link>
+<pubDate>Tue, 27 Jan 2026 00:00:00 GMT</pubDate>
+<mi:words>1201</mi:words>
+<description><![CDATA[<p>Hello! One of my favourite things is starting to learn an
+Old Boring Technology that I’ve never tried before but that has been around for
+20+ years. It feels really good when every problem I’m ever going to have has
+been solved already 1000 times and I can just get stuff done easily.</p>
+<p>I’ve thought it would be cool to learn a popular web framework like
+Rails or Django or Laravel for a long time, but I’d never really managed to
+make it happen. But I started learning Django to make a website a few months
+back, I’ve been liking it so far, and here are a few quick notes!</p>
+<h3>less magic than Rails</h3>
+<p>I spent some time <a href="https://jvns.ca/blog/2020/11/09/day-1--a-little-rails-/">trying to learn Rails</a>in 2020, and while it was cool and …</p><pre><code>@admin.register(Zine)
+class ZineAdmin(admin.ModelAdmin):
+    list_display = ["name", "publication_date", "free", "slug", "image_preview"]
+    search_fields = ["name", "slug"]
+    readonly_fields = ["image_preview"]
+    ordering = ["-publication_date"]</code></pre>]]></description>
+</item>
+<item>
+<title>A data model for Git (and other docs updates)</title>
+<link>https://jvns.ca/blog/2026/01/08/a-data-model-for-git/</link>
+<pubDate>Thu, 08 Jan 2026 00:00:00 GMT</pubDate>
+<mi:words>1018</mi:words>
+<description><![CDATA[<p>Hello! This past fall, I decided to take some time to work on Git’s
+documentation. I’ve been thinking about working on open source docs for a long
+time – usually if I think the documentation for something could be improved,
+I’ll write a blog post or a zine or something. But this time I wondered: could I
+instead make a few improvements to the official documentation?</p>
+<p>So <a href="https://marieflanagan.com/">Marie</a> and I made a few changes to the Git
+documentation!</p>
+<h3>a data model for Git</h3>
+<p>After a while working on the documentation, we noticed that Git uses the terms “object”, “reference”, or “index” in its documentation a lot, but that it didn’t have a great explanation of what those terms mean or how they relate to other core concepts like “commit” and …</p>]]></description>
+</item>
+<item>
+<title>Notes on switching to Helix from vim</title>
+<link>https://jvns.ca/blog/2025/10/10/notes-on-switching-to-helix-from-vim/</link>
+<pubDate>Fri, 10 Oct 2025 00:00:00 GMT</pubDate>
+<mi:words>1175</mi:words>
+<description><![CDATA[<p>Hello! Earlier this summer I was talking to a friend about how much I
+<a href="https://jvns.ca/blog/2024/09/12/reasons-i--still--love-fish/">love using fish</a>, and
+how I love that I don’t have to configure it. They said that they feel the same
+way about the <a href="https://helix-editor.com/">helix</a> text editor, and so I decided
+to give it a try.</p>
+<p>I’ve been using it for 3 months now and here are a few notes.</p>
+<h3>why helix: language servers</h3>
+<p>I think what motivated me to try Helix is that I’ve been trying to get a working
+language server setup (so I can do things like “go to definition”) and getting
+a setup that feels good in Vim or Neovim just felt like too much work.</p>
+<p>After using Vim/Neovim for 20 years, I’ve tried both “build my own custom configuration from …</p><pre><code>thread 'main' panicked at helix-core/src/transaction.rs:499:9:
+Positions [(2959, AfterSticky), (2959, AfterSticky)] are out of range for changeset len 2945!
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace</code></pre>]]></description>
+</item>
+<item>
+<title>New zine: The Secret Rules of the Terminal</title>
+<link>https://jvns.ca/blog/2025/06/24/new-zine--the-secret-rules-of-the-terminal/</link>
+<pubDate>Thu, 26 Jun 2025 00:00:00 GMT</pubDate>
+<mi:words>1157</mi:words>
+<description><![CDATA[<p>Hello! After many months of writing deep dive blog posts about the terminal, on
+Tuesday I released a new zine called “The Secret Rules of the Terminal”!</p>
+<p>You can get it for $12 here:
+<a href="https://wizardzines.com/zines/terminal">https://wizardzines.com/zines/terminal</a>, or get
+an <a href="https://wizardzines.com/zines/all-the-zines/">15-pack of all my zines here</a>.</p>
+<p>Here’s the cover:</p>
+<div>
+<a href="https://wizardzines.com/zines/terminal">
+  <img src="https://jvns.ca/images/terminal-cover-small.jpg"/>
+  </a>
+</div>
+<h3>the table of contents</h3>
+<p>Here’s the table of contents:</p>
+<a href="https://wizardzines.com/zines/terminal/toc.png">
+  <img src="https://jvns.ca/images/terminal-toc-small.png"/>
+</a>
+<h3>why the terminal?</h3>
+<p>I’ve been using the terminal every day for 20 years but even though I’m very
+confident in the terminal, I’ve always had a bit of an uneasy feeling about it.
+Usually things work fine, but sometimes something goes wrong and it just feels
+like investigating it is impossible, or at least like it would open up a huge
+can of worms.</p>
+<p>So I started trying to write down a …</p>]]></description>
+</item>
+<item>
+<title>Using `make` to compile C programs (for non-C-programmers)</title>
+<link>https://jvns.ca/blog/2025/06/10/how-to-compile-a-c-program/</link>
+<pubDate>Tue, 10 Jun 2025 00:00:00 GMT</pubDate>
+<mi:words>2012</mi:words>
+<description><![CDATA[<p>I have never been a C programmer but every so often I need to compile a C/C++
+program from source. This has been kind of a struggle for me: for a
+long time, my approach was basically “install the dependencies, run <code>make</code>, if
+it doesn’t work, either try to find a binary someone has compiled or give up”.</p>
+<p>“Hope someone else has compiled it” worked pretty well when I was running Linux
+but since I’ve been using a Mac for the last couple of years I’ve been running
+into more situations where I have to actually compile programs myself.</p>
+<p>So let’s talk about what you might have to do to compile a C program! I’ll use a couple of examples of specific C programs I’ve compiled and talk about …</p><pre><code>sudo apt-get install build-essential</code></pre>]]></description>
+</item>
+<item>
+<title>Standards for ANSI escape codes</title>
+<link>https://jvns.ca/blog/2025/03/07/escape-code-standards/</link>
+<pubDate>Fri, 07 Mar 2025 00:00:00 GMT</pubDate>
+<mi:words>1691</mi:words>
+<description><![CDATA[<p>Hello! Today I want to talk about ANSI escape codes.</p>
+<p>For a long time I was vaguely aware of ANSI escape codes (“that’s how you make
+text red in the terminal and stuff”) but I had no real understanding of where they were
+supposed to be defined or whether or not there were standards for them. I just
+had a kind of vague “there be dragons” feeling around them. While learning
+about the terminal this year, I’ve learned that:</p>
+<ol>
+<li>ANSI escape codes are responsible for a lot of usability improvements
+in the terminal (did you know there’s a way to copy to your system clipboard
+when SSHed into a remote machine?? It’s an escape code called <a href="https://jvns.ca/til/vim-osc52/">OSC 52</a>!)</li>
+<li>They aren’t completely standardized, and because of that they don’t always …</li></ol><pre><code>for term in $(toe -a | awk '{print $1}')
+do
+  echo $term
+  infocmp -1 -T "$term" 2&gt;/dev/null | grep 'clear=' | sed 's/clear=//g;s/,//g'
+done</code></pre>]]></description>
+</item>
+<item>
+<title>How to add a directory to your PATH</title>
+<link>https://jvns.ca/blog/2025/02/13/how-to-add-a-directory-to-your-path/</link>
+<pubDate>Thu, 13 Feb 2025 12:27:56 GMT</pubDate>
+<mi:words>2061</mi:words>
+<description><![CDATA[<p>I was talking to a friend about how to add a directory to your PATH today. It’s
+something that feels “obvious” to me since I’ve been using the terminal for a
+long time, but when I searched for instructions for how to do it, I actually
+couldn’t find something that explained all of the steps – a lot of them just
+said “add this to <code>~/.bashrc</code>”, but what if you’re not using bash? What if your
+bash config is actually in a different file? And how are you supposed to figure
+out which directory to add anyway?</p>
+<p>So I wanted to try to write down some more complete directions and mention some
+of the gotchas I’ve run into over the years.</p>
+<p>Here’s a table of contents:</p>
+<ul>
+<li><a href="#step-1-what-shell-are-you-using">step 1: what …</a></li></ul><pre><code>ps -p $$ -o pid,comm=</code></pre>]]></description>
+</item>
+<item>
+<title>Some terminal frustrations</title>
+<link>https://jvns.ca/blog/2025/02/05/some-terminal-frustrations/</link>
+<pubDate>Wed, 05 Feb 2025 16:57:00 GMT</pubDate>
+<mi:words>1545</mi:words>
+<description><![CDATA[<p>A few weeks ago I ran a terminal survey (you can <a href="https://jvns.ca/terminal-survey/results-bsky.html">read the results here</a>) and at the end I asked:</p>
+<blockquote>
+<p>What’s the most frustrating thing about using the terminal for you?</p>
+</blockquote>
+<p>1600 people answered, and I decided to spend a few days categorizing all the
+responses. Along the way I learned that classifying qualitative data is not
+easy but I gave it my best shot. I ended up building a custom
+<a href="https://github.com/jvns/classificator">tool</a> to make it faster to categorize
+everything.</p>
+<p>As with all of my surveys the methodology isn’t particularly scientific. I just
+posted the survey to Mastodon and Twitter, ran it for a couple of days, and got
+answers from whoever happened to see it and felt like responding.</p>
+<p>Here are the top categories of frustrations!</p>
+<p>I think …</p>]]></description>
+</item>
+<item>
+<title>What&#x27;s involved in getting a &quot;modern&quot; terminal setup?</title>
+<link>https://jvns.ca/blog/2025/01/11/getting-a-modern-terminal-setup/</link>
+<pubDate>Sat, 11 Jan 2025 09:46:01 GMT</pubDate>
+<mi:words>2170</mi:words>
+<description><![CDATA[<p>Hello! Recently I ran a terminal survey and I asked people what frustrated
+them. One person commented:</p>
+<blockquote>
+<p>There are so many pieces to having a modern terminal experience. I wish it
+all came out of the box.</p>
+</blockquote>
+<p>My immediate reaction was “oh, getting a modern terminal experience isn’t that
+hard, you just need to….”, but the more I thought about it, the longer the
+“you just need to…” list got, and I kept thinking about more and more
+caveats.</p>
+<p>So I thought I would write down some notes about what it means to me personally
+to have a “modern” terminal experience and what I think can make it hard for
+people to get there.</p>
+<h3>what is a “modern terminal experience”?</h3>
+<p>Here are a few things that are important to me, …</p>]]></description>
+</item>
+<item>
+<title>&quot;Rules&quot; that terminal programs follow</title>
+<link>https://jvns.ca/blog/2024/11/26/terminal-rules/</link>
+<pubDate>Thu, 12 Dec 2024 09:28:22 GMT</pubDate>
+<mi:words>1958</mi:words>
+<description><![CDATA[<p>Recently I’ve been thinking about how everything that happens in the terminal
+is some combination of:</p>
+<ol>
+<li>Your <strong>operating system</strong>’s job</li>
+<li>Your <strong>shell</strong>’s job</li>
+<li>Your <strong>terminal emulator</strong>’s job</li>
+<li>The job of <strong>whatever program you happen to be running</strong> (like <code>top</code> or <code>vim</code> or <code>cat</code>)</li>
+</ol>
+<p>The first three (your operating system, shell, and terminal emulator) are all kind of
+known quantities – if you’re using bash in GNOME Terminal on Linux, you can
+more or less reason about how how all of those things interact, and some of
+their behaviour is standardized by POSIX.</p>
+<p>But the fourth one (“whatever program you happen to be running”) feels like it
+could do ANYTHING. How are you supposed to know how a program is going to
+behave?</p>
+<p>This post is kind …</p><pre><code>unbuffer rg blah |  less -R</code></pre>]]></description>
+</item>
+<item>
+<title>Why pipes sometimes get &quot;stuck&quot;: buffering</title>
+<link>https://jvns.ca/blog/2024/11/29/why-pipes-get-stuck-buffering/</link>
+<pubDate>Fri, 29 Nov 2024 08:23:31 GMT</pubDate>
+<mi:words>1920</mi:words>
+<description><![CDATA[<p>Here’s a niche terminal problem that has bothered me for years but that I never
+really understood until a few weeks ago. Let’s say you’re running this command
+to watch for some specific output in a log file:</p>
+<pre><code>tail -f /some/log/file | grep thing1 | grep thing2
+</code></pre>
+<p>If log lines are being added to the file relatively slowly, the result I’d see
+is… nothing! It doesn’t matter if there were matches in the log file or not,
+there just wouldn’t be any output.</p>
+<p>I internalized this as “uh, I guess pipes just get stuck sometimes and don’t
+show me the output, that’s weird”, and I’d handle it by just
+running <code>grep thing1 /some/log/file | grep thing2</code> instead, which would work.</p>
+<p>So as I’ve been doing a terminal deep dive over the last few months I was really excited to …</p>]]></description>
+</item>
+<item>
+<title>Importing a frontend Javascript library without a build system</title>
+<link>https://jvns.ca/blog/2024/11/18/how-to-import-a-javascript-library/</link>
+<pubDate>Mon, 18 Nov 2024 09:35:42 GMT</pubDate>
+<mi:words>2837</mi:words>
+<description><![CDATA[<p>I like writing Javascript <a href="https://jvns.ca/blog/2023/02/16/writing-javascript-without-a-build-system/">without a build system</a>
+and for the millionth time yesterday I ran into a problem where I needed to
+figure out how to import a Javascript library in my code without using a build
+system, and it took FOREVER to figure out how to import it because the
+library’s setup instructions assume that you’re using a build system.</p>
+<p>Luckily at this point I’ve mostly learned how to navigate this situation and
+either successfully use the library or decide it’s too difficult and switch to
+a different library, so here’s the guide I wish I had to importing Javascript
+libraries years ago.</p>
+<p>I’m only going to talk about using Javacript libraries on the frontend, and
+only about how to use them in a no-build-system setup.</p>
+<p>In this …</p><pre><code>$ cd /tmp/whatever
+$ npm install chart.js
+$ cd node_modules/chart.js/dist
+$ ls *.*js
+chart.cjs  chart.js  chart.umd.js  helpers.cjs  helpers.js</code></pre>]]></description>
+</item>
+</channel>
+</rss>

@@ -11,7 +11,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.tgnra.morningissue.appContainer
-import net.tgnra.morningissue.client.LegacyMigration
 import net.tgnra.morningissue.data.db.ArticleEntity
 import net.tgnra.morningissue.data.db.FeedEntity
 import net.tgnra.morningissue.model.CadenceTier
@@ -27,10 +26,12 @@ import net.tgnra.morningissue.model.SliderStep
  * --ei posts 1000`. The result data says what was stored. Guarded by the DUMP permission, which
  * the shell holds and other apps do not.
  *
- * The phone is a client of a server now, which builds the editions: the seed also stands in
- * an account (at an address that does not exist), so the app gets past the login screen and
- * reads the seeded cache. `--ez print true` is still accepted, and answers "printed nothing":
- * there is no build on the phone to run.
+ * With `--ez print true` it stores nothing and instead **runs that build**:
+ * `EditionPublisher.ensureCurrentEdition()`, the build from stored posts that Print now and a
+ * late background run perform between their sync and their prefetch. Opening the app no
+ * longer builds an edition, and the seeded feeds do not exist on the network, so the
+ * benchmark asks for the build this way instead of pressing Print now. The result data is
+ * "printed edition 12", or "printed nothing".
  */
 class BenchmarkSeedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -42,15 +43,15 @@ class BenchmarkSeedReceiver : BroadcastReceiver() {
         container.appScope.launch {
             try {
                 if (print) {
+                    val editionId = container.editionPublisher.ensureCurrentEdition()
                     pending.resultCode = Activity.RESULT_OK
-                    pending.resultData = "printed nothing"
+                    pending.resultData = if (editionId != null) "printed edition $editionId" else "printed nothing"
                     return@launch
                 }
                 seed(context, posts, feeds)
-                val auth = container.auth
-                auth.loggedIn("https://benchmark.invalid", "benchmark", "benchmark", "benchmark", mustChangePassword = false)
-                auth.setLegacyMigration(LegacyMigration.DONE)
-                auth.setLastSyncAt(container.clock.instant())
+                // As after a sync: every post has its traits and its embedding before the app
+                // opens, so the build that is measured reads them as a real one does.
+                container.signals.run()
                 container.settings.setOnboardingDone(true)
                 pending.resultCode = Activity.RESULT_OK
                 pending.resultData = "seeded $posts posts in $feeds feeds"
@@ -65,7 +66,7 @@ class BenchmarkSeedReceiver : BroadcastReceiver() {
 
     private suspend fun seed(context: Context, posts: Int, feeds: Int) = withContext(Dispatchers.IO) {
         val container = context.appContainer
-        val database = container.database
+        val database = container.core.database
         val now = container.clock.instant()
         val random = Random(SEED)
         database.clearAllTables()

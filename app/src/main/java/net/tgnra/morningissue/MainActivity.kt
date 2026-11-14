@@ -19,7 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.tgnra.morningissue.model.AppSettings
 import net.tgnra.morningissue.ui.LocalAppContainer
-import net.tgnra.morningissue.ui.account.AccountGate
 import net.tgnra.morningissue.ui.layout.LocalPaperLayoutSpec
 import net.tgnra.morningissue.ui.layout.PaperLayoutSpec
 import net.tgnra.morningissue.ui.navigation.MorningIssueNavHost
@@ -57,12 +56,9 @@ class MainActivity : ComponentActivity() {
                     }
                     Box(Modifier.fillMaxSize().background(MorningIssueTheme.colors.paper)) {
                         if (stored != null) {
-                            // The account, its password and the upload of an earlier library come first.
-                            AccountGate {
-                                // Decided once: finishing onboarding navigates, it does not restart the graph.
-                                val showOnboarding = remember { !settings.onboardingDone }
-                                MorningIssueNavHost(showOnboarding = showOnboarding)
-                            }
+                            // Decided once: finishing onboarding navigates, it does not restart the graph.
+                            val showOnboarding = remember { !settings.onboardingDone }
+                            MorningIssueNavHost(showOnboarding = showOnboarding)
                         }
                     }
                 }

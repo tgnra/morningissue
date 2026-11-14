@@ -1,5 +1,6 @@
-# Runs the unit tests (the shared :core module and the app) on every push and pull
-# request. The test reports are kept as workflow artifacts when a run fails.
+# Runs the unit tests, the 180-day ranking simulation among them, on every push and pull request.
+# The simulation's per-persona reports (how affinity and W moved) and the test reports are kept
+# as workflow artifacts, so a failing ranking check can be diagnosed from the run's page.
 name: Tests
 
 on:
@@ -42,14 +43,20 @@ jobs:
           "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
 
       - name: Run unit tests
-        run: ./gradlew :core:test :app:testDebugUnitTest
+        run: ./gradlew testDebugUnitTest -PsimulationReport
+
+      - name: Upload the ranking simulation reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ranking-simulation-reports
+          path: app/build/reports/simulation/
+          if-no-files-found: ignore
 
       - name: Upload the test reports
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: unit-test-reports
-          path: |
-            core/build/reports/tests/test/
-            app/build/reports/tests/testDebugUnitTest/
+          path: app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: ignore

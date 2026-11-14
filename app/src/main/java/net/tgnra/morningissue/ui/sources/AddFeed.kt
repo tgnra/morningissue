@@ -40,12 +40,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.tgnra.morningissue.AppContainer
 import net.tgnra.morningissue.R
-import net.tgnra.morningissue.api.FeedCandidateDto
-import net.tgnra.morningissue.api.client.ApiException
-import net.tgnra.morningissue.client.FeedSearch
 import net.tgnra.morningissue.model.AddFeedResult
 import net.tgnra.morningissue.model.FeedUrls
 import net.tgnra.morningissue.model.NewFeed
+import net.tgnra.morningissue.sync.DiscoveredFeed
+import net.tgnra.morningissue.sync.DiscoveryResult
 import net.tgnra.morningissue.ui.LocalAppContainer
 import net.tgnra.morningissue.ui.components.HairlineRule
 import net.tgnra.morningissue.ui.components.NoticeLine
@@ -60,7 +59,7 @@ sealed interface AddFeedState {
     data object Searching : AddFeedState
 
     /** The address offers several feeds; the user picks. */
-    data class Choose(val feeds: List<FeedCandidateDto>) : AddFeedState
+    data class Choose(val feeds: List<DiscoveredFeed>) : AddFeedState
     data class Failed(val message: String) : AddFeedState
     data class Added(val message: String) : AddFeedState
 }
@@ -98,15 +97,15 @@ class AddFeedFlow(
         if (isBusy) return
         state = AddFeedState.Searching
         job = scope.launch {
-            state = when (val result = container.feedFinder.discover(address)) {
-                is FeedSearch.Found -> if (result.feeds.size == 1) subscribe(result.feeds.first()) else AddFeedState.Choose(result.feeds)
-                FeedSearch.NoFeed -> AddFeedState.Failed(resources.getString(R.string.add_feed_none))
-                is FeedSearch.Failed -> AddFeedState.Failed(resources.getString(R.string.add_feed_failed, result.message))
+            state = when (val result = container.feedDiscovery.discover(address)) {
+                is DiscoveryResult.Found -> if (result.feeds.size == 1) subscribe(result.feeds.first()) else AddFeedState.Choose(result.feeds)
+                DiscoveryResult.NoFeed -> AddFeedState.Failed(resources.getString(R.string.add_feed_none))
+                is DiscoveryResult.Failed -> AddFeedState.Failed(resources.getString(R.string.add_feed_failed, result.message))
             }
         }
     }
 
-    fun choose(feed: FeedCandidateDto) {
+    fun choose(feed: DiscoveredFeed) {
         if (isBusy) return
         state = AddFeedState.Searching
         job = scope.launch { state = subscribe(feed) }
@@ -118,18 +117,14 @@ class AddFeedFlow(
         state = AddFeedState.Idle
     }
 
-    private suspend fun subscribe(feed: FeedCandidateDto): AddFeedState {
+    private suspend fun subscribe(feed: DiscoveredFeed): AddFeedState {
         val name = feed.title?.takeIf { it.isNotBlank() } ?: FeedUrls.hostOf(feed.url)
-        val added = try {
-            container.feeds.addFeed(NewFeed(url = feed.url, title = feed.title, siteUrl = feed.siteUrl, iconUrl = feed.iconUrl))
-        } catch (e: ApiException) {
-            return AddFeedState.Failed(resources.getString(R.string.add_feed_failed, e.message.orEmpty()))
-        }
+        val added = container.feeds.addFeed(NewFeed(url = feed.url, title = feed.title, siteUrl = feed.siteUrl, iconUrl = feed.iconUrl))
         return when (added) {
             is AddFeedResult.AlreadySubscribed -> AddFeedState.Failed(resources.getString(R.string.add_feed_already, name))
             is AddFeedResult.Added -> {
-                // Outlives the dialog: the server has fetched the feed; the cache catches up.
-                if (syncAfterAdd) container.appScope.launch { container.serverSync.sync("feed added") }
+                // Outlives the dialog: the posts are for the next edition either way.
+                if (syncAfterAdd) container.appScope.launch { container.feedSyncer.syncFeed(added.feedId) }
                 input = ""
                 AddFeedState.Added(resources.getString(R.string.add_feed_added, name))
             }
@@ -247,11 +242,11 @@ class OpmlHolder : ViewModel() {
 /**
  * OPML import and export through the Storage Access Framework: the user picks the file, so no
  * storage permission is involved. [onResult] gets a line such as "Added 38, skipped 4".
- * The server imports and fetches the feeds; the phone syncs afterwards. The work survives rotation (see
+ * [syncAfterImport] fetches the new feeds afterwards. The work survives rotation (see
  * [OpmlHolder]); its outcome is delivered to whichever instance of the screen is showing.
  */
 @Composable
-fun rememberOpmlActions(onResult: (message: String, isError: Boolean) -> Unit): OpmlActions {
+fun rememberOpmlActions(syncAfterImport: Boolean, onResult: (message: String, isError: Boolean) -> Unit): OpmlActions {
     val container = LocalAppContainer.current
     // The application's context and resources: the work outlives any one activity instance.
     val appContext = LocalContext.current.applicationContext
@@ -271,8 +266,8 @@ fun rememberOpmlActions(onResult: (message: String, isError: Boolean) -> Unit): 
         if (uri == null) return@rememberLauncherForActivityResult
         holder.run(failure = resources.getString(R.string.opml_import_failed)) {
             val stream = appContext.contentResolver.openInputStream(uri) ?: throw IOException("No stream for $uri")
-            // The server imports, then the phone syncs the new subscriptions.
-            val result = stream.use { container.opml.importFrom(it) }
+            val result = stream.use { container.opmlTransfer.importFrom(it) }
+            if (syncAfterImport && result.added > 0) container.appScope.launch { container.feedSyncer.syncAll() }
             resources.getString(R.string.opml_import_result, result.added, result.skipped)
         }
     }
@@ -280,7 +275,7 @@ fun rememberOpmlActions(onResult: (message: String, isError: Boolean) -> Unit): 
         if (uri == null) return@rememberLauncherForActivityResult
         holder.run(failure = resources.getString(R.string.opml_export_failed)) {
             val stream = appContext.contentResolver.openOutputStream(uri) ?: throw IOException("No stream for $uri")
-            val count = stream.use { container.opml.exportTo(it) }
+            val count = stream.use { container.opmlTransfer.exportTo(it) }
             resources.getQuantityString(R.plurals.opml_exported, count, count)
         }
     }

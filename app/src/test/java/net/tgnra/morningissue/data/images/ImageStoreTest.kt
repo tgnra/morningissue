@@ -12,6 +12,7 @@ import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.db.T0
 import net.tgnra.morningissue.data.db.article
 import net.tgnra.morningissue.data.db.feed
+import net.tgnra.morningissue.data.repository.RoomFeedRepository
 import net.tgnra.morningissue.edition.MutableClock
 import net.tgnra.morningissue.model.ContentBlock
 import net.tgnra.morningissue.model.ContentBlocks
@@ -261,9 +262,7 @@ class ImageStoreTest {
         store.storeForArticles(listOf(a, b))
         assertEquals(3, storedFiles().size)
 
-        // What ServerFeedRepository.removeFeed does once the server has removed it.
-        store.deleteForFeed(feedId)
-        db.feedDao().delete(feedId)
+        RoomFeedRepository(db, clock, images = store).removeFeed(feedId)
 
         assertEquals(listOf(files.nameFor(stays)), storedFiles().map { it.name })
         assertEquals(1, db.storedImageDao().count())

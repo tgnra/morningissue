@@ -51,7 +51,7 @@ jobs:
           echo "code=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Run unit tests
-        run: ./gradlew :core:test :app:testDebugUnitTest
+        run: ./gradlew testDebugUnitTest
 
       - name: Decode the keystore
         env:
