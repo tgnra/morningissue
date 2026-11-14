@@ -49,6 +49,7 @@ import net.tgnra.morningissue.server.feeds.signals.EmbeddingBackfill
 import net.tgnra.morningissue.server.feeds.signals.SignalsUpkeep
 import net.tgnra.morningissue.server.feeds.signals.TraitsBackfill
 import net.tgnra.morningissue.server.http.ServerServices
+import net.tgnra.morningissue.server.importer.ArchiveExporter
 import net.tgnra.morningissue.server.importer.ArchiveImporter
 import net.tgnra.morningissue.server.importer.ImportServiceImpl
 import net.tgnra.morningissue.server.sync.Relearner
@@ -188,6 +189,7 @@ class ServerContainer(
         sync = SyncServiceImpl(database, bundles, clock, relearn = { userId -> relearner.schedule(userId) }, fullText = fullText, scope = scope),
         settings = SettingsServiceImpl(database, settingsStore, clock),
         imports = imports,
+        exports = ArchiveExporter(database, settingsStore, clock),
         koboImages = koboImages,
     )
 

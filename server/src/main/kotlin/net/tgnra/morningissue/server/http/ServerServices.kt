@@ -9,6 +9,7 @@ import net.tgnra.morningissue.server.service.AuthService
 import net.tgnra.morningissue.server.service.DeviceService
 import net.tgnra.morningissue.server.service.DiscoveryService
 import net.tgnra.morningissue.server.service.EditionService
+import net.tgnra.morningissue.server.service.ExportService
 import net.tgnra.morningissue.server.service.FeedService
 import net.tgnra.morningissue.server.service.ImportService
 import net.tgnra.morningissue.server.service.JobService
@@ -35,6 +36,7 @@ data class ServerServices(
     val sync: SyncService = unimplemented(),
     val settings: SettingsService = unimplemented(),
     val imports: ImportService = unimplemented(),
+    val exports: ExportService = unimplemented(),
     val koboImages: KoboImageService = unimplemented(),
 )
 

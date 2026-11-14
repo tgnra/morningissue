@@ -171,6 +171,55 @@ morningissue-server import sam morning-issue-archive.zip           # an empty ac
 morningissue-server import --merge sam morning-issue-archive.zip   # merge into one in use
 ```
 
+## Moving back to the phone app
+
+A reader's library can be written back out as an archive that the phone app (the version that
+works on its own, without a server) reads with Settings → Archive → Import a file. It is the same
+archive format the app exports, so nothing on the phone needs changing.
+
+On the server, with the server running or stopped:
+
+```sh
+morningissue-server export sam sam-library.zip
+# Wrote 42 feeds, 9120 posts and 210 editions to sam-library.zip
+```
+
+Or a reader fetches their own, logged in like the app (the device id is any UUID; it shows up in
+the account's device list and can be removed afterwards):
+
+```sh
+TOKEN=$(curl -s https://news.example.org/api/v1/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"sam","password":"…","device":{"id":"3f0c…","name":"Export"}}' | jq -r .token)
+curl -fH "Authorization: Bearer $TOKEN" -o sam-library.zip https://news.example.org/api/v1/export
+```
+
+`GET /api/v1/export` answers the caller's own library only, as `application/zip` with
+`Content-Disposition: attachment`. The file is written to `imports/` first and sent once complete,
+so a large library takes a moment before the download starts; give a reverse proxy a generous read
+timeout for it.
+
+What the archive holds, per reader:
+
+- **Feeds**: every subscription, under the name the reader gave it (else the feed's title), with
+  its tags, slider, mute and when it was added. Feeds only looked into from discovery come as
+  discovered. A feed the reader holds saved or Liked posts of without subscribing comes as
+  discovered too, so those posts are not lost.
+- **Posts**: every post of those feeds the server holds, plus any other post the reader engaged
+  with or an edition of theirs printed, with its stored text (feed or fetched), categories and
+  enclosure kind, and the reader's opens, reading progress, reads, Saves and Likes. A post's
+  first-seen time is when this reader first saw it (the later of the server's and their
+  subscription's).
+- **Editions**: every released edition with its stories, their kinds, scores, sections and
+  "Why is this here?" reasons, opened and finished times, and page views.
+- **Settings** (`settings.json`): release times, edition length, Evening edition and time zone,
+  when the reader has changed any.
+
+Left out, because the archive has no place for them: learned affinities (the phone relearns them
+from the imported editions and engagement), feed health flags, notification choices, discovery
+verdicts, devices and Kobo pairings. The phone app's importer also ignores mutes, page views and
+`settings.json`, so after restoring, set the release times and any mutes again on the phone; they
+are in the file for a server-to-server move (`import` on another server reads them).
+
 ## Kobos
 
 A Kobo pairs through the phone: the Kobo shows a QR code, the phone scans it and sends it to the
@@ -235,7 +284,7 @@ morningissue.db (+ -wal, -shm)   every account's feeds, posts, editions and devi
 initial-passwords/               generated passwords not yet changed
 cache/catalogue.db               the discovery catalogue, unpacked
 kobo-images/                     pictures prepared for Kobos (an LRU cache)
-imports/                         archives being imported
+imports/                         archives being imported, and exports being written
 tmp/                             temporary files, including the SQLite native library (on NixOS the service uses its private /tmp instead)
 ```
 
@@ -267,4 +316,5 @@ A database restored from an older backup, or a fresh one, tells phones and Kobos
 morningissue-server [--config <file>] serve                               run the server (the default)
 morningissue-server [--config <file>] reset-password <user>               new generated password, phones signed out
 morningissue-server [--config <file>] import [--merge] <user> <file.zip>  import an app archive
+morningissue-server [--config <file>] export <user> <file.zip>            write a reader's library for the phone app
 ```

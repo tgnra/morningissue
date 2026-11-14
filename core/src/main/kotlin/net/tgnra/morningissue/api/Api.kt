@@ -139,8 +139,9 @@ object ApiPaths {
     const val KOBO_IMAGES = "/kobo/images"
     const val KOBO_CONFIG = "/kobo/config.json"
 
-    // 4.9 Legacy import
+    // 4.9 Legacy import, and the export back to the phone app
     const val IMPORT = "/import"
+    const val EXPORT = "/export"
 
     /** The path parameter in the templates above. */
     const val ID = "id"

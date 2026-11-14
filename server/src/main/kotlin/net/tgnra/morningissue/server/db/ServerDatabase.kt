@@ -69,6 +69,7 @@ abstract class ServerDatabase : RoomDatabase() {
     abstract fun learningDao(): LearningDao
     abstract fun importDao(): ImportDao
     abstract fun userStateDao(): UserStateDao
+    abstract fun exportDao(): ExportDao
 
     companion object {
         const val FILE_NAME = "morningissue.db"

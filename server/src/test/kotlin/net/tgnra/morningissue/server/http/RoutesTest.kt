@@ -143,6 +143,7 @@ class RoutesTest {
         Endpoint(HttpMethod.Post, ApiPaths.feedHealthRetry(3), Access.PHONE),
         Endpoint(HttpMethod.Post, ApiPaths.OPML, Access.PHONE, "<opml/>", ok = HttpStatusCode.Accepted),
         Endpoint(HttpMethod.Get, ApiPaths.OPML, Access.PHONE),
+        Endpoint(HttpMethod.Get, ApiPaths.EXPORT, Access.PHONE),
         Endpoint(HttpMethod.Get, ApiPaths.article(7), Access.PHONE),
         Endpoint(HttpMethod.Post, ApiPaths.articleFullText(7), Access.PHONE),
         Endpoint(HttpMethod.Get, ApiPaths.ARTICLES + "?shelf=saved", Access.PHONE),
@@ -358,6 +359,24 @@ class RoutesTest {
         assertEquals("text/x-opml", out.headers[HttpHeaders.ContentType]!!.substringBefore(';'))
         assertTrue(out.headers[HttpHeaders.ContentDisposition]!!.contains("attachment"))
         assertEquals("<opml version=\"2.0\"/>", out.bodyAsText())
+    }
+
+    @Test
+    fun theExportIsTheCallersArchiveAsAnAttachment() = api {
+        val r = client.call(HttpMethod.Get, ApiPaths.EXPORT)
+        assertEquals(HttpStatusCode.OK, r.status)
+        assertEquals("application/zip", r.headers[HttpHeaders.ContentType])
+        val disposition = r.headers[HttpHeaders.ContentDisposition]!!
+        assertTrue(disposition, disposition.startsWith("attachment") && disposition.contains(EXPORT_FILE_NAME))
+        ZipInputStream(ByteArrayInputStream(r.bodyAsBytes())).use { assertEquals("manifest.json", it.nextEntry!!.name) }
+        assertTrue(fakes.calls.contains("export(1)"))
+        // The file is written aside first and removed once sent.
+        assertTrue(importsDir.listFiles().orEmpty().none { it.name.startsWith("export-") })
+
+        // A failure answers an error, not a cut-off zip, and leaves nothing behind.
+        fakes.exportFailure = java.io.IOException("disk full")
+        assertEquals(HttpStatusCode.InternalServerError, client.call(HttpMethod.Get, ApiPaths.EXPORT).status)
+        assertTrue(importsDir.listFiles().orEmpty().none { it.name.startsWith("export-") })
     }
 
     @Test

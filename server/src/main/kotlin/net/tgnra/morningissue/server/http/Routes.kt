@@ -77,6 +77,7 @@ fun Application.installApi(services: ServerServices, options: HttpOptions) {
             discoveryRoutes(services)
             deviceRoutes(services)
             importRoutes(services, options)
+            exportRoutes(services)
         }
     }
 }

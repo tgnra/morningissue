@@ -4,8 +4,11 @@ import io.ktor.server.application.Application
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import java.io.File
+import java.io.IOException
 import java.io.PrintStream
 import java.lang.management.ManagementFactory
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.UUID
 import kotlin.system.exitProcess
 import kotlinx.coroutines.delay
@@ -30,6 +33,7 @@ import org.slf4j.LoggerFactory
  * morningissue-server [--config <file>] serve
  * morningissue-server [--config <file>] reset-password <user>
  * morningissue-server [--config <file>] import [--merge] <user> <file.zip>
+ * morningissue-server [--config <file>] export <user> <file.zip>
  * ```
  *
  * The services are built by [ServerContainer].
@@ -106,6 +110,10 @@ class Cli(
                 val positional = rest.drop(1).filter { it != "--merge" }
                 if (positional.size != 2) usage("import needs a user name and an archive") else import(config, positional[0], File(positional[1]), merge)
             }
+            "export" -> {
+                val positional = rest.drop(1)
+                if (positional.size != 2) usage("export needs a user name and a file to write") else export(config, positional[0], File(positional[1]))
+            }
             else -> usage("Unknown command \"$command\"")
         }
     }
@@ -119,6 +127,7 @@ class Cli(
               serve                               run the server (the default)
               reset-password <user>               give a user a new generated password and sign out their phones
               import [--merge] <user> <file.zip>  import an archive exported by the app (into an empty account unless --merge)
+              export <user> <file.zip>            write a user's library as an archive the phone app can restore
             The config file is --config, else ${'$'}${ConfigLoader.ENV_CONFIG}, else ${ConfigLoader.DEFAULT_PATH} (optional).
             """.trimIndent(),
         )
@@ -214,6 +223,39 @@ class Cli(
                     copy.delete()
                     err.println("Import is not available in this build: ${e.message}")
                     1
+                }
+            }
+        }
+    }
+
+    /** Writes [username]'s archive to [target], through a `.part` file so a failure leaves nothing half-written. */
+    private fun export(config: ServerConfig, username: String, target: File): Int {
+        if (target.isDirectory) {
+            err.println("${target.path} is a directory; give the archive's file name")
+            return 1
+        }
+        prepareDataDir(config)
+        return containerFactory(config).use { container ->
+            runBlocking {
+                val user = container.database.accountDao().userByName(username)
+                if (user == null) {
+                    err.println("No user \"$username\"")
+                    return@runBlocking 1
+                }
+                val part = File(target.absoluteFile.parentFile, "${target.name}.part")
+                try {
+                    val report = part.outputStream().use { stream -> container.services.exports.export(user.id, stream) }
+                    Files.move(part.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                    out.println("Wrote ${report.feeds} feeds, ${report.posts} posts and ${report.editions} editions to ${target.path}")
+                    0
+                } catch (e: IOException) {
+                    err.println("Could not write ${target.path}: ${e.message}")
+                    1
+                } catch (e: NotImplementedError) {
+                    err.println("Export is not available in this build: ${e.message}")
+                    1
+                } finally {
+                    part.delete()
                 }
             }
         }

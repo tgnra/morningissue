@@ -87,6 +87,8 @@ import net.tgnra.morningissue.server.service.AuthService
 import net.tgnra.morningissue.server.service.DeviceService
 import net.tgnra.morningissue.server.service.DiscoveryService
 import net.tgnra.morningissue.server.service.EditionService
+import net.tgnra.morningissue.server.service.ExportReport
+import net.tgnra.morningissue.server.service.ExportService
 import net.tgnra.morningissue.server.service.FeedService
 import net.tgnra.morningissue.server.service.ImportService
 import net.tgnra.morningissue.server.service.JobProgress
@@ -128,7 +130,7 @@ class FakeServices {
     fun services() = ServerServices(
         auth = auth, devices = devices, feeds = feeds, articles = articles, search = search,
         discovery = discovery, editions = editions, stand = stand, jobs = jobs, sync = sync,
-        settings = settings, imports = imports, koboImages = koboImages,
+        settings = settings, imports = imports, exports = exports, koboImages = koboImages,
     )
 
     val feed = FeedDto(
@@ -372,6 +374,22 @@ class FakeServices {
             importStarted = archive
             if (mode == ImportMode.REPLACE) throw ApiFailure(ApiError.CONFLICT, "has data")
             return importAnswer
+        }
+    }
+
+    /** When set, the export fails with it before writing anything. */
+    var exportFailure: Exception? = null
+
+    val exports = object : ExportService {
+        override suspend fun export(userId: Long, output: OutputStream): ExportReport {
+            record("export($userId)")
+            exportFailure?.let { throw it }
+            val zip = ZipOutputStream(output)
+            zip.putNextEntry(ZipEntry("manifest.json"))
+            zip.write("""{"format":"morning-issue-archive","version":2,"exportedAt":0}""".toByteArray())
+            zip.closeEntry()
+            zip.finish()
+            return ExportReport()
         }
     }
 
