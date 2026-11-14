@@ -5,6 +5,10 @@
 #   kobo/dist/.adds/nm/morningissue           the NickelMenu entry
 #   kobo/dist/morningissue-kobo-$VERSION.zip  unzip at the root of the KOBOeReader drive
 #
+# The same zip installs both ways: unzipped at the root of the drive it runs from NickelMenu,
+# and uploaded on KoboUI's Apps page it installs as a KoboUI app (.adds/morningissue/koboui.json,
+# see KoboUI's docs/app-api.md), which KoboUI delivers with its next sync.
+#
 # VERSION defaults to "dev". Uses cargo and clang from PATH, or takes them from nix (see below).
 set -eu
 
@@ -66,6 +70,10 @@ cp "target/$TARGET/release/morningissue" "$APP/morningissue"
 cp launch/launch.sh "$APP/launch.sh"
 cp launch/wifi-off.sh "$APP/wifi-off.sh"
 cp launch/wifi-on.sh "$APP/wifi-on.sh"
+# For KoboUI: the app manifest and its tile icon (design/icon/morning-issue-icon.svg at
+# 128 px, grey).
+cp launch/koboui.json "$APP/koboui.json"
+cp launch/icon.png "$APP/icon.png"
 chmod 755 "$APP/morningissue" "$APP/launch.sh" "$APP/wifi-off.sh" "$APP/wifi-on.sh"
 for f in fraunces.ttf fraunces_italic.ttf newsreader.ttf newsreader_italic.ttf inter.ttf; do
     cp "$ROOT/app/src/main/res/font/$f" "$APP/fonts/$f"

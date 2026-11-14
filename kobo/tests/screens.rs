@@ -170,6 +170,8 @@ struct Setup {
     paired: bool,
     /// The server has accepted this Kobo before (`serverSeen`).
     server_seen: bool,
+    /// Launched by KoboUI (`KOBOUI_MODE=run`).
+    managed: bool,
 }
 
 impl Default for Setup {
@@ -190,6 +192,7 @@ impl Default for Setup {
             no_config_server: false,
             paired: false,
             server_seen: false,
+            managed: false,
         }
     }
 }
@@ -329,6 +332,7 @@ fn run_with(dir: &str, size: &Size, s: &Setup, script: Vec<Step>, mut at_mark: i
         network: Box::new(network),
         radio: Box::new(DesktopRadio::new(shared.clone())),
         sync_on_start: s.sync_on_start,
+        managed: s.managed,
         hit_probe: Some(Box::new(move |hits| *shared3.hits.borrow_mut() = hits.to_vec())),
     };
     let mut app = App::new(Box::new(display), Box::new(input), Box::new(ScriptClock(shared.clone())), Store::new(&home), Config { server: if s.no_config_server { None } else { Some(s.server.clone().unwrap_or_else(|| format!("http://{}", nobody()))) }, ..Config::default() }, &fonts_dir(), opts).unwrap();
@@ -571,6 +575,18 @@ fn offline_never_tries_to_sync() {
     let setup = Setup { online: false, sync_on_start: true, server: Some(server.url()), paired: true, server_seen: true, ..Default::default() };
     let o = run("offline", &SIZES[2], &setup, vec![Step::Sleep(500), tap_on("OpenSettings"), mark("settings"), Step::Sleep(300)]);
     assert_eq!(o.syncs_started, 0);
+    assert!(server.with(|s| s.requests.is_empty()));
+}
+
+/// Launched by KoboUI, the reader never syncs or touches Wi-Fi, even online: KoboUI does both.
+#[test]
+fn under_koboui_the_reader_leaves_wifi_and_sync_to_koboui() {
+    let server = FakeServer::start();
+    pair(&server);
+    let setup = Setup { online: true, sync_on_start: true, server: Some(server.url()), paired: true, server_seen: true, managed: true, ..Default::default() };
+    let o = run("koboui", &SIZES[2], &setup, vec![Step::Sleep(500), mark("01-home"), tap_on("OpenSettings"), mark("02-settings"), tap_on("OpenPair"), mark("03-pair"), Step::Sleep(300)]);
+    assert_eq!(o.syncs_started, 0);
+    assert!(o.radio.is_empty());
     assert!(server.with(|s| s.requests.is_empty()));
 }
 

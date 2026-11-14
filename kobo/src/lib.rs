@@ -17,6 +17,7 @@ pub mod gesture;
 pub mod http;
 pub mod images;
 pub mod kobo;
+pub mod koboui;
 pub mod layout;
 pub mod light;
 pub mod model;

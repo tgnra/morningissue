@@ -572,7 +572,15 @@ pub struct SettingsView<'s> {
     pub server_from_config: bool,
     /// Where pairing stands, in a sentence ([`pairing_note`]).
     pub pairing_note: String,
+    /// Launched by KoboUI, which owns Wi-Fi and syncs the reader: no Wi-Fi or sync buttons.
+    pub managed: bool,
 }
+
+/// What Settings says about Wi-Fi and sync under KoboUI.
+pub const KOBOUI_SYNC_NOTE: &str = "KoboUI turns Wi-Fi on and syncs Morning Issue with everything else: tap Sync in KoboUI\u{2019}s quick panel.";
+
+/// The pairing screen's note under KoboUI, once the code is shown.
+pub const PAIR_NOTE_KOBOUI: &str = "Once Morning Issue on the phone has scanned this code, go back to KoboUI and tap Sync.";
 
 /// Why Wi-Fi the reader turned on stays on and the sync is tried again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -741,26 +749,11 @@ fn settings_body(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView, breaks: &mut 
     let c = m.content();
     let (x, w) = (c.x, c.w);
     let mut y = c.y as f32 + m.pt(10.0);
-    let body = ctx.ty.label;
 
-    section(ctx, canvas, x, &mut y, w, "WI-FI");
-    let wifi = ctx.para(&text::plain(&s.wifi, body), w as f32, Align::Left, 1.3, Some(2));
-    wifi.draw(ctx.fonts, canvas, x as f32, y);
-    y += wifi.height();
-    let note = match (s.wifi_job, s.online) {
-        (Some(true), _) => "Turning Wi-Fi on and joining a network saved in the Kobo\u{2019}s Wi-Fi settings\u{2026}",
-        (Some(false), _) => "Turning Wi-Fi off\u{2026}",
-        (None, true) if s.retrying == Some(Retry::Unreachable) => "Wi-Fi stays on until the server answers. Turn Wi-Fi off to stop trying.",
-        (None, true) if s.retrying == Some(Retry::Waiting) => "Wi-Fi stays on until the phone has paired this Kobo with the server. Turn Wi-Fi off to stop trying.",
-        (None, true) if s.wifi_auto => "Wi-Fi turns off again when the sync is done.",
-        (None, true) => "Turn Wi-Fi off to save the battery; Morning Issue can turn it on again to sync.",
-        (None, false) if s.slept => "Wi-Fi was turned off when the Kobo went to sleep. Turn on Wi-Fi and sync turns it on, syncs, and turns it off again.",
-        (None, false) => "Turn on Wi-Fi and sync turns Wi-Fi on, syncs, and turns it off again. It joins a network saved in the Kobo\u{2019}s Wi-Fi settings.",
-    };
-    let n = ctx.para(&text::plain(note, ctx.ty.caption.color(MUTED)), w as f32, Align::Left, 1.35, None);
-    n.draw(ctx.fonts, canvas, x as f32, y);
-    y += n.height();
-    section_break(ctx, canvas, x, &mut y, w, breaks);
+    // Under KoboUI, Wi-Fi is KoboUI's: no Wi-Fi section, and Sync only explains.
+    if !s.managed {
+        wifi_section(ctx, canvas, s, x, &mut y, w, breaks);
+    }
 
     section(ctx, canvas, x, &mut y, w, "PAIRING");
     let bh = (m.bar() * 0.82).round() as i32;
@@ -792,44 +785,13 @@ fn settings_body(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView, breaks: &mut 
     section_break(ctx, canvas, x, &mut y, w, breaks);
 
     section(ctx, canvas, x, &mut y, w, "SYNC");
-    // Offline, the button turns Wi-Fi on first (and off again after).
-    let wifi_first = !s.online || s.wifi_job.is_some();
-    let (label, action) = match (s.wifi_job, s.syncing, wifi_first) {
-        (Some(true), _, _) => ("Turning Wi-Fi on\u{2026}", None),
-        (Some(false), _, _) => ("Turn on Wi-Fi and sync", None),
-        (None, true, _) => ("Syncing\u{2026}", None),
-        (None, false, true) => ("Turn on Wi-Fi and sync", Some(Action::WifiAndSync)),
-        (None, false, false) => ("Sync now", Some(Action::SyncNow)),
-    };
-    let widest = if wifi_first { "Turn on Wi-Fi and sync" } else { "Syncing\u{2026}" };
-    let bw = button_w(ctx, widest).max(button_w(ctx, label)).max(m.inch(1.2) as i32).min(w);
-    let br = Rect::new(x, y as i32, bw, bh);
-    button(ctx, canvas, br, label, false, action.is_some());
-    if let Some(a) = action {
-        hits.push((target(ctx, br), a));
+    if s.managed {
+        let n = ctx.para(&text::plain(KOBOUI_SYNC_NOTE, ctx.ty.caption.color(MUTED)), w as f32, Align::Left, 1.35, None);
+        n.draw(ctx.fonts, canvas, x as f32, y);
+        y += n.height() + m.pt(6.0);
+    } else {
+        sync_buttons(ctx, canvas, s, x, &mut y, w, bh, &mut hits);
     }
-    let gap = m.pt(10.0) as i32;
-    // Off, whoever turned it on, whenever it is on or coming on.
-    if s.online || s.wifi_job.is_some() {
-        let label = if s.wifi_job == Some(false) { "Turning off\u{2026}" } else { "Turn Wi-Fi off" };
-        let ow = button_w(ctx, "Turn Wi-Fi off").min(w - bw - gap);
-        let or = Rect::new(x + bw + gap, y as i32, ow, bh);
-        let enabled = s.wifi_job != Some(false);
-        button(ctx, canvas, or, label, false, enabled);
-        if enabled {
-            hits.push((target(ctx, or), Action::WifiOff));
-        }
-    }
-    let side = match (s.online || s.wifi_job.is_some(), s.slept) {
-        (true, _) => "",
-        (false, true) => "Offline since sleep",
-        (false, false) => "Offline",
-    };
-    if !side.is_empty() {
-        let l = ctx.line(side, ctx.ty.label.italic().color(MUTED), w as f32 - bw as f32 - m.pt(12.0), Align::Left);
-        l.draw(ctx.fonts, canvas, (x + bw) as f32 + m.pt(12.0), br.y as f32 + (bh as f32 - l.height()) / 2.0);
-    }
-    y += bh as f32 + m.pt(6.0);
     let st = if s.last_is_error { ctx.ty.caption.italic().color(BLACK) } else { ctx.ty.caption.color(MUTED) };
     let res = ctx.para(&text::plain(&s.last_result, st), w as f32, Align::Left, 1.35, Some(3));
     res.draw(ctx.fonts, canvas, x as f32, y);
@@ -882,6 +844,73 @@ fn settings_body(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView, breaks: &mut 
         hits.push((target(ctx, rr), Action::Reset));
     }
     (hits, y + bh as f32)
+}
+
+/// Settings' Wi-Fi section: the connection, and what the buttons will do.
+fn wifi_section(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView, x: i32, y: &mut f32, w: i32, breaks: &mut Vec<(f32, f32)>) {
+    let body = ctx.ty.label;
+    section(ctx, canvas, x, y, w, "WI-FI");
+    let wifi = ctx.para(&text::plain(&s.wifi, body), w as f32, Align::Left, 1.3, Some(2));
+    wifi.draw(ctx.fonts, canvas, x as f32, *y);
+    *y += wifi.height();
+    let note = match (s.wifi_job, s.online) {
+        (Some(true), _) => "Turning Wi-Fi on and joining a network saved in the Kobo\u{2019}s Wi-Fi settings\u{2026}",
+        (Some(false), _) => "Turning Wi-Fi off\u{2026}",
+        (None, true) if s.retrying == Some(Retry::Unreachable) => "Wi-Fi stays on until the server answers. Turn Wi-Fi off to stop trying.",
+        (None, true) if s.retrying == Some(Retry::Waiting) => "Wi-Fi stays on until the phone has paired this Kobo with the server. Turn Wi-Fi off to stop trying.",
+        (None, true) if s.wifi_auto => "Wi-Fi turns off again when the sync is done.",
+        (None, true) => "Turn Wi-Fi off to save the battery; Morning Issue can turn it on again to sync.",
+        (None, false) if s.slept => "Wi-Fi was turned off when the Kobo went to sleep. Turn on Wi-Fi and sync turns it on, syncs, and turns it off again.",
+        (None, false) => "Turn on Wi-Fi and sync turns Wi-Fi on, syncs, and turns it off again. It joins a network saved in the Kobo\u{2019}s Wi-Fi settings.",
+    };
+    let n = ctx.para(&text::plain(note, ctx.ty.caption.color(MUTED)), w as f32, Align::Left, 1.35, None);
+    n.draw(ctx.fonts, canvas, x as f32, *y);
+    *y += n.height();
+    section_break(ctx, canvas, x, y, w, breaks);
+}
+
+/// Settings' sync buttons: sync (turning Wi-Fi on first when offline) and Wi-Fi off.
+#[allow(clippy::too_many_arguments)]
+fn sync_buttons(ctx: &Ctx, canvas: &mut Canvas, s: &SettingsView, x: i32, y: &mut f32, w: i32, bh: i32, hits: &mut Hits) {
+    let m = &ctx.m;
+    // Offline, the button turns Wi-Fi on first (and off again after).
+    let wifi_first = !s.online || s.wifi_job.is_some();
+    let (label, action) = match (s.wifi_job, s.syncing, wifi_first) {
+        (Some(true), _, _) => ("Turning Wi-Fi on\u{2026}", None),
+        (Some(false), _, _) => ("Turn on Wi-Fi and sync", None),
+        (None, true, _) => ("Syncing\u{2026}", None),
+        (None, false, true) => ("Turn on Wi-Fi and sync", Some(Action::WifiAndSync)),
+        (None, false, false) => ("Sync now", Some(Action::SyncNow)),
+    };
+    let widest = if wifi_first { "Turn on Wi-Fi and sync" } else { "Syncing\u{2026}" };
+    let bw = button_w(ctx, widest).max(button_w(ctx, label)).max(m.inch(1.2) as i32).min(w);
+    let br = Rect::new(x, *y as i32, bw, bh);
+    button(ctx, canvas, br, label, false, action.is_some());
+    if let Some(a) = action {
+        hits.push((target(ctx, br), a));
+    }
+    let gap = m.pt(10.0) as i32;
+    // Off, whoever turned it on, whenever it is on or coming on.
+    if s.online || s.wifi_job.is_some() {
+        let label = if s.wifi_job == Some(false) { "Turning off\u{2026}" } else { "Turn Wi-Fi off" };
+        let ow = button_w(ctx, "Turn Wi-Fi off").min(w - bw - gap);
+        let or = Rect::new(x + bw + gap, *y as i32, ow, bh);
+        let enabled = s.wifi_job != Some(false);
+        button(ctx, canvas, or, label, false, enabled);
+        if enabled {
+            hits.push((target(ctx, or), Action::WifiOff));
+        }
+    }
+    let side = match (s.online || s.wifi_job.is_some(), s.slept) {
+        (true, _) => "",
+        (false, true) => "Offline since sleep",
+        (false, false) => "Offline",
+    };
+    if !side.is_empty() {
+        let l = ctx.line(side, ctx.ty.label.italic().color(MUTED), w as f32 - bw as f32 - m.pt(12.0), Align::Left);
+        l.draw(ctx.fonts, canvas, (x + bw) as f32 + m.pt(12.0), br.y as f32 + (bh as f32 - l.height()) / 2.0);
+    }
+    *y += bh as f32 + m.pt(6.0);
 }
 
 // --------------------------------------------------------------------------------------------

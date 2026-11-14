@@ -85,17 +85,57 @@ static EVENTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Whole-state writes from the two threads, one at a time.
 static STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+#[derive(Clone, Debug)]
 pub struct Store {
     pub home: PathBuf,
+    /// Where everything is kept: `home/data`, or the folder KoboUI gives the app
+    /// (`KOBOUI_DATA_DIR`).
+    data: PathBuf,
+}
+
+/// What [`Store::adopt`] leaves behind: the launcher's own log and crash note.
+fn launcher_file(name: &str) -> bool {
+    name.starts_with("launch.log") || name == "panic.txt"
 }
 
 impl Store {
     pub fn new(home: impl Into<PathBuf>) -> Store {
-        Store { home: home.into() }
+        let home = home.into();
+        let data = home.join("data");
+        Store { home, data }
+    }
+
+    /// A store whose data lives in `data` rather than `home/data`.
+    pub fn with_data(home: impl Into<PathBuf>, data: impl Into<PathBuf>) -> Store {
+        Store { home: home.into(), data: data.into() }
     }
 
     pub fn data(&self) -> PathBuf {
-        self.home.join("data")
+        self.data.clone()
+    }
+
+    /// Takes over a store that was kept elsewhere (the NickelMenu install's `data/`) when this
+    /// one is still empty, so moving under KoboUI keeps the pairing, the editions and what
+    /// was read. Everything is copied, except unsent events, which are moved, so that they
+    /// are sent once whichever way the app is opened next. Returns whether it copied.
+    pub fn adopt(&self, old: &Path) -> io::Result<bool> {
+        if old == self.data.as_path() || self.state_path().exists() || !old.join("state.json").exists() {
+            return Ok(false);
+        }
+        copy_tree(old, &self.data, true)?;
+        // state.json last: until it is there, the next start copies again from scratch.
+        let events = old.join("events.jsonl");
+        if events.exists() {
+            fs::copy(&events, self.events_path())?;
+        }
+        let tmp = self.data.join("state.json.adopt");
+        fs::copy(old.join("state.json"), &tmp)?;
+        File::open(&tmp)?.sync_all()?;
+        fs::rename(&tmp, self.state_path())?;
+        if events.exists() {
+            fs::remove_file(&events)?;
+        }
+        Ok(true)
     }
     pub fn editions_dir(&self) -> PathBuf {
         self.data().join("editions")
@@ -449,6 +489,26 @@ pub fn commit(tmp: &Path, path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Copies `src` into `dst`, recursively. At the top level, the launcher's files, the state
+/// and the events are left for [`Store::adopt`].
+fn copy_tree(src: &Path, dst: &Path, top: bool) -> io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if top && (launcher_file(&name) || name == "state.json" || name == "events.jsonl") {
+            continue;
+        }
+        let (from, to) = (entry.path(), dst.join(&name));
+        if entry.file_type()?.is_dir() {
+            copy_tree(&from, &to, false)?;
+        } else {
+            fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
 fn sync_dir(dir: &Path) {
     // FAT (the Kobo's user partition) may refuse to fsync a directory; the rename still stands.
     if let Ok(d) = File::open(dir) {
@@ -522,6 +582,34 @@ mod tests {
         store.drop_events_through(2).unwrap();
         let seqs: Vec<i64> = store.read_events().unwrap().iter().map(|e| e.seq).collect();
         assert_eq!(seqs, vec![3, 5]);
+    }
+
+    #[test]
+    fn a_koboui_store_adopts_the_nickelmenu_one_once() {
+        let home = temp_home("adopt");
+        let old = Store::new(&home);
+        let device = old.load_state().unwrap().device_id;
+        old.ensure_dirs().unwrap();
+        old.append_event(&ev(1)).unwrap();
+        fs::write(old.edition_path(7), b"{}").unwrap();
+        fs::write(old.data().join("launch.log"), b"launcher").unwrap();
+
+        let new = Store::with_data(&home, home.join("image").join("morningissue"));
+        assert!(new.adopt(&old.data()).unwrap());
+        assert_eq!(new.load_state().unwrap().device_id, device);
+        assert!(new.edition_path(7).exists());
+        assert_eq!(new.read_events().unwrap().len(), 1);
+        assert!(!new.data().join("launch.log").exists());
+        // The events moved: the NickelMenu copy won't send them a second time.
+        assert!(old.read_events().unwrap().is_empty());
+        assert!(old.edition_path(7).exists());
+        // Only once.
+        fs::write(old.edition_path(8), b"{}").unwrap();
+        assert!(!new.adopt(&old.data()).unwrap());
+        assert!(!new.edition_path(8).exists());
+        // Nothing to adopt from an install that never ran.
+        let fresh = Store::with_data(&home, home.join("image").join("other"));
+        assert!(!fresh.adopt(&home.join("nothing")).unwrap());
     }
 
     #[test]

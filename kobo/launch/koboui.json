@@ -1,0 +1,8 @@
+{
+  "api": 1,
+  "id": "morningissue",
+  "name": "Morning Issue",
+  "icon": "icon.png",
+  "run": ["morningissue", "read"],
+  "sync": { "exec": ["morningissue", "sync"], "timeout": 180 }
+}

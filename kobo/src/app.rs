@@ -201,6 +201,9 @@ pub struct Options {
     pub radio: Box<dyn Radio>,
     /// Start a sync as soon as the home screen is up (when online).
     pub sync_on_start: bool,
+    /// Launched by KoboUI (`KOBOUI_MODE=run`): KoboUI owns Wi-Fi and sync, so the reader
+    /// never turns Wi-Fi on or syncs, and Settings says to sync from KoboUI.
+    pub managed: bool,
     /// Told what can be touched after every frame, for scripted tests.
     pub hit_probe: Option<HitProbe>,
 }
@@ -266,6 +269,7 @@ pub struct App {
     network: Box<dyn Fn() -> NetStatus>,
     net: NetStatus,
     sync_on_start: bool,
+    managed: bool,
     hit_probe: Option<HitProbe>,
     stack: Vec<View>,
     chrome: bool,
@@ -312,6 +316,12 @@ impl App {
         let images_dir = store.images_dir();
         let images = ImageCache::new(Box::new(move |url| std::fs::read(images_dir.join(format!("{}.img", crate::store::image_key(url)))).ok()));
         let now = clock.mono_ms();
+        let mut opts = opts;
+        if opts.managed {
+            // KoboUI owns Wi-Fi: the reader sees no network and can't switch the radio.
+            opts.network = Box::new(|| NetStatus::Offline);
+            opts.radio = Box::new(crate::device::NoRadio);
+        }
         let net = (opts.network)();
         let mut app = App {
             display,
@@ -352,7 +362,8 @@ impl App {
             ignore_touches_until: 0,
             network: opts.network,
             net,
-            sync_on_start: opts.sync_on_start,
+            sync_on_start: opts.sync_on_start && !opts.managed,
+            managed: opts.managed,
             hit_probe: opts.hit_probe,
             stack: vec![View::Home],
             chrome: false,
@@ -557,6 +568,10 @@ impl App {
     // Drawing
 
     fn status(&self) -> (String, bool) {
+        if self.managed {
+            // Under KoboUI there's no "Offline": the last sync KoboUI ran, or its error.
+            return ui::status_line(&self.state, self.clock.wall_ms(), None, true);
+        }
         match self.wifi_job {
             Some(true) => return ("Turning Wi-Fi on\u{2026}".into(), false),
             Some(false) => return ("Turning Wi-Fi off\u{2026}".into(), false),
@@ -612,6 +627,7 @@ impl App {
                     server_address: server.as_deref(),
                     server_from_config: self.config.server_address().is_some(),
                     pairing_note: ui::pairing_note(&self.state, server.as_deref()),
+                    managed: self.managed,
                 };
                 let (hits, pages) = ui::draw_settings(&ctx, &mut canvas, &view, self.settings_page);
                 settings_pages = pages;
@@ -619,7 +635,11 @@ impl App {
             }
             View::Pair { uri } => {
                 let server = self.server_address();
-                let note = ui::pair_note(&self.state, self.pair_polling(), server.as_deref());
+                let note = if self.managed && !self.pair_polling() && server.is_some() && !(self.state.server_seen && !self.state.server_not_listed) {
+                    ui::PAIR_NOTE_KOBOUI.to_string()
+                } else {
+                    ui::pair_note(&self.state, self.pair_polling(), server.as_deref())
+                };
                 ui::draw_pair(&ctx, &mut canvas, uri, server.as_deref(), &note)
             }
             View::ServerKeys { typed, error } => ui::draw_server_keyboard(&ctx, &mut canvas, typed, error.as_deref()),
@@ -1407,7 +1427,7 @@ impl App {
     /// Starts a sync on its own thread, if the Kobo is online and none is running. Offline,
     /// nothing is tried.
     pub fn start_sync(&mut self) {
-        if self.sync.is_some() {
+        if self.sync.is_some() || self.managed {
             return;
         }
         self.net = (self.network)();
@@ -1423,16 +1443,15 @@ impl App {
         opts.progress = Some(Arc::new(move |p| {
             let _ = ptx.send(SyncMsg::Progress(p));
         }));
-        let home = self.store.home.clone();
+        let store = self.store.clone();
         let spawned = std::thread::Builder::new().name("sync".into()).spawn(move || {
             // A panic in a sync is logged by the panic hook and ends that sync only; the
             // reader goes on with what is stored.
-            let store = Store::new(&home);
             let r = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sync::sync(&store, &opts))) {
                 Ok(r) => r,
                 Err(_) => {
                     eprintln!("sync: crashed; the reader goes on with what it has");
-                    let _ = std::fs::remove_file(store.home.join("data").join("panic.txt"));
+                    let _ = std::fs::remove_file(store.data().join("panic.txt"));
                     let _ = tx.send(SyncMsg::Done(Finish::Failed));
                     return;
                 }
@@ -1466,7 +1485,7 @@ impl App {
     /// "Turn on Wi-Fi and sync": starts turning Wi-Fi on; [`App::poll_wifi`] syncs once it
     /// is connected.
     fn wifi_on_and_sync(&mut self) {
-        if self.wifi_job.is_some() {
+        if self.wifi_job.is_some() || self.managed {
             return;
         }
         self.wifi_error = None;
@@ -1626,10 +1645,10 @@ impl App {
         self.net = (self.network)();
         let Some(server) = self.server_address().filter(|_| self.net.online()) else { return Ok(()) };
         let (tx, rx) = mpsc::channel();
-        let home = self.store.home.clone();
+        let store = self.store.clone();
         let opts = sync::Options::new(Some(server));
         let spawned = std::thread::Builder::new().name("pair".into()).spawn(move || {
-            let known = match crate::server::hello(&Store::new(&home), &opts) {
+            let known = match crate::server::hello(&store, &opts) {
                 Ok(known) => known,
                 Err(e) => {
                     eprintln!("pair: cannot ask the server whether it knows this Kobo: {e}");

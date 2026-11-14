@@ -537,3 +537,44 @@ fn the_bearer_token_is_derived_from_the_secret() {
     server.with(|st| st.token = Some("gLYEzapDfvjcIu5h42jFUFPx46QBYg0sKsGaedJRfzc".into()));
     assert!(hello(&store, &opts(&server.url())).unwrap());
 }
+
+/// KoboUI's sync entry point: `morningissue sync` with KOBOUI_MODE=sync keeps its data in
+/// KOBOUI_DATA_DIR (taking over the NickelMenu install's `data/` the first time), prints one
+/// short line and exits 0; a failed sync prints the reason on stderr and exits 1.
+#[test]
+fn koboui_runs_the_sync_entry_point() {
+    let server = FakeServer::start();
+    publish(&server);
+    let nm = paired("koboui-sync", &server);
+    nm.append_event(&event(1)).unwrap();
+    let home = nm.home.clone();
+    std::fs::write(home.join("config.json"), format!(r#"{{"server":"{}"}}"#, server.url())).unwrap();
+    let data = home.join("image").join("appdata").join("morningissue");
+    let run = || {
+        std::process::Command::new(env!("CARGO_BIN_EXE_morningissue"))
+            .arg("sync")
+            .env("MORNINGISSUE_HOME", &home)
+            .env("KOBOUI", "1")
+            .env("KOBOUI_MODE", "sync")
+            .env("KOBOUI_DATA_DIR", &data)
+            .output()
+            .unwrap()
+    };
+    let out = run();
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.status.success(), "{stdout} {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(stdout.trim().lines().last().unwrap(), "2 editions fetched, saved list updated, 1 event sent");
+    let ui = Store::with_data(&home, &data);
+    assert_eq!(ui.load_state().unwrap().edition_order, vec![2, 1]);
+    // The NickelMenu copy gave up its events, and has no editions.
+    assert!(nm.read_events().unwrap().is_empty());
+    assert!(nm.load_state().unwrap().edition_order.is_empty());
+    // Nothing new.
+    let out = run();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "Up to date");
+    // No server: exit 1, with the reason.
+    std::fs::write(home.join("config.json"), r#"{"server":"http://127.0.0.1:9"}"#).unwrap();
+    let out = run();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!String::from_utf8_lossy(&out.stderr).trim().is_empty());
+}

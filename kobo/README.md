@@ -73,6 +73,28 @@ Delete `.adds/morningissue/` and `.adds/nm/morningissue` from the drive. Nothing
 the device is changed. The reader never installs into the system partition, and it doesn't
 change the screen mode.
 
+### Under KoboUI
+
+The same zip is also a KoboUI app: upload it on KoboUI's **Apps** page and the Kobo
+installs `.adds/morningissue/` at its next sync (or unzip it over USB as above). KoboUI
+reads `.adds/morningissue/koboui.json`, shows Morning Issue in its Apps row and hides the
+NickelMenu entry. Under KoboUI:
+
+- Tapping the tile runs `morningissue read` with `KOBOUI_MODE=run`. The reader never turns
+  Wi-Fi on or syncs by itself; Settings has no Wi-Fi or sync buttons and says to tap
+  **Sync** in KoboUI's quick panel. Exit goes back to KoboUI.
+- KoboUI's Sync runs `morningissue sync` with `KOBOUI_MODE=sync` while Wi-Fi is up. It
+  prints one line, such as `2 editions fetched, 45 events sent`, which KoboUI shows on the
+  tile, and exits 0, or prints why it failed on stderr and exits 1. KoboUI stops it after
+  180 seconds.
+- The data lives in `KOBOUI_DATA_DIR`, a folder on KoboUI's data image, instead of
+  `.adds/morningissue/data/`. The first time, `data/` is copied there (unsent events are
+  moved), so the pairing and what you read carry over. `config.json` stays in
+  `.adds/morningissue/`.
+- To pair, open **Pair with phone**, scan the code, then go back to KoboUI and tap Sync.
+
+Opened from NickelMenu, nothing changes, and it keeps using `data/`.
+
 ## Use
 
 - **Home:** the latest edition large in the middle, earlier ones on the shelf below (beside

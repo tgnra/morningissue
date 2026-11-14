@@ -7,6 +7,7 @@ use morningissue::app::{self, App};
 use morningissue::config::Config;
 use morningissue::device::SystemClock;
 use morningissue::kobo::{self, EvdevInput, Framebuffer};
+use morningissue::koboui;
 use morningissue::light::{KoboLight, Light, NoLight};
 use morningissue::net;
 use morningissue::profile;
@@ -50,8 +51,8 @@ fn wifi_power(on: bool) -> std::io::Result<()> {
 /// Logs every panic, on any thread, as one line on stderr (which `launch.sh` sends to
 /// `data/launch.log`): the thread, the source location and the message. The same line goes
 /// to `data/panic.txt`, which the launcher quotes when the reader ends abnormally.
-fn log_panics(home: &Path) {
-    let panic_file = home.join("data").join("panic.txt");
+fn log_panics(data: &Path) {
+    let panic_file = data.join("panic.txt");
     panic::set_hook(Box::new(move |info| {
         let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
             s.to_string()
@@ -74,11 +75,20 @@ fn main() -> ExitCode {
     let home = home();
     let config = Config::load(&home);
     match cmd {
+        // Also KoboUI's sync entry point (KOBOUI_MODE=sync): Wi-Fi is up, nothing is drawn,
+        // and the last line of stdout (or of stderr, on failure) is KoboUI's summary. Exit 0
+        // when the sync went through, 1 when it didn't.
         "sync" => {
-            let store = Store::new(&home);
+            let store = koboui::open_store(&home);
             let settings = morningissue::settings::Settings::load(&store.settings_path());
+            let under_koboui = koboui::mode() == koboui::Mode::Sync;
             match sync::sync(&store, &sync::Options::from_config(&config, &settings)) {
                 Ok(r) => {
+                    let line = koboui::summary(&r);
+                    if under_koboui {
+                        println!("{line}");
+                        return ExitCode::SUCCESS;
+                    }
                     println!(
                         "synced with {}: {} events sent, editions fetched {:?}, removed {:?}, saved list {}, {} images installed, {} not on the server{}",
                         r.address,
@@ -93,7 +103,11 @@ fn main() -> ExitCode {
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
-                    eprintln!("sync failed: {e}");
+                    if under_koboui {
+                        eprintln!("{e}"); // KoboUI adds "Sync failed: "
+                    } else {
+                        eprintln!("sync failed: {e}");
+                    }
                     ExitCode::from(1)
                 }
             }
@@ -110,8 +124,9 @@ fn main() -> ExitCode {
             }
         }
         "read" => {
-            log_panics(&home);
-            match panic::catch_unwind(AssertUnwindSafe(|| read(&home, config))) {
+            let store = koboui::open_store(&home);
+            log_panics(&store.data());
+            match panic::catch_unwind(AssertUnwindSafe(|| read(&home, config, store))) {
                 Ok(code) => code,
                 Err(_) => {
                     eprintln!("read: crashed before the reader was up");
@@ -141,7 +156,7 @@ fn main() -> ExitCode {
 /// `morningissue read`. A panic while the reader runs is caught here, after the panic hook
 /// has logged it, so the session's events and Nickel's light levels are still put right
 /// before the process ends with [`EXIT_PANIC`].
-fn read(home: &Path, config: Config) -> ExitCode {
+fn read(home: &Path, config: Config, store: Store) -> ExitCode {
     let p = profile::detect(&version_file());
     eprintln!("read: {} (product {}), {}", p.name, p.id, if p.verified { "verified" } else { "unverified profile" });
     let fb = match Framebuffer::open(p.clone(), &config) {
@@ -160,7 +175,6 @@ fn read(home: &Path, config: Config) -> ExitCode {
             return ExitCode::from(3);
         }
     };
-    let store = Store::new(home);
     match store.apply_pending_reset() {
         Ok(true) => eprintln!("read: reset done; starting fresh"),
         Ok(false) => {}
@@ -171,7 +185,7 @@ fn read(home: &Path, config: Config) -> ExitCode {
         None => Box::new(NoLight),
     };
     let power = Box::new(kobo::KoboPower { home: home.to_path_buf() });
-    let opts = app::Options { rotation, follow_sensor: p.sensor.is_some(), light, power, network: Box::new(net::probe), radio: Box::new(kobo::KoboRadio::new(home.to_path_buf())), sync_on_start: true, hit_probe: None };
+    let opts = app::Options { rotation, follow_sensor: p.sensor.is_some(), light, power, network: Box::new(net::probe), radio: Box::new(kobo::KoboRadio::new(home.to_path_buf())), sync_on_start: true, managed: koboui::mode() == koboui::Mode::Run, hit_probe: None };
     let mut app = match App::new(Box::new(fb), Box::new(input), Box::new(SystemClock::new()), store, config, &home.join("fonts"), opts) {
         Ok(a) => a,
         Err(e) => {
