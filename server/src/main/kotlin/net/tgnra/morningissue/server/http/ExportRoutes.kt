@@ -16,8 +16,8 @@ import net.tgnra.morningissue.api.ApiPaths
 /**
  * `GET /export`: the caller's library as an archive the phone app's "Restore from archive"
  * reads. Written first to `<dataDir>/imports/export-<random>.zip.part` (so a failure answers an
- * error rather than a cut-off zip, and no read transaction waits on a slow download), then sent
- * as an attachment and deleted.
+ * error rather than a cut-off zip, and no read transaction waits on a slow download), then unlinked and
+ * sent as an attachment from the still-open file.
  */
 internal fun Route.exportRoutes(s: ServerServices) {
     get(ApiPaths.EXPORT, Access.PHONE) { p ->
@@ -25,18 +25,23 @@ internal fun Route.exportRoutes(s: ServerServices) {
         val dir = options.importsDir
         withContext(Dispatchers.IO) { dir.mkdirs() }
         val file = File(dir, "export-${UUID.randomUUID()}.zip.part")
-        try {
+        val input = try {
             withContext(Dispatchers.IO) {
                 file.outputStream().use { out -> s.exports.export(p.userId, out) }
+                // Opened before the response and unlinked at once: Ktor runs the body writer after
+                // this handler returns, so deleting the file in a `finally` here would race it.
+                // The open stream keeps the data readable; nothing is left behind on disk.
+                file.inputStream().also { file.delete() }
             }
-            call.response.header(
-                HttpHeaders.ContentDisposition,
-                ContentDisposition.Attachment.withParameter(ContentDisposition.Parameters.FileName, EXPORT_FILE_NAME).toString(),
-            )
-            call.respondOutputStream(ContentType.parse(ApiContentTypes.ZIP)) { file.inputStream().use { it.copyTo(this) } }
-        } finally {
+        } catch (t: Throwable) {
             withContext(Dispatchers.IO) { file.delete() }
+            throw t
         }
+        call.response.header(
+            HttpHeaders.ContentDisposition,
+            ContentDisposition.Attachment.withParameter(ContentDisposition.Parameters.FileName, EXPORT_FILE_NAME).toString(),
+        )
+        call.respondOutputStream(ContentType.parse(ApiContentTypes.ZIP)) { input.use { it.copyTo(this) } }
     }
 }
 
