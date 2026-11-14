@@ -3,6 +3,7 @@ package net.tgnra.morningissue.data.db
 import androidx.room3.Dao
 import androidx.room3.Query
 import androidx.room3.Upsert
+import net.tgnra.morningissue.ai.PostForRating
 
 /**
  * The on-device model's ratings (`article_interest`) and the little the model is told about the
@@ -20,6 +21,16 @@ abstract class InterestDao {
     /** The stored ratings of [articleIds], by article ID; a post never rated is missing. */
     suspend fun ratingsOf(articleIds: Collection<Long>): Map<Long, ArticleInterestEntity> =
         articleIds.distinct().chunked(ArticleSignalDao.MAX_IDS).flatMap { ratingsChunk(it) }.associateBy { it.articleId }
+
+    @Query(
+        "SELECT a.id AS articleId, a.title AS title, f.title AS feed, a.summary AS summary " +
+            "FROM article a JOIN feed f ON f.id = a.feedId WHERE a.id IN (:articleIds)",
+    )
+    protected abstract suspend fun postsChunk(articleIds: List<Long>): List<PostForRating>
+
+    /** What the model is shown of each of [articleIds]: its title, its feed's name and its summary. */
+    suspend fun postsForRating(articleIds: Collection<Long>): List<PostForRating> =
+        articleIds.distinct().chunked(ArticleSignalDao.MAX_IDS).flatMap { postsChunk(it) }
 
     @Query("SELECT COUNT(*) FROM article_interest")
     abstract suspend fun count(): Int

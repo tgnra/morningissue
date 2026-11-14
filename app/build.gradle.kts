@@ -143,6 +143,9 @@ dependencies {
     implementation(libs.readability4j)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    // Gemini Nano through AICore, for the model-interest factor (N). Every call is behind
+    // ai/NanoGate: devices without AICore never get past its status check.
+    implementation(libs.mlkit.genai.prompt)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

@@ -3,6 +3,13 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Gemini Nano runs on the phone's NPU where it has one (through AICore). Not required: on
+         a phone without it the ranking does without the model, so Play must not filter it out.
+         Whether the model is there is checked at run time (ai/OnDeviceAi). -->
+    <uses-feature
+        android:name="android.hardware.npu"
+        android:required="false" />
+
     <application
         android:name=".MorningIssueApp"
         android:allowBackup="true"

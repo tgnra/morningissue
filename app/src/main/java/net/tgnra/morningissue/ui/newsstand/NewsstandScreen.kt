@@ -152,6 +152,13 @@ fun NewsstandScreen(
     }
     val now = remember(clockCheck) { container.clock.instant() }
 
+    // The on-device model rates the next edition's likeliest stories while the app is in the
+    // foreground, the only time AICore will serve it; nothing on the stand waits for it.
+    LifecycleStartEffect(container) {
+        container.onDeviceAi.rateSoon()
+        onStopOrDispose { }
+    }
+
     val printing = printState as? PrintState.Printing
     // An edition Print now has stored but is still fetching stories for stays behind the
     // placeholder until the run is over.

@@ -265,6 +265,13 @@
     <string name="length_standard">Standard</string>
     <string name="length_long">Long</string>
     <string name="settings_appearance">Appearance</string>
+    <string name="settings_ai">On-device AI ranking (Gemini Nano)</string>
+    <string name="settings_ai_detail">The phone\'s own AI model rates the likeliest stories of the next edition against what you read, and a story it rates highly moves up a little. It never adds or drops a story. Everything stays on the phone. %1$s</string>
+    <string name="ai_status_checking">Checking this phone…</string>
+    <string name="ai_status_available">Available.</string>
+    <string name="ai_status_downloading">Downloading.</string>
+    <string name="ai_status_downloadable">The model will download over Wi-Fi while the phone is charging.</string>
+    <string name="ai_status_unavailable">Not supported on this device.</string>
     <string name="settings_theme">Theme</string>
     <string name="settings_theme_detail">Paper by day, the Night edition in the dark.</string>
     <string name="theme_system">System</string>

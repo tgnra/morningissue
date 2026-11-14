@@ -11,6 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import net.tgnra.morningissue.sync.SyncStatus
 import net.tgnra.morningissue.sync.TeaserBackfillWorker
 
 class MorningIssueApp : Application(), SingletonImageLoader.Factory {
@@ -19,6 +20,7 @@ class MorningIssueApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        registerActivityLifecycleCallbacks(container.foreground)
         // Off the main thread: building the modules opens the database and settings.
         container.appScope.launch {
             container.syncScheduler.ensurePeriodicSync()
@@ -30,6 +32,7 @@ class MorningIssueApp : Application(), SingletonImageLoader.Factory {
                 .distinctUntilChanged()
                 .collect { container.editionScheduler.scheduleEarlyBuild() }
         }
+        watchOnDeviceAi()
         // Work that earlier versions scheduled and this one no longer has: the Kobo relay's,
         // and the server client's sync. A worker class that is gone would only fail.
         val workManager = WorkManager.getInstance(this)
@@ -54,6 +57,28 @@ class MorningIssueApp : Application(), SingletonImageLoader.Factory {
                 throw e
             } catch (_: Exception) {
                 // Swept again after the next sync.
+            }
+        }
+    }
+
+    /**
+     * The on-device model (Gemini Nano): where it stands, checked once the start has settled,
+     * which also asks for its download when the phone supports it but does not have it; then a
+     * rating pass after every sync that finishes while the app is in the foreground. AICore
+     * refuses the background, so nothing is rated otherwise (the newsstand asks too, when it
+     * comes to the foreground).
+     */
+    private fun watchOnDeviceAi() {
+        container.appScope.launch {
+            delay(SIGNALS_START_DELAY_MILLIS)
+            container.onDeviceAi.refresh()
+        }
+        container.appScope.launch {
+            var syncing = false
+            container.feedSyncer.status.collect { status ->
+                val running = status is SyncStatus.Running
+                if (syncing && !running && container.foreground.isForeground) container.onDeviceAi.rateSoon()
+                syncing = running
             }
         }
     }

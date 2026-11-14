@@ -52,6 +52,13 @@ data class AppSettings(
      * cleared when onboarding ends.
      */
     val restoreNotice: Boolean = false,
+    /**
+     * Let the on-device model (Gemini Nano, through AICore) rate new posts for N, the
+     * model-interest factor of the ranking. On by default; it only does anything on a phone
+     * where the model is available (`ai/OnDeviceAi`). Off, the stored ratings are not used and
+     * no post is rated.
+     */
+    val onDeviceAiRanking: Boolean = true,
 ) {
     companion object {
         val DEFAULT_RESET_TIME: LocalTime = LocalTime.of(6, 30)

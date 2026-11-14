@@ -79,4 +79,7 @@ interface SettingsRepository {
 
     /** Shows or clears onboarding's notice about restoring a library from a server (`AppSettings.restoreNotice`). */
     suspend fun setRestoreNotice(show: Boolean) = Unit
+
+    /** Switches the on-device model's part in the ranking on or off (`AppSettings.onDeviceAiRanking`). A device setting. */
+    suspend fun setOnDeviceAiRanking(enabled: Boolean) = Unit
 }

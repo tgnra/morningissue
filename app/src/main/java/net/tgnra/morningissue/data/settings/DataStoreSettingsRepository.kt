@@ -90,6 +90,10 @@ class DataStoreSettingsRepository(
         dataStore.edit { it[GREYSCALE_IMAGES] = enabled }
     }
 
+    override suspend fun setOnDeviceAiRanking(enabled: Boolean) {
+        dataStore.edit { it[ON_DEVICE_AI_RANKING] = enabled }
+    }
+
     override suspend fun setEveningEditionEnabled(enabled: Boolean) {
         dataStore.edit {
             it[EVENING_EDITION] = enabled
@@ -166,6 +170,7 @@ class DataStoreSettingsRepository(
             resetChange = decode(prefs[RESET_CHANGE]),
             eveningChange = decode(prefs[EVENING_CHANGE]),
             restoreNotice = prefs[RESTORE_NOTICE] ?: defaults.restoreNotice,
+            onDeviceAiRanking = prefs[ON_DEVICE_AI_RANKING] ?: defaults.onDeviceAiRanking,
         )
     }
 
@@ -190,5 +195,6 @@ class DataStoreSettingsRepository(
         val RESET_CHANGE = stringPreferencesKey("reset_change")
         val EVENING_CHANGE = stringPreferencesKey("evening_change")
         val RESTORE_NOTICE = booleanPreferencesKey("server_restore_notice")
+        val ON_DEVICE_AI_RANKING = booleanPreferencesKey("on_device_ai_ranking")
     }
 }

@@ -80,6 +80,8 @@ internal class FakeSettings(initial: AppSettings = AppSettings()) : SettingsRepo
 
     override suspend fun setRestoreNotice(show: Boolean) = state.update { it.copy(restoreNotice = show) }
 
+    override suspend fun setOnDeviceAiRanking(enabled: Boolean) = state.update { it.copy(onDeviceAiRanking = enabled) }
+
     val current: AppSettings get() = state.value
 }
 

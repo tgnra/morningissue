@@ -16,6 +16,7 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TimePickerDefaults
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -30,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalTime
 import kotlinx.coroutines.launch
 import net.tgnra.morningissue.R
+import net.tgnra.morningissue.ai.NanoStatus
 import net.tgnra.morningissue.model.DisplayMode
 import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.ThemeMode
@@ -49,7 +51,7 @@ import net.tgnra.morningissue.ui.layout.LocalPaperLayoutSpec
 import net.tgnra.morningissue.ui.theme.MorningIssueTheme
 
 /**
- * Reset time, edition length, theme and display mode, storage and the archive. Every change is written straight to the settings store, and the app
+ * Reset time, edition length, the on-device model, theme and display mode, storage and the archive. Every change is written straight to the settings store, and the app
  * re-themes from that, so there is nothing to confirm.
  */
 @Composable
@@ -63,6 +65,9 @@ fun SettingsScreen(
     val use24Hour = DateFormat.is24HourFormat(LocalContext.current)
     var pickingTime by rememberSaveable { mutableStateOf(false) }
     var pickingEveningTime by rememberSaveable { mutableStateOf(false) }
+    val aiStatus by container.onDeviceAi.status.collectAsStateWithLifecycle()
+    // Where the model stands is asked again each time Settings opens: a download may have finished.
+    LaunchedEffect(container) { container.onDeviceAi.refresh() }
 
     PaperScreenFrame(
         title = stringResource(R.string.settings_title),
@@ -129,6 +134,34 @@ fun SettingsScreen(
                                 onClick = { pickingEveningTime = true },
                             )
                         }
+                    }
+                }
+                val aiLine = stringResource(
+                    when (aiStatus) {
+                        null -> R.string.ai_status_checking
+                        NanoStatus.AVAILABLE -> R.string.ai_status_available
+                        NanoStatus.DOWNLOADING -> R.string.ai_status_downloading
+                        NanoStatus.DOWNLOADABLE -> R.string.ai_status_downloadable
+                        NanoStatus.UNAVAILABLE -> R.string.ai_status_unavailable
+                    },
+                )
+                Setting(stringResource(R.string.settings_ai), stringResource(R.string.settings_ai_detail, aiLine)) {
+                    // A phone without the model has nothing to switch.
+                    if (aiStatus != null && aiStatus != NanoStatus.UNAVAILABLE) {
+                        SegmentedChoice(
+                            options = listOf(
+                                false to stringResource(R.string.settings_evening_off),
+                                true to stringResource(R.string.settings_evening_on),
+                            ),
+                            selected = settings.onDeviceAiRanking,
+                            onSelect = { enabled ->
+                                scope.launch {
+                                    container.settings.setOnDeviceAiRanking(enabled)
+                                    // Switched on with the model still to fetch: ask for the download.
+                                    if (enabled) container.onDeviceAi.refresh()
+                                }
+                            },
+                        )
                     }
                 }
             }

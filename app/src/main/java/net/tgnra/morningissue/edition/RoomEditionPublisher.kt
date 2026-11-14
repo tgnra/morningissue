@@ -2,6 +2,7 @@ package net.tgnra.morningissue.edition
 
 import android.os.Build
 import android.os.Trace
+import androidx.room3.withReadTransaction
 import androidx.room3.withWriteTransaction
 import java.time.Clock
 import java.time.Duration
@@ -15,6 +16,7 @@ import kotlinx.coroutines.sync.withLock
 import net.tgnra.morningissue.data.db.ArticleRow
 import net.tgnra.morningissue.data.db.EditionEntity
 import net.tgnra.morningissue.data.db.EditionItemEntity
+import net.tgnra.morningissue.data.db.EditionItemRow
 import net.tgnra.morningissue.data.db.FeedWithDetails
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
 import net.tgnra.morningissue.data.repository.AffinityLearner
@@ -28,9 +30,11 @@ import net.tgnra.morningissue.engine.EditionBuilder
 import net.tgnra.morningissue.engine.EditionClock
 import net.tgnra.morningissue.engine.EditionDraft
 import net.tgnra.morningissue.engine.FeedProfile
+import net.tgnra.morningissue.engine.Interest
 import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.engine.ReadingListPick
 import net.tgnra.morningissue.engine.Scorer
+import net.tgnra.morningissue.engine.WithinFeedSource
 import net.tgnra.morningissue.engine.schedule
 import net.tgnra.morningissue.model.AppSettings
 import net.tgnra.morningissue.model.EditionKind
@@ -83,6 +87,13 @@ private val traceCookies = AtomicInteger()
  * (`WithinFeedLearner`) is learned from the same evidence for every kind of build and stored
  * nowhere: it reaches the edition through each story's score and reason line.
  *
+ * **Model interest.** N, the on-device model's rating of a post (`engine/Interest`), comes from
+ * [interestRatings]: the ratings stored for the build's candidates. The build never asks the
+ * model itself (AICore refuses inference from the background, where most builds run); the
+ * ratings were given while the app was in the foreground (`ai/InterestRater`, which asks
+ * [shortlist] what to rate). A post without one, or every post when the source is
+ * [InterestRatings.None], scores as if there were no model.
+ *
  * **Subscribed feeds only.** The pool is subscribed feeds' posts: a post opened or saved from
  * feed discovery belongs to a feed the reader does not subscribe to (`FeedStatus.DISCOVERED`)
  * and is never a candidate. A Morning edition may give one such saved post a page of its own,
@@ -109,6 +120,7 @@ class RoomEditionPublisher(
     private val clock: Clock,
     private val config: RankingConfig = RankingConfig.Default,
     private val zone: () -> ZoneId = ZoneId::systemDefault,
+    private val interestRatings: InterestRatings = InterestRatings.None,
 ) : EditionPublisher {
     private val editionDao = database.editionDao()
     private val articleDao = database.articleDao()
@@ -117,6 +129,7 @@ class RoomEditionPublisher(
     private val affinity = Affinity(config)
     private val learner = AffinityLearner(database, config)
     private val withinFeed = WithinFeedLearner(database, config)
+    private val interest = Interest(config)
 
     /** One build at a time in this process; the transaction in [build] guards the rest. */
     private val mutex = Mutex()
@@ -166,6 +179,131 @@ class RoomEditionPublisher(
     }
 
     /**
+     * The article IDs of the [limit] best candidates of the next scheduled edition, best first,
+     * by the score without N (`Score.base`): what the on-device model should rate before that
+     * edition is built. Posts under the freshness floor or finished are left out. Empty when the
+     * next edition is already built or there is nothing new for it. Reads only, in one read
+     * transaction, and never holds up a build.
+     */
+    override suspend fun shortlist(limit: Int): List<Long> {
+        val now = clock.instant()
+        val settings = settings.settings.first()
+        val next = settings.schedule.nextRelease(now, zone())
+        val date = EditionClock.editionDate(next.at, zone())
+        return database.withReadTransaction {
+            if (editionDao.getByDate(date, next.kind) != null) return@withReadTransaction emptyList()
+            val plan = plan(next.kind, releaseAt = next.at, now = now, reprintOf = null) ?: return@withReadTransaction emptyList()
+            val scorer = Scorer(config, withinFeedSource = plan.within)
+            (plan.fresh + plan.heldOver)
+                .mapNotNull { candidate ->
+                    val feed = plan.feedsById[candidate.feedId] ?: return@mapNotNull null
+                    val score = scorer.score(feed, candidate, next.at)
+                    val printable = candidate.isHeldOver || candidate.exemptFromAgeLimits || score.f >= config.minFreshness
+                    if (score.base > 0.0 && printable) candidate to score.base else null
+                }
+                .sortedWith(compareByDescending<Pair<Candidate, Double>> { it.second }.thenByDescending { it.first.publishedAt })
+                .take(limit)
+                .map { it.first.articleId }
+        }
+    }
+
+    /**
+     * What a build of [kind] at [releaseAt] works from: the pool, the feeds with this build's
+     * affinities, and the within-feed model. Reads only; null when there is nothing new.
+     */
+    private class Plan(
+        val fresh: List<Candidate>,
+        val heldOver: List<Candidate>,
+        val shadows: List<Candidate>,
+        val away: AwayPool?,
+        val readingList: ReadingListPick?,
+        val feeds: List<FeedProfile>,
+        val feedsById: Map<Long, FeedProfile>,
+        val tagAffinity: Map<String, Double>,
+        val learned: LearnedAffinities,
+        val pending: List<EditionEntity>,
+        val supersedes: Boolean,
+        val newIds: Set<Long>,
+        val within: WithinFeedSource,
+    ) {
+        /** Every post the build scores. */
+        val scored: List<Candidate> get() = fresh + heldOver + shadows + away?.candidates.orEmpty()
+    }
+
+    private suspend fun plan(
+        kind: EditionKind,
+        releaseAt: Instant,
+        now: Instant,
+        reprintOf: EditionEntity?,
+        reprinted: List<EditionItemRow> = emptyList(),
+        extraFeedIds: Set<Long> = emptySet(),
+    ): Plan? {
+        val extraFeeds = extraFeedIds + reprinted.map { it.row.article.feedId }
+
+        // The window: posts first seen in (after, now].
+        val window = Duration.ofDays(config.firstEditionWindowDays)
+        val firstWindow = now.minus(window)
+        val after = when (kind) {
+            EditionKind.MORNING -> editionDao.getLatestByCutoffOf(listOf(EditionKind.MORNING))?.cutoffAt ?: firstWindow
+            // An evening paper follows a morning one; it is never the first edition.
+            EditionKind.EVENING -> editionDao.getLatestByCutoffOf(SCHEDULED)?.cutoffAt ?: return null
+            // A reprint keeps the first printing's window, so none of its stories ages out of it.
+            EditionKind.EXTRA -> reprintOf?.cutoffAt?.minus(window) ?: firstWindow
+        }
+        // The clock was set back past the last cutoff: nothing can be new yet.
+        if (!now.isAfter(after)) return null
+
+        // Stories an edition since [after] already printed (an Evening or Extra edition, or for
+        // an Extra any edition of the last few days) are not new again.
+        val printedSince = if (reprintOf == null) editionDao.printedArticleIdsSince(after).toSet() else printedSinceExcept(after, reprintOf.id)
+        val seen = articleDao.firstSeenBetween(after, now)
+        val rows = seen.filter { it.article.id !in printedSince && (kind != EditionKind.EXTRA || it.article.feedId in extraFeeds) }
+        if (rows.isEmpty()) return null
+
+        // A scheduled build supersedes the pending editions, so their untouched stories now
+        // count as ignored. An Extra edition supersedes nothing.
+        val pending = editionDao.getPending()
+        val supersedes = kind != EditionKind.EXTRA
+        val evidence = learner.evidence(now, if (supersedes) emptySet() else pending.mapTo(HashSet()) { it.id })
+        val learned = learner.learn(evidence, now)
+        val details = feedDao.getSubscribedWithDetails()
+        val tagAffinity = HashMap<String, Double>()
+        details.forEach { feed -> feed.tags.forEach { tagAffinity[it.name] = learned.tags[it.id] ?: it.affinity } }
+        val feeds = details.map { it.toProfile(learned, tagAffinity) }
+        val feedsById = feeds.associateBy { it.id }
+
+        val newIds = rows.mapTo(HashSet()) { it.article.id }
+        val fresh = withComebacks(rows, after).let { if (kind == EditionKind.EXTRA) exemptNewest(it) else it }
+        val alreadyRun = seen.filter { it.article.id in printedSince }
+        val heldOver = if (kind == EditionKind.MORNING) heldOver(feeds, alreadyRun, pending, after, releaseAt, newIds) else emptyList()
+        val heldOverIds = heldOver.mapTo(HashSet()) { it.articleId }
+        val away = if (kind == EditionKind.MORNING) awayPool(now) else null
+        val readingList = if (kind == EditionKind.MORNING) readingListPick(releaseAt) else null
+        val shadows = alreadyRun.filter { it.article.id !in heldOverIds && it.article.feedId in feedsById }.map { it.toCandidate() }
+
+        // Within-feed ranking: learned from the same evidence as affinity, as of the release
+        // time, then given the traits of every post this build scores.
+        val taste = withinFeed.learn(evidence, learner.windowStart(now), at = releaseAt)
+        val scored = fresh + heldOver + shadows + away?.candidates.orEmpty()
+        val traits = withinFeed.traitsOf(scored.map { it.articleId }, taste)
+        return Plan(
+            fresh = fresh,
+            heldOver = heldOver,
+            shadows = shadows,
+            away = away,
+            readingList = readingList,
+            feeds = feeds,
+            feedsById = feedsById,
+            tagAffinity = tagAffinity,
+            learned = learned,
+            pending = pending,
+            supersedes = supersedes,
+            newIds = newIds,
+            within = taste.source(traits),
+        )
+    }
+
+    /**
      * Returns the [kind] edition for [date], building and storing it first if it is missing;
      * null when it is missing and there is nothing to build. Reading the pool, the check for
      * an existing edition and every write share one transaction, so concurrent callers (even
@@ -197,75 +335,32 @@ class RoomEditionPublisher(
         // Set only for an Extra edition that today already has: see "Reprinting" above.
         val reprintOf = existing
         val reprinted = reprintOf?.let { editionDao.getItems(it.id) }.orEmpty()
-        val extraFeeds = extraFeedIds + reprinted.map { it.row.article.feedId }
+        val plan = plan(kind, releaseAt, now, reprintOf, reprinted, extraFeedIds) ?: return@withWriteTransaction null
 
-        // The window: posts first seen in (after, now].
-        val window = Duration.ofDays(config.firstEditionWindowDays)
-        val firstWindow = now.minus(window)
-        val after = when (kind) {
-            EditionKind.MORNING -> editionDao.getLatestByCutoffOf(listOf(EditionKind.MORNING))?.cutoffAt ?: firstWindow
-            // An evening paper follows a morning one; it is never the first edition.
-            EditionKind.EVENING -> editionDao.getLatestByCutoffOf(SCHEDULED)?.cutoffAt ?: return@withWriteTransaction null
-            // A reprint keeps the first printing's window, so none of its stories ages out of it.
-            EditionKind.EXTRA -> reprintOf?.cutoffAt?.minus(window) ?: firstWindow
-        }
-        // The clock was set back past the last cutoff: nothing can be new yet.
-        if (!now.isAfter(after)) return@withWriteTransaction null
-
-        // Stories an edition since [after] already printed (an Evening or Extra edition, or for
-        // an Extra any edition of the last few days) are not new again.
-        val printedSince = if (reprintOf == null) editionDao.printedArticleIdsSince(after).toSet() else printedSinceExcept(after, reprintOf.id)
-        val seen = articleDao.firstSeenBetween(after, now)
-        val rows = seen.filter { it.article.id !in printedSince && (kind != EditionKind.EXTRA || it.article.feedId in extraFeeds) }
-        if (rows.isEmpty()) return@withWriteTransaction null
-
-        // A scheduled build supersedes the pending editions, so their untouched stories now
-        // count as ignored. An Extra edition supersedes nothing.
-        val pending = editionDao.getPending()
-        val supersedes = kind != EditionKind.EXTRA
-        val evidence = learner.evidence(now, if (supersedes) emptySet() else pending.mapTo(HashSet()) { it.id })
-        val learned = learner.learn(evidence, now)
-        val details = feedDao.getSubscribedWithDetails()
-        val tagAffinity = HashMap<String, Double>()
-        details.forEach { feed -> feed.tags.forEach { tagAffinity[it.name] = learned.tags[it.id] ?: it.affinity } }
-        val feeds = details.map { it.toProfile(learned, tagAffinity) }
-        val feedsById = feeds.associateBy { it.id }
-
-        val newIds = rows.mapTo(HashSet()) { it.article.id }
-        val fresh = withComebacks(rows, after).let { if (kind == EditionKind.EXTRA) exemptNewest(it) else it }
-        val alreadyRun = seen.filter { it.article.id in printedSince }
-        val heldOver = if (kind == EditionKind.MORNING) heldOver(feeds, alreadyRun, pending, after, releaseAt, newIds) else emptyList()
-        val heldOverIds = heldOver.mapTo(HashSet()) { it.articleId }
-        val away = if (kind == EditionKind.MORNING) awayPool(now) else null
-        val readingList = if (kind == EditionKind.MORNING) readingListPick(releaseAt) else null
-        val shadows = alreadyRun.filter { it.article.id !in heldOverIds && it.article.feedId in feedsById }.map { it.toCandidate() }
-
-        // Within-feed ranking: learned from the same evidence as affinity, as of the release
-        // time, then given the traits of every post this build scores.
-        val taste = withinFeed.learn(evidence, learner.windowStart(now), at = releaseAt)
-        val scored = fresh + heldOver + shadows + away?.candidates.orEmpty()
-        val traits = withinFeed.traitsOf(scored.map { it.articleId }, taste)
-        val builder = EditionBuilder(config, Scorer(config, withinFeedSource = taste.source(traits)))
+        // N from the ratings stored for these posts; none stored, or no model, and N is 1 throughout.
+        val ratings = interestRatings.of(plan.scored.map { it.articleId })
+        val scorer = Scorer(config, withinFeedSource = plan.within, interestSource = interest.source(ratings))
+        val builder = EditionBuilder(config, scorer)
 
         val draft = builder.build(
-            candidates = fresh + heldOver,
-            feeds = feeds,
+            candidates = plan.fresh + plan.heldOver,
+            feeds = plan.feeds,
             length = length,
             releaseAt = releaseAt,
-            tagAffinity = tagAffinity,
+            tagAffinity = plan.tagAffinity,
             kind = kind,
-            alreadyRun = shadows,
-            away = away,
-            readingList = readingList,
+            alreadyRun = plan.shadows,
+            away = plan.away,
+            readingList = plan.readingList,
         )
         // A reprint has to print something from the feeds it was asked for; otherwise the first
         // printing stands.
-        if (draft.printed.none { it.articleId in newIds && (reprintOf == null || it.feedId in extraFeedIds) }) return@withWriteTransaction null
+        if (draft.printed.none { it.articleId in plan.newIds && (reprintOf == null || it.feedId in extraFeedIds) }) return@withWriteTransaction null
 
-        if (supersedes) {
+        if (plan.supersedes) {
             // Each untouched story of a superseded edition that the reader saw counts one more run.
-            pending.forEach { engagementDao.countUnopenedRun(it.id, config.pageSeenMinMillis) }
-            learner.store(learned)
+            plan.pending.forEach { engagementDao.countUnopenedRun(it.id, config.pageSeenMinMillis) }
+            learner.store(plan.learned)
         }
 
         // A reprint's pages are new, and its old page views go with the old row (see below).
@@ -440,6 +535,23 @@ class RoomEditionPublisher(
 
     private companion object {
         val SCHEDULED = listOf(EditionKind.MORNING, EditionKind.EVENING)
+    }
+
+    /**
+     * The stored on-device ratings (1 to 5) of a build's posts, by article ID; a post never
+     * rated is missing. [None], the default, has no ratings at all.
+     */
+    fun interface InterestRatings {
+        suspend fun of(articleIds: Collection<Long>): Map<Long, Int>
+
+        companion object {
+            val None = InterestRatings { emptyMap() }
+
+            /** The ratings stored in [database] (`article_interest`), while [enabled] says so; none otherwise. */
+            fun stored(database: MorningIssueDatabase, enabled: suspend () -> Boolean) = InterestRatings { ids ->
+                if (enabled()) database.interestDao().ratingsOf(ids).mapValues { it.value.rating } else emptyMap()
+            }
+        }
     }
 
     private fun FeedWithDetails.toProfile(learned: LearnedAffinities, tagAffinity: Map<String, Double>): FeedProfile {

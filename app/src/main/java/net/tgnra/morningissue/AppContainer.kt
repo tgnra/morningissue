@@ -11,6 +11,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import net.tgnra.morningissue.ai.ForegroundTracker
+import net.tgnra.morningissue.ai.InterestRater
+import net.tgnra.morningissue.ai.MlKitNanoModel
+import net.tgnra.morningissue.ai.NanoDownloadWorker
+import net.tgnra.morningissue.ai.OnDeviceAi
 import net.tgnra.morningissue.data.archive.ArchiveController
 import net.tgnra.morningissue.data.archive.RoomArchiveTransfer
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
@@ -45,6 +50,7 @@ import net.tgnra.morningissue.edition.EditionPublisher
 import net.tgnra.morningissue.edition.EditionScheduler
 import net.tgnra.morningissue.edition.ReleaseTimes
 import net.tgnra.morningissue.embedding.EmbedderAsset
+import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.sync.CandidateFetcher
 import net.tgnra.morningissue.sync.FeedDiscovery
 import net.tgnra.morningissue.sync.FeedFetcher
@@ -104,6 +110,9 @@ interface AppContainer {
 
     /** Print now: the foreground build of an edition that was not printed in the background. */
     val editionPrinter: EditionPrinter
+
+    /** Gemini Nano on the phone, when it has it: its status, its download, and its ratings for N. */
+    val onDeviceAi: OnDeviceAi
 
     val imageLoader: ImageLoader
     val clock: Clock
@@ -254,4 +263,19 @@ class DefaultAppContainer(context: Context) : AppContainer {
     }
 
     override val editions: EditionRepository by lazy { RoomEditionRepository(database, editionPublisher, clock) }
+
+    /** Whether an activity is started; `MorningIssueApp` registers it. AICore only serves the foreground. */
+    val foreground = ForegroundTracker()
+
+    override val onDeviceAi: OnDeviceAi by lazy {
+        val model = MlKitNanoModel()
+        val rater = InterestRater(
+            database = database,
+            model = model,
+            clock = clock,
+            shortlist = { editionPublisher.shortlist(RankingConfig.Default.interestShortlist) },
+            isForeground = { foreground.isForeground },
+        )
+        OnDeviceAi(model, settings, rater, appScope, scheduleDownload = { NanoDownloadWorker.enqueue(appContext) })
+    }
 }

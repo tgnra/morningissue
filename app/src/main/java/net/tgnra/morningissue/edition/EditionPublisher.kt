@@ -60,6 +60,14 @@ interface EditionPublisher {
      * Returns null, storing and changing nothing, when those feeds have nothing printable.
      */
     suspend fun publishExtraEdition(feedIds: Set<Long>): Long? = null
+
+    /**
+     * The article IDs of the next scheduled edition's best [limit] candidates, best first, by
+     * their score without the model's rating: what the on-device model should rate before
+     * that edition is built (`ai/InterestRater`). Reads only. Empty when the next edition is
+     * already built or has nothing new.
+     */
+    suspend fun shortlist(limit: Int): List<Long> = emptyList()
 }
 
 /**

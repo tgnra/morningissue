@@ -1,6 +1,7 @@
 package net.tgnra.morningissue.edition
 
 import androidx.work.WorkManager
+import kotlinx.coroutines.flow.first
 import net.tgnra.morningissue.CoreComponents
 import net.tgnra.morningissue.sync.SyncComponents
 
@@ -28,6 +29,11 @@ object EditionModule {
             database = core.database,
             settings = core.settings,
             clock = core.clock,
+            // The on-device model's stored ratings, while the reader has it switched on. Off, or
+            // on a phone that never had the model, there are none and N is 1 throughout.
+            interestRatings = RoomEditionPublisher.InterestRatings.stored(core.database) {
+                core.settings.settings.first().onDeviceAiRanking
+            },
         ),
         scheduler = WorkManagerEditionScheduler(
             workManager = { WorkManager.getInstance(core.appContext) },
