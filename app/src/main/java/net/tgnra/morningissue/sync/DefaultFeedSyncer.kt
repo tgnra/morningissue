@@ -238,6 +238,12 @@ class DefaultFeedSyncer(
         }
         val teasers = mutableListOf<Teaser>()
         val count = database.withWriteTransaction {
+            // First seen when stored, read inside the write transaction: an edition build reads
+            // its pool and its cutoff in a transaction of its own, so a post first seen at or
+            // before a build's cutoff is always in what that build reads, and one stored after
+            // it always falls after the cutoff (in the next edition). A time taken before the
+            // fetch could land before a cutoff and be stored after the build had read the pool.
+            val seenAt = maxOf(now, clock.instant())
             for (post in incomplete) {
                 if (post.categories) signalDao.addCategories(post.articleId, post.item.categories)
                 traits[post.articleId]?.let { signalDao.upsertTraits(ArticleSignalDao.traitsRow(post.articleId, it)) }
@@ -245,7 +251,7 @@ class DefaultFeedSyncer(
             }
             rows.count { post ->
                 val content = post.item.content
-                val id = articleDao.insertNew(post.article, post.blocksJson, content.plainText.takeIf { post.blocksJson != null })
+                val id = articleDao.insertNew(post.article.copy(firstSeenAt = seenAt), post.blocksJson, content.plainText.takeIf { post.blocksJson != null })
                     ?: return@count false
                 signalDao.addCategories(id, post.item.categories)
                 signalDao.upsertTraits(ArticleSignalDao.traitsRow(id, content.traits))
