@@ -8,7 +8,7 @@
   gradle_9,
   jdk21_headless,
   makeWrapper,
-  version ? "0.1.0",
+  version ? "0.5.0",
 }:
 
 let
