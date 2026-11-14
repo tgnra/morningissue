@@ -85,7 +85,7 @@ internal class FakeSettings(initial: AppSettings = AppSettings()) : SettingsRepo
     val current: AppSettings get() = state.value
 }
 
-/** Records the order of everything the early build does. */
+/** Records the order of everything a print does. */
 internal class Journal {
     private val entries = mutableListOf<String>()
 
@@ -109,28 +109,10 @@ internal class FakeSyncer(
         return behaviour()
     }
 
-    override suspend fun syncFeed(feedId: Long): SyncReport = SyncReport()
-}
-
-internal class FakePublisher(
-    private val journal: Journal,
-    var nextRelease: Instant?,
-    var nextEditionId: Long? = 7,
-    var currentEditionId: Long? = 3,
-    var buildFailure: Exception? = null,
-) : EditionPublisher {
-    override suspend fun ensureCurrentEdition(): Long? {
-        journal.add("ensureCurrent")
-        return currentEditionId
+    override suspend fun syncFeed(feedId: Long): SyncReport {
+        journal.add("syncFeed:$feedId")
+        return behaviour()
     }
-
-    override suspend fun buildNextEdition(): Long? {
-        journal.add("buildNext")
-        buildFailure?.let { throw it }
-        return nextEditionId
-    }
-
-    override suspend fun nextReleaseAt(): Instant? = nextRelease
 }
 
 internal class FakeEditions(

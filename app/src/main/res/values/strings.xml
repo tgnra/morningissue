@@ -38,14 +38,17 @@
     <string name="notice_dismiss">Close this notice</string>
     <string name="print_now">Print now</string>
     <string name="print_try_again">Try again</string>
-    <string name="print_stage_syncing">Fetching your sources…</string>
-    <string name="print_stage_building">Setting the pages…</string>
-    <string name="print_stage_text">Fetching the stories…</string>
-    <plurals name="print_stage_images">
-        <item quantity="one">Fetching %d picture…</item>
-        <item quantity="other">Fetching %d pictures…</item>
+    <string name="newsstand_printing_today">Printing today’s edition…</string>
+    <string name="newsstand_printing_evening">Printing this evening’s edition…</string>
+    <string name="newsstand_printing_date">Printing the edition of %1$s…</string>
+    <string name="print_stage_syncing">Gathering the last dispatches…</string>
+    <plurals name="print_stage_syncing_feeds">
+        <item quantity="one">Gathering the last dispatches from %d source…</item>
+        <item quantity="other">Gathering the last dispatches from %d sources…</item>
     </plurals>
-    <string name="print_stay">Printing carries on if you leave this screen.</string>
+    <string name="print_stage_rating">Reading the stories through…</string>
+    <string name="print_stage_building">Setting the pages…</string>
+    <string name="print_stay">Printing carries on if you leave the app.</string>
     <string name="print_from_stored">Your sources could not be reached, so this edition was printed from the posts already stored.</string>
     <string name="print_nothing_new">Your sources had nothing new to print.</string>
     <string name="print_unreachable">Your sources could not be reached, and nothing new is stored to print. Try again when you are connected.</string>
@@ -73,6 +76,7 @@
     <string name="extra_reprinted">Extra edition reprinted</string>
     <string name="extra_printing">Fetching the new sources and setting the Extra edition…</string>
     <string name="extra_printed">Extra edition printed</string>
+    <string name="extra_failed">The Extra edition could not be printed. Try again.</string>
     <string name="extra_nothing_to_print">Nothing recent from the new sources to print. Their next posts join the next edition.</string>
     <string name="cover_lead">Lead story: %1$s</string>
     <string name="cover_open">Open edition</string>

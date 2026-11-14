@@ -31,18 +31,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -62,17 +60,15 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.TextStyle
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import net.tgnra.morningissue.R
-import net.tgnra.morningissue.edition.BuildStage
 import net.tgnra.morningissue.edition.DueEditions
 import net.tgnra.morningissue.edition.DueRelease
 import net.tgnra.morningissue.edition.DueStatus
+import net.tgnra.morningissue.edition.PrintJob
 import net.tgnra.morningissue.edition.PrintResult
+import net.tgnra.morningissue.edition.PrintStage
 import net.tgnra.morningissue.edition.PrintState
 import net.tgnra.morningissue.engine.schedule
 import net.tgnra.morningissue.model.EditionKind
@@ -103,11 +99,12 @@ private const val RACKED_EDITIONS = 6
  * Home: today's edition facing out, the last six racked below or beside it newest first, an
  * "Older issues" tile to the calendar, and the button bar (Search, Saved, Sources, Settings).
  *
- * The stand never builds an edition by being opened, and it has no refresh: editions are
- * printed in the background ahead of their release. When the one that is due failed to build
- * (`DueEditions` has the rule), an unprinted cover stands in its place with a Print now
- * button, which hands the work to the app-wide `EditionPrinter`; this screen only shows where
- * that has got to, so leaving or rotating it loses nothing.
+ * Editions are printed when the stand comes to the foreground: when a release has come and
+ * its edition is not printed yet (`DueEditions` has the rule), the app-wide `EditionPrinter`
+ * prints it there and then, and an unprinted cover stands in its place with the print's
+ * progress ("Printing today's edition…") until the cover replaces it. This screen only starts
+ * the print and shows where it has got to, so leaving or rotating it loses nothing. A print
+ * that failed leaves the placeholder with Try again. The stand has no refresh.
  */
 @Composable
 fun NewsstandScreen(
@@ -122,7 +119,6 @@ fun NewsstandScreen(
     val spec = LocalPaperLayoutSpec.current
     val colors = MorningIssueTheme.colors
     val scope = rememberCoroutineScope()
-    val resources = LocalResources.current
 
     val editions by retainedState("editions") { container.editions.observeReleasedEditions() }
     val feeds by retainedState("feeds") { container.feeds.observeFeeds() }
@@ -136,7 +132,8 @@ fun NewsstandScreen(
     val schedule = settings?.schedule
 
     // Release is a clock check, taken when the stand comes to the foreground and again each
-    // time a release time passes while it is on screen. Nothing is built or fetched here.
+    // time a release time passes while it is on screen. Each check also asks the printer to
+    // print the edition that has come, if it is not printed yet.
     var clockCheck by remember { mutableIntStateOf(0) }
     LifecycleStartEffect(container, settings?.resetTime, settings?.eveningEditionEnabled, settings?.eveningEditionTime, settings?.resetChange, settings?.eveningChange) {
         clockCheck++
@@ -152,17 +149,17 @@ fun NewsstandScreen(
     }
     val now = remember(clockCheck) { container.clock.instant() }
 
-    // The on-device model rates the next edition's likeliest stories while the app is in the
-    // foreground, the only time AICore will serve it; nothing on the stand waits for it.
-    LifecycleStartEffect(container) {
-        container.onDeviceAi.rateSoon()
-        onStopOrDispose { }
+    // Print the edition that is due, in the foreground, where the on-device model can rate its
+    // shortlist first. With nothing to print, the model rates the next edition's likeliest
+    // stories ahead of time instead, so that print has less to do; nothing waits for that.
+    LaunchedEffect(container, clockCheck) {
+        if (!container.editionPrinter.printIfDue()) container.onDeviceAi.rateSoon()
     }
 
     val printing = printState as? PrintState.Printing
-    // An edition Print now has stored but is still fetching stories for stays behind the
-    // placeholder until the run is over.
-    val onStand = editions?.filter { it.id != printing?.editionId }
+    val printingDue = printing?.takeIf { it.job is PrintJob.Due }
+    val printingExtra = printing?.job is PrintJob.Extra
+    val onStand = editions
     val subscribed = feeds
 
     // Null until the editions, the sources and the settings have all been read: until then a
@@ -179,15 +176,16 @@ fun NewsstandScreen(
     } else {
         null
     }
-    // The edition the placeholder stands in for: one that failed to build, or one being
-    // printed at the reader's request after a "nothing new" verdict.
+    // The edition the placeholder stands in for: one not printed yet (being printed now, or
+    // whose print failed), or one being printed at the reader's request after a "nothing new"
+    // verdict.
     val unprinted: DueRelease? = when (status) {
         is DueStatus.NotPrinted -> status.release
-        is DueStatus.NothingNew -> status.release.takeIf { printing != null }
+        is DueStatus.NothingNew -> status.release.takeIf { printingDue != null }
         else -> null
     }
 
-    // What the last Print now run came to, while it is still about the paper that is due.
+    // What the last print came to, while it is still about the paper that is due.
     val lastResult = (printState as? PrintState.Finished)
         ?.takeIf { schedule != null && !it.at.isBefore(DueEditions.due(now, schedule, zone).first().at) }
         ?.result
@@ -196,6 +194,10 @@ fun NewsstandScreen(
         PrintResult.NothingNew -> R.string.print_nothing_new
         PrintResult.Unreachable -> R.string.print_unreachable
         PrintResult.Failed -> R.string.print_failed
+        PrintResult.ExtraPrinted -> R.string.extra_printed
+        PrintResult.ExtraReprinted -> R.string.extra_reprinted
+        PrintResult.ExtraNothingNew -> R.string.extra_nothing_to_print
+        PrintResult.ExtraFailed -> R.string.extra_failed
         PrintResult.Printed, null -> null
     }
     val printFailed = lastResult == PrintResult.Unreachable || lastResult == PrintResult.Failed
@@ -206,12 +208,8 @@ fun NewsstandScreen(
     val noNewEdition = status is DueStatus.NothingNew && unprinted == null && newest != null && schedule != null &&
         StandEditions.of(newest.date, status.release.date) == StandEdition.NoNewEdition
 
-    var notice by rememberSaveable { mutableStateOf<String?>(null) }
-    val printNow: () -> Unit = {
-        notice = null
-        // Does nothing if a run is already under way.
-        container.editionPrinter.printNow()
-    }
+    // Does nothing if a print is already under way.
+    val printNow: () -> Unit = { container.editionPrinter.printNow() }
 
     val newSources = remember(feeds, editions, settings?.extraOfferDismissedAt) {
         ExtraOffer.newSources(
@@ -222,33 +220,10 @@ fun NewsstandScreen(
     }
     // Today's Extra edition, if there is one, is reprinted with the new sources.
     val reprintsExtra = ExtraOffer.reprints(editions.orEmpty(), now.atZone(zone).toLocalDate())
-    var printingExtra by remember { mutableStateOf(false) }
+    // The printer syncs the new sources (an imported list has not been read at all yet), has
+    // the model rate their stories and prints; its result is said like Print now's.
     val printExtra: () -> Unit = {
-        if (!printingExtra && newSources.isNotEmpty()) {
-            printingExtra = true
-            notice = null
-            val ids = newSources.map { it.id }.toSet()
-            scope.launch {
-                try {
-                    // Fetch the new sources first: an imported list has not been read at all yet.
-                    coroutineScope { ids.map { id -> async { container.feedSyncer.syncFeed(id) } }.awaitAll() }
-                    val printed = container.editions.publishExtraEdition(ids)
-                    if (printed == null) {
-                        // Nothing recent enough to print; do not keep offering the same sources.
-                        container.settings.setExtraOfferDismissedAt(container.clock.instant())
-                    }
-                    notice = resources.getString(
-                        when {
-                            printed == null -> R.string.extra_nothing_to_print
-                            reprintsExtra -> R.string.extra_reprinted
-                            else -> R.string.extra_printed
-                        },
-                    )
-                } finally {
-                    printingExtra = false
-                }
-            }
-        }
+        if (newSources.isNotEmpty()) container.editionPrinter.printExtra(newSources.map { it.id }.toSet())
     }
 
     val buttons = listOf(
@@ -273,26 +248,16 @@ fun NewsstandScreen(
                         .padding(bottom = 24.dp),
                 ) {
                     StandHeader()
-                    if (printing == null) {
-                        // A Print now result outranks an older Extra edition notice. Closing
-                        // one forgets that result: the printer's is held by the printer and the
-                        // Extra's is saved with the screen, so neither comes back on rotation
-                        // or on returning to the stand, only when there is a new result.
-                        val extraNotice = notice
-                        if (printMessage != null) {
-                            ResultNotice(
-                                text = stringResource(printMessage),
-                                onDismiss = { container.editionPrinter.dismissResult() },
-                                modifier = Modifier.padding(horizontal = spec.pageMargin).padding(top = 8.dp),
-                                isError = printFailed,
-                            )
-                        } else if (extraNotice != null) {
-                            ResultNotice(
-                                text = extraNotice,
-                                onDismiss = { notice = null },
-                                modifier = Modifier.padding(horizontal = spec.pageMargin).padding(top = 8.dp),
-                            )
-                        }
+                    if (printing == null && printMessage != null) {
+                        // Closing it forgets the result, which the printer holds, so it does
+                        // not come back on rotation or on returning to the stand, only when
+                        // there is a new result.
+                        ResultNotice(
+                            text = stringResource(printMessage),
+                            onDismiss = { container.editionPrinter.dismissResult() },
+                            modifier = Modifier.padding(horizontal = spec.pageMargin).padding(top = 8.dp),
+                            isError = printFailed || lastResult == PrintResult.ExtraFailed,
+                        )
                     }
                     if (noNewEdition) {
                         NoNewEditionNotice(
@@ -303,7 +268,7 @@ fun NewsstandScreen(
                             modifier = Modifier.padding(horizontal = spec.pageMargin),
                         )
                     }
-                    // While today's edition is unprinted, Print now is the offer: it takes the
+                    // While today's edition is unprinted, its print is the offer: it takes the
                     // new sources too, so an Extra edition from them is not offered beside it.
                     if (newSources.isNotEmpty() && unprinted == null) {
                         ExtraEditionOffer(
@@ -322,7 +287,7 @@ fun NewsstandScreen(
                                 UnprintedDisplay(
                                     release = unprinted,
                                     today = now.atZone(zone).toLocalDate(),
-                                    stage = printing?.stage,
+                                    stage = printingDue?.stage,
                                     syncStatus = syncStatus,
                                     tryAgain = printFailed,
                                     onPrint = printNow,
@@ -381,18 +346,17 @@ fun NewsstandScreen(
 }
 
 /**
- * How far a Print now run has got, 0..1, as one bar that only moves forward: the sync is the
- * first half, the build a step, the stories' text most of the rest, the pictures the end.
- * [sync] is the syncer's own count of feeds, which only matters during [BuildStage.Syncing].
+ * How far a print has got, 0..1, as one bar that only moves forward: the sync is the first
+ * part, the model's rating most of the rest, and setting the pages the end. [sync] is the
+ * syncer's own count of feeds, which only matters during [PrintStage.Syncing].
  */
-internal fun printProgress(stage: BuildStage, sync: SyncStatus): Float = when (stage) {
-    BuildStage.Syncing -> {
+internal fun printProgress(stage: PrintStage, sync: SyncStatus): Float = when (stage) {
+    PrintStage.Syncing -> {
         val running = sync as? SyncStatus.Running
-        if (running != null && running.feedsTotal > 0) 0.5f * running.feedsDone / running.feedsTotal else 0f
+        if (running != null && running.feedsTotal > 0) 0.4f * running.feedsDone / running.feedsTotal else 0f
     }
-    BuildStage.Building -> 0.5f
-    is BuildStage.FetchingText -> 0.55f + if (stage.total > 0) 0.35f * stage.done / stage.total else 0.35f
-    is BuildStage.FetchingImages -> 0.95f
+    is PrintStage.Rating -> 0.4f + if (stage.total > 0) 0.5f * stage.done / stage.total else 0.5f
+    PrintStage.Building -> 0.95f
 }
 
 /**
@@ -686,7 +650,7 @@ private fun TodayDisplay(
 private fun UnprintedDisplay(
     release: DueRelease,
     today: LocalDate,
-    stage: BuildStage?,
+    stage: PrintStage?,
     syncStatus: SyncStatus,
     tryAgain: Boolean,
     onPrint: () -> Unit,
@@ -696,6 +660,9 @@ private fun UnprintedDisplay(
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
     val title = when {
+        stage != null && release.date != today -> stringResource(R.string.newsstand_printing_date, PaperFormat.shortDate(release.date))
+        stage != null && release.kind == EditionKind.EVENING -> stringResource(R.string.newsstand_printing_evening)
+        stage != null -> stringResource(R.string.newsstand_printing_today)
         release.date != today -> stringResource(R.string.newsstand_unprinted_date, PaperFormat.shortDate(release.date))
         release.kind == EditionKind.EVENING -> stringResource(R.string.newsstand_unprinted_evening)
         else -> stringResource(R.string.newsstand_unprinted_today)
@@ -732,23 +699,22 @@ private fun UnprintedDisplay(
     }
 }
 
-/** Where a Print now run has got to: the stage in words, a count where there is one, and the bar. */
+/** Where a print has got to: the stage in words, a count where there is one, and the bar. */
 @Composable
-private fun PrintProgress(stage: BuildStage, syncStatus: SyncStatus) {
+private fun PrintProgress(stage: PrintStage, syncStatus: SyncStatus) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
     val running = syncStatus as? SyncStatus.Running
     val line = when (stage) {
-        BuildStage.Syncing ->
-            if (running != null) pluralStringResource(R.plurals.fetching_feeds, running.feedsTotal, running.feedsTotal)
+        PrintStage.Syncing ->
+            if (running != null) pluralStringResource(R.plurals.print_stage_syncing_feeds, running.feedsTotal, running.feedsTotal)
             else stringResource(R.string.print_stage_syncing)
-        BuildStage.Building -> stringResource(R.string.print_stage_building)
-        is BuildStage.FetchingText -> stringResource(R.string.print_stage_text)
-        is BuildStage.FetchingImages -> pluralStringResource(R.plurals.print_stage_images, stage.count, stage.count)
+        is PrintStage.Rating -> stringResource(R.string.print_stage_rating)
+        PrintStage.Building -> stringResource(R.string.print_stage_building)
     }
     val count = when (stage) {
-        BuildStage.Syncing -> running?.let { stringResource(R.string.fetching_progress, it.feedsDone, it.feedsTotal) }
-        is BuildStage.FetchingText -> stringResource(R.string.fetching_progress, stage.done, stage.total)
+        PrintStage.Syncing -> running?.let { stringResource(R.string.fetching_progress, it.feedsDone, it.feedsTotal) }
+        is PrintStage.Rating -> stringResource(R.string.fetching_progress, stage.done, stage.total)
         else -> null
     }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {

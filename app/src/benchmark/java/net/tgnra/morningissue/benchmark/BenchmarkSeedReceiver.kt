@@ -26,28 +26,18 @@ import net.tgnra.morningissue.model.SliderStep
  * --ei posts 1000`. The result data says what was stored. Guarded by the DUMP permission, which
  * the shell holds and other apps do not.
  *
- * With `--ez print true` it stores nothing and instead **runs that build**:
- * `EditionPublisher.ensureCurrentEdition()`, the build from stored posts that Print now and a
- * late background run perform between their sync and their prefetch. Opening the app no
- * longer builds an edition, and the seeded feeds do not exist on the network, so the
- * benchmark asks for the build this way instead of pressing Print now. The result data is
- * "printed edition 12", or "printed nothing".
+ * The seeded feeds count as just synced (`lastSyncAt` = now), so when the app then starts the
+ * newsstand prints the edition on open without syncing first: the seeded feeds do not exist
+ * on the network. That print's build is what the benchmark measures.
  */
 class BenchmarkSeedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val posts = intent.getIntExtra(EXTRA_POSTS, 1000)
         val feeds = intent.getIntExtra(EXTRA_FEEDS, 40)
-        val print = intent.getBooleanExtra(EXTRA_PRINT, false)
         val pending = goAsync()
         val container = context.appContainer
         container.appScope.launch {
             try {
-                if (print) {
-                    val editionId = container.editionPublisher.ensureCurrentEdition()
-                    pending.resultCode = Activity.RESULT_OK
-                    pending.resultData = if (editionId != null) "printed edition $editionId" else "printed nothing"
-                    return@launch
-                }
                 seed(context, posts, feeds)
                 // As after a sync: every post has its traits and its embedding before the app
                 // opens, so the build that is measured reads them as a real one does.
@@ -138,7 +128,6 @@ class BenchmarkSeedReceiver : BroadcastReceiver() {
     private companion object {
         const val EXTRA_POSTS = "posts"
         const val EXTRA_FEEDS = "feeds"
-        const val EXTRA_PRINT = "print"
         const val SEED = 20261110
     }
 }

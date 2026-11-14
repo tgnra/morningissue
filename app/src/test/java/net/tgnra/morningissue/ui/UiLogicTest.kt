@@ -11,7 +11,7 @@ import java.util.Locale
 import net.tgnra.morningissue.model.InlineSpan
 import net.tgnra.morningissue.model.InlineStyle
 import net.tgnra.morningissue.model.RichText
-import net.tgnra.morningissue.edition.BuildStage
+import net.tgnra.morningissue.edition.PrintStage
 import net.tgnra.morningissue.sync.SyncStatus
 import net.tgnra.morningissue.ui.components.ImageTreatment
 import net.tgnra.morningissue.ui.components.StepScroll
@@ -174,27 +174,27 @@ class UiLogicTest {
     }
 
     @Test
-    fun printNowProgressIsOneBarThatOnlyMovesForward() {
+    fun printProgressIsOneBarThatOnlyMovesForward() {
         val idle = SyncStatus.Idle
         val steps = listOf(
-            printProgress(BuildStage.Syncing, idle),
-            printProgress(BuildStage.Syncing, SyncStatus.Running(0, 40)),
-            printProgress(BuildStage.Syncing, SyncStatus.Running(10, 40)),
-            printProgress(BuildStage.Syncing, SyncStatus.Running(40, 40)),
-            printProgress(BuildStage.Building, idle),
-            printProgress(BuildStage.FetchingText(1, 0, 20), idle),
-            printProgress(BuildStage.FetchingText(1, 10, 20), idle),
-            printProgress(BuildStage.FetchingText(1, 20, 20), idle),
-            printProgress(BuildStage.FetchingImages(1, 12), idle),
+            printProgress(PrintStage.Syncing, idle),
+            printProgress(PrintStage.Syncing, SyncStatus.Running(0, 40)),
+            printProgress(PrintStage.Syncing, SyncStatus.Running(10, 40)),
+            printProgress(PrintStage.Syncing, SyncStatus.Running(40, 40)),
+            printProgress(PrintStage.Rating(0, 40), idle),
+            printProgress(PrintStage.Rating(20, 40), idle),
+            printProgress(PrintStage.Rating(40, 40), idle),
+            printProgress(PrintStage.Building, idle),
         )
         assertEquals(steps.sorted(), steps)
         assertEquals(0f, steps.first())
-        assertEquals(0.125f, steps[2])
-        assertEquals("the sync is the first half", 0.5f, steps[3])
+        assertEquals(0.1f, steps[2], 0.0001f)
+        assertEquals("the sync is the first part", 0.4f, steps[3], 0.0001f)
+        assertEquals(0.65f, steps[5], 0.0001f)
         assertTrue(steps.last() < 1f)
         // No feeds and no stories do not divide by zero.
-        assertEquals(0f, printProgress(BuildStage.Syncing, SyncStatus.Running(0, 0)))
-        assertEquals(0.9f, printProgress(BuildStage.FetchingText(1, 0, 0), idle), 0.0001f)
+        assertEquals(0f, printProgress(PrintStage.Syncing, SyncStatus.Running(0, 0)))
+        assertEquals(0.9f, printProgress(PrintStage.Rating(0, 0), idle), 0.0001f)
     }
 
     // --- Layout and rendering helpers --------------------------------------------------------

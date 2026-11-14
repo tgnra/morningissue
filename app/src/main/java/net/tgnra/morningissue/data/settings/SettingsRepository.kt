@@ -62,8 +62,8 @@ interface SettingsRepository {
     suspend fun setExtraOfferDismissedAt(at: Instant) = Unit
 
     /**
-     * Records that a run reached the feeds and found nothing new to print for the scheduled
-     * release at [releaseAt] (`AppSettings.nothingNewFor`). Written by `EarlyBuild`, read by
+     * Records that a print from current posts found nothing new to print for the scheduled
+     * release at [releaseAt] (`AppSettings.nothingNewFor`). Written by `EditionPress`, read by
      * the newsstand so it does not report that edition as unprinted. Only the newest few are
      * kept.
      */

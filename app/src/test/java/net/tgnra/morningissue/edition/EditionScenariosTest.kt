@@ -129,19 +129,19 @@ class EditionScenariosTest {
         open(tuesday)
         assertTrue(awayIn(tuesday).isEmpty())
 
-        // Wednesday and Thursday are built overnight and never opened.
-        clock.now = at(11, "05:00")
+        // Wednesday and Thursday are printed when the stand is opened, and never read.
+        clock.now = at(11, "06:40")
         val wednesdayPosts = addPosts(6, at(11, "04:00"), "Wed")
         val wire = addFeed("Wire", CadenceTier.FIREHOSE)
         val fromWire = addPost(wire, at(11, "04:30"))
         val turnedDown = addPost(addFeed("Turned down", slider = SliderStep.LESS), at(11, "04:30"))
-        val wednesday = publisher.buildNextEdition()!!
+        val wednesday = publisher.ensureCurrentEdition()!!
         assertTrue("yesterday's paper was opened, so nothing was missed", awayIn(wednesday).isEmpty())
         assertTrue(fromWire in printedIn(wednesday) && turnedDown in printedIn(wednesday))
 
-        clock.now = at(12, "05:00")
+        clock.now = at(12, "06:40")
         val thursdayPosts = addPosts(6, at(12, "04:00"), "Thu")
-        val thursday = publisher.buildNextEdition()!!
+        val thursday = publisher.ensureCurrentEdition()!!
         // Thursday's paper already carried Wednesday's best, but nobody saw it.
         assertEquals(wednesdayPosts.toSet(), awayIn(thursday).toSet())
 
@@ -198,10 +198,10 @@ class EditionScenariosTest {
         open(publisher.ensureCurrentEdition()!!)
         db.engagementDao().setLiked(liked, at(10, "07:30"))
 
-        clock.now = at(11, "05:00")
+        clock.now = at(11, "06:40")
         addPosts(4, at(11, "04:00"), "Wed")
         val missedFromWire = addPost(wire, at(11, "04:50"))
-        val wednesday = publisher.buildNextEdition()!!
+        val wednesday = publisher.ensureCurrentEdition()!!
         assertTrue(missedFromWire in printedIn(wednesday))
 
         clock.now = at(12, "08:00")
@@ -345,7 +345,7 @@ class EditionScenariosTest {
     }
 
     @Test
-    fun theEveningEditionCanBeBuiltEarlyAndFollowsItsOwnTimeSetting() = runTest {
+    fun theEveningEditionFollowsItsOwnTimeSetting() = runTest {
         enableEvening()
         settings.setEveningEditionTime(LocalTime.of(20, 15))
         addPosts(6, at(10, "06:40"), "Tue")
@@ -353,20 +353,21 @@ class EditionScenariosTest {
         val wire = addFeed("Wire", CadenceTier.FIREHOSE)
         val inTime = (0 until 4).map { addPost(wire, at(10, "18:00")) }
 
+        // Not due before its time: opening the app at 18:45 prints nothing new.
         clock.now = at(10, "18:45")
         assertEquals(at(10, "20:15"), publisher.nextReleaseAt())
-        val early = publisher.buildNextEdition()!!
-        val edition = db.editionDao().getById(early)!!
+        assertEquals(morning, publisher.ensureCurrentEdition())
+        assertEquals(1, db.editionDao().count())
+
+        // Opened at 20:20: printed then, released at its own time, cut off when it is printed.
+        clock.now = at(10, "20:20")
+        val evening = publisher.ensureCurrentEdition()!!
+        val edition = db.editionDao().getById(evening)!!
         assertEquals(EditionKind.EVENING, edition.kind)
         assertEquals(at(10, "20:15"), edition.releaseAt)
-        assertEquals(early, publisher.buildNextEdition())
-        // Hidden until its release time.
-        assertEquals(morning, publisher.ensureCurrentEdition())
-        val tooLate = addPost(wire, at(10, "19:30"))
-
-        clock.now = at(10, "20:15")
-        assertEquals(early, publisher.ensureCurrentEdition())
-        assertEquals(inTime.toSet(), idsOf(early))
+        assertEquals(at(10, "20:20"), edition.cutoffAt)
+        assertEquals(inTime.toSet(), idsOf(evening))
+        val tooLate = addPost(wire, at(10, "20:40"))
 
         // The straggler is tomorrow morning's.
         clock.now = at(11, "07:00")
@@ -384,8 +385,8 @@ class EditionScenariosTest {
         (0 until 4).map { addPost(wire, at(11, "09:00")) }
         addPosts(2, at(11, "09:00"), "Wed")
 
-        // Wednesday, first opened at 19:00 with no early builds: one morning paper with
-        // everything; the evening paper would have nothing new to print.
+        // Wednesday, first opened at 19:00: one morning paper with everything; the evening
+        // paper would have nothing new to print.
         clock.now = at(11, "19:00")
         val current = publisher.ensureCurrentEdition()!!
 

@@ -144,11 +144,13 @@ class InterestPublisherTest {
     }
 
     @Test
-    fun theShortlistIsTheNextEditionsBestCandidatesBestFirst() = runTest {
+    fun theShortlistIsTheDueEditionsBestCandidatesBestFirst() = runTest {
         val db = database()
         val ids = seed(db)
-        val publisher = publisher(db)
+        val clock = MutableClock(morning)
+        val publisher = RoomEditionPublisher(db, FakeSettings(), clock, zone = { ZoneOffset.UTC })
 
+        // Today's edition is due and not printed yet: the print rates its shortlist first.
         val shortlist = publisher.shortlist(10)
 
         assertEquals(10, shortlist.size)
@@ -157,11 +159,24 @@ class InterestPublisherTest {
         assertTrue(ids[5] !in shortlist)
         // The whole pool when asked for more than there is.
         assertEquals(35, publisher.shortlist(100).size)
-        // Best first: the next edition's lead, built from the same posts, heads it.
-        val next = publisher.buildNextEdition()!!
-        val nextLead = db.editionDao().getItems(next).single { it.item.kind == ItemKind.LEAD }.item.articleId
-        assertEquals(nextLead, shortlist.first())
-        // Once the next edition is built there is nothing left to rate for it.
+        // Best first: the edition's lead, built from the same posts, heads it.
+        val printed = publisher.ensureCurrentEdition()!!
+        val lead = db.editionDao().getItems(printed).single { it.item.kind == ItemKind.LEAD }.item.articleId
+        assertEquals(lead, shortlist.first())
+        // Once it is printed the shortlist is the next edition's, which has nothing yet.
         assertEquals(emptyList<Long>(), publisher.shortlist(10))
+        // A post that arrives later is rated ahead of the next print.
+        val later = db.articleDao().insertNew(
+            ArticleEntity(
+                feedId = db.articleDao().getById(ids[0])!!.feedId,
+                guid = "later",
+                url = "https://example.com/later",
+                title = "Later",
+                publishedAt = morning.plus(Duration.ofHours(2)),
+                firstSeenAt = morning.plus(Duration.ofHours(2)),
+            ),
+        )!!
+        clock.now = morning.plus(Duration.ofHours(3))
+        assertEquals(listOf(later), publisher.shortlist(10))
     }
 }

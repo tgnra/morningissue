@@ -105,13 +105,6 @@ data class RankingConfig(
     val archiveCooldownEditions: Int = 3,
     /** From your reading list runs at most once in this many days. */
     val readingListIntervalDays: Long = 7,
-    /** The early build aims for this long before the reset time. */
-    val earlyBuildLeadMinutes: Long = 90,
-    /**
-     * The early build only builds the coming edition when its reset is at most this far away;
-     * a job that ran late (after the reset it aimed for) settles for the current edition.
-     */
-    val earlyBuildMaxLeadMinutes: Long = 180,
 
     // Cadence fallback: the interval assumed for a feed whose median interval is not known yet,
     // by tier (v1's "typical median interval" column).

@@ -31,16 +31,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Reschedules the early edition build when the clock or time zone changes. -->
-        <receiver
-            android:name=".edition.TimeChangeReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
-                <action android:name="android.intent.action.TIME_SET" />
-            </intent-filter>
-        </receiver>
     </application>
 
 </manifest>

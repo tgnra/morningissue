@@ -41,7 +41,10 @@ import net.tgnra.morningissue.model.EditionKind
 import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.ItemKind
 
-/** The trace section around the on-open fallback build; `:macrobenchmark` measures it by this name. */
+/**
+ * The trace section around the build of the due morning edition (once the on-open fallback,
+ * now the build stage of the print on open); `:macrobenchmark` measures it by this name.
+ */
 const val TRACE_ON_OPEN_BUILD = "MorningIssue.onOpenEditionBuild"
 
 /** Tells concurrent trace sections of the same name apart; shared by every publisher in the process. */
@@ -89,9 +92,9 @@ private val traceCookies = AtomicInteger()
  *
  * **Model interest.** N, the on-device model's rating of a post (`engine/Interest`), comes from
  * [interestRatings]: the ratings stored for the build's candidates. The build never asks the
- * model itself (AICore refuses inference from the background, where most builds run); the
- * ratings were given while the app was in the foreground (`ai/InterestRater`, which asks
- * [shortlist] what to rate). A post without one, or every post when the source is
+ * model itself, so it does not depend on the app staying in the foreground; the print that
+ * calls it (`EditionPress`) has the model rate [shortlist] first, while the app is open
+ * (`ai/InterestRater`). A post without a rating, or every post when the source is
  * [InterestRatings.None], scores as if there were no model.
  *
  * **Subscribed feeds only.** The pool is subscribed feeds' posts: a post opened or saved from
@@ -153,16 +156,8 @@ class RoomEditionPublisher(
             build(EditionKind.EVENING, EditionClock.editionDate(evening, zone), releaseAt = evening, now = now, length = settings.editionLength)
         }
         // Whatever is newest on the stand, of any kind. An edition whose own release time is
-        // still ahead (built early, or see "Time zones") is not shown yet.
+        // still ahead (built ahead by an earlier version of the app, or see "Time zones") is not shown yet.
         editionDao.getLatestReleased(now)?.id
-    }
-
-    override suspend fun buildNextEdition(): Long? = mutex.withLock {
-        val now = clock.instant()
-        val settings = settings.settings.first()
-        val zone = zone()
-        val next = settings.schedule.nextRelease(now, zone)
-        build(next.kind, EditionClock.editionDate(next.at, zone), releaseAt = next.at, now = now, length = settings.editionLength)?.id
     }
 
     override suspend fun nextReleaseAt(): Instant? {
@@ -179,32 +174,67 @@ class RoomEditionPublisher(
     }
 
     /**
-     * The article IDs of the [limit] best candidates of the next scheduled edition, best first,
-     * by the score without N (`Score.base`): what the on-device model should rate before that
-     * edition is built. Posts under the freshness floor or finished are left out. Empty when the
-     * next edition is already built or there is nothing new for it. Reads only, in one read
-     * transaction, and never holds up a build.
+     * The article IDs of the [limit] best candidates of the next build, best first, by the
+     * score without N (`Score.base`): what the on-device model should rate before that build.
+     * The next build is the one [ensureCurrentEdition] would make now (the due morning edition,
+     * then the due evening one) while it is still missing, and otherwise the edition of the
+     * coming release, for the ratings to be ready when it falls due. Posts under the freshness
+     * floor or finished are left out. Empty when that edition exists or there is nothing new
+     * for it. Reads only, in one read transaction, and never holds up a build.
      */
     override suspend fun shortlist(limit: Int): List<Long> {
         val now = clock.instant()
         val settings = settings.settings.first()
-        val next = settings.schedule.nextRelease(now, zone())
-        val date = EditionClock.editionDate(next.at, zone())
+        val zone = zone()
         return database.withReadTransaction {
-            if (editionDao.getByDate(date, next.kind) != null) return@withReadTransaction emptyList()
-            val plan = plan(next.kind, releaseAt = next.at, now = now, reprintOf = null) ?: return@withReadTransaction emptyList()
-            val scorer = Scorer(config, withinFeedSource = plan.within)
-            (plan.fresh + plan.heldOver)
-                .mapNotNull { candidate ->
-                    val feed = plan.feedsById[candidate.feedId] ?: return@mapNotNull null
-                    val score = scorer.score(feed, candidate, next.at)
-                    val printable = candidate.isHeldOver || candidate.exemptFromAgeLimits || score.f >= config.minFreshness
-                    if (score.base > 0.0 && printable) candidate to score.base else null
-                }
-                .sortedWith(compareByDescending<Pair<Candidate, Double>> { it.second }.thenByDescending { it.first.publishedAt })
-                .take(limit)
-                .map { it.first.articleId }
+            val (kind, date, releaseAt) = nextBuild(settings, now, zone)
+            if (editionDao.getByDate(date, kind) != null) return@withReadTransaction emptyList()
+            val plan = plan(kind, releaseAt = releaseAt, now = now, reprintOf = null) ?: return@withReadTransaction emptyList()
+            rank(plan, releaseAt, limit)
         }
+    }
+
+    override suspend fun extraShortlist(feedIds: Set<Long>, limit: Int): List<Long> {
+        if (feedIds.isEmpty()) return emptyList()
+        val now = clock.instant()
+        val date = now.atZone(zone()).toLocalDate()
+        return database.withReadTransaction {
+            val reprintOf = editionDao.getByDate(date, EditionKind.EXTRA)
+            val reprinted = reprintOf?.let { editionDao.getItems(it.id) }.orEmpty()
+            val plan = plan(EditionKind.EXTRA, releaseAt = now, now = now, reprintOf, reprinted, feedIds) ?: return@withReadTransaction emptyList()
+            rank(plan, now, limit)
+        }
+    }
+
+    /** Which edition the next build is for: kind, date and release time. See [shortlist]. */
+    private suspend fun nextBuild(settings: AppSettings, now: Instant, zone: ZoneId): Triple<EditionKind, LocalDate, Instant> {
+        val reset = settings.schedule.latestReset(now, zone)
+        val date = EditionClock.editionDate(reset, zone)
+        val released = editionDao.getLatestReleasedOf(EditionKind.MORNING, now)
+        if ((released == null || released.date < date) && editionDao.getByDate(date, EditionKind.MORNING) == null) {
+            return Triple(EditionKind.MORNING, date, reset)
+        }
+        settings.schedule.currentEveningRelease(now, zone)?.let { evening ->
+            val eveningDate = EditionClock.editionDate(evening, zone)
+            if (editionDao.getByDate(eveningDate, EditionKind.EVENING) == null) return Triple(EditionKind.EVENING, eveningDate, evening)
+        }
+        val next = settings.schedule.nextRelease(now, zone)
+        return Triple(next.kind, EditionClock.editionDate(next.at, zone), next.at)
+    }
+
+    /** The plan's printable candidates by the score without N, best first, as article IDs. */
+    private fun rank(plan: Plan, releaseAt: Instant, limit: Int): List<Long> {
+        val scorer = Scorer(config, withinFeedSource = plan.within)
+        return (plan.fresh + plan.heldOver)
+            .mapNotNull { candidate ->
+                val feed = plan.feedsById[candidate.feedId] ?: return@mapNotNull null
+                val score = scorer.score(feed, candidate, releaseAt)
+                val printable = candidate.isHeldOver || candidate.exemptFromAgeLimits || score.f >= config.minFreshness
+                if (score.base > 0.0 && printable) candidate to score.base else null
+            }
+            .sortedWith(compareByDescending<Pair<Candidate, Double>> { it.second }.thenByDescending { it.first.publishedAt })
+            .take(limit)
+            .map { it.first.articleId }
     }
 
     /**
@@ -491,7 +521,7 @@ class RoomEditionPublisher(
     }
 
     /**
-     * Runs [block] inside a trace section, for the macrobenchmark of the on-open build's 300 ms
+     * Runs [block] inside a trace section, for the macrobenchmark of the build's 300 ms
      * budget. An async section, because a suspending block may finish on another thread; those
      * need Android 10, and on older versions nothing is traced.
      */

@@ -23,9 +23,11 @@ import net.tgnra.morningissue.data.repository.WithinFeedLearner
 import net.tgnra.morningissue.data.signals.EmbeddingBackfill
 import net.tgnra.morningissue.data.signals.SignalsUpkeep
 import net.tgnra.morningissue.data.signals.TraitsBackfill
-import net.tgnra.morningissue.edition.EarlyBuild
+import net.tgnra.morningissue.edition.EditionPress
 import net.tgnra.morningissue.edition.FakeSettings
 import net.tgnra.morningissue.edition.MutableClock
+import net.tgnra.morningissue.edition.PrintJob
+import net.tgnra.morningissue.edition.PrintTimings
 import net.tgnra.morningissue.edition.RoomEditionPublisher
 import net.tgnra.morningissue.embedding.EmbeddingFixtures
 import net.tgnra.morningissue.engine.RankingConfig
@@ -34,7 +36,6 @@ import net.tgnra.morningissue.model.ItemKind
 import net.tgnra.morningissue.sync.DefaultFeedSyncer
 import net.tgnra.morningissue.sync.FeedFetcher
 import net.tgnra.morningissue.sync.MaintainedFeedSyncer
-import net.tgnra.morningissue.sync.NoOpFullTextFetcher
 
 /** One story of one edition, printed or indexed, with what the build gave it and what the reader did. */
 class ItemRecord(
@@ -190,15 +191,17 @@ class Simulation(
             val rater = InterestRater(db, nano, clock, shortlist = { publisher.shortlist(RankingConfig.Default.interestShortlist) }, isForeground = { true })
             val editions = RoomEditionRepository(db, publisher, clock)
             val articles = RoomArticleRepository(db, clock)
-            val earlyBuild = EarlyBuild(
+            // The app's print, as the stand runs it when it comes to the foreground; the full text
+            // and pictures it fetches afterwards are not fetched here.
+            val press = EditionPress(
                 feedSyncer = syncer,
                 publisher = publisher,
                 editions = editions,
-                fullTextFetcher = NoOpFullTextFetcher(),
-                images = { },
-                scheduleNext = {},
-                clock = clock,
                 settings = settings,
+                clock = clock,
+                lastSyncAt = { db.feedDao().lastSyncAt() },
+                // No time limits: they are measured on the wall clock, and a run must not depend on it.
+                timings = UNLIMITED,
                 zone = { ZoneOffset.UTC },
             )
             val learner = AffinityLearner(db)
@@ -229,14 +232,18 @@ class Simulation(
             for (day in 0 until days) {
                 val midnight = START.plus(Duration.ofDays(day.toLong()))
 
-                // 05:00, the early build: final sync, then the 06:30 edition.
+                // 05:00, the periodic background sync.
                 clock.now = midnight.plus(Duration.ofHours(5))
-                val buildAt = clock.now
                 var mark = System.nanoTime()
-                val outcome = earlyBuild.run()
+                syncer.syncAll()
+                // 06:30, the release: the stand is opened and prints the edition. The sync at
+                // 05:00 is recent enough, so the print does not sync again.
+                clock.now = midnight.plus(Duration.ofHours(6)).plus(Duration.ofMinutes(30))
+                val buildAt = clock.now
+                val outcome = press.run(PrintJob.Due(forceSync = false))
                 phases[0] += System.nanoTime() - mark
                 mark = System.nanoTime()
-                outcome.error?.let { throw AssertionError("Day $day: the early build failed", it) }
+                outcome.error?.let { throw AssertionError("Day $day: the print failed", it) }
                 val newPosts = db.articleDao().firstSeenBetween(seenUpTo, buildAt).size
                 val editionId = outcome.editionId
                 val items = ArrayList<ItemRecord>()
@@ -353,7 +360,7 @@ class Simulation(
                 phases[3] += System.nanoTime() - mark
                 records += DayRecord(day, editionId, visit, items, affinity, slope, trust, newPosts)
             }
-            val phaseMillis = mapOf("early build" to phases[0], "W snapshot" to phases[1], "reading" to phases[2], "later syncs" to phases[3], "of which signals upkeep" to upkeepNanos)
+            val phaseMillis = mapOf("print" to phases[0], "W snapshot" to phases[1], "reading" to phases[2], "later syncs" to phases[3], "of which signals upkeep" to upkeepNanos)
                 .mapValues { it.value / 1_000_000 }
             return SimulationResult(persona, seed, records, (System.nanoTime() - started) / 1_000_000, phaseMillis, withModel)
         } finally {
@@ -396,6 +403,10 @@ class Simulation(
 
     companion object {
         const val DAYS = 180
+
+        private val UNLIMITED = Duration.ofDays(1).let { day ->
+            PrintTimings(syncTimeout = day, extraSyncTimeout = day, ratingBudget = day, beforeBuild = day, buildTimeout = day)
+        }
 
         /** Midnight UTC on day 0, a Monday. */
         val START: Instant = Instant.parse("2026-03-02T00:00:00Z")

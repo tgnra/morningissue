@@ -2,9 +2,11 @@ package net.tgnra.morningissue
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import java.time.Clock
+import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,12 +45,16 @@ import net.tgnra.morningissue.data.signals.TraitsBackfill
 import net.tgnra.morningissue.data.storage.RoomStorageRepository
 import net.tgnra.morningissue.data.storage.StorageRepository
 import net.tgnra.morningissue.data.upgrade.ServerClientUpgrade
-import net.tgnra.morningissue.edition.EarlyBuild
+import net.tgnra.morningissue.edition.DueEditions
 import net.tgnra.morningissue.edition.EditionModule
+import net.tgnra.morningissue.edition.EditionPrefetch
+import net.tgnra.morningissue.edition.EditionPress
 import net.tgnra.morningissue.edition.EditionPrinter
 import net.tgnra.morningissue.edition.EditionPublisher
-import net.tgnra.morningissue.edition.EditionScheduler
+import net.tgnra.morningissue.edition.PrintRating
 import net.tgnra.morningissue.edition.ReleaseTimes
+import net.tgnra.morningissue.edition.StoringImagePrefetcher
+import net.tgnra.morningissue.engine.schedule
 import net.tgnra.morningissue.embedding.EmbedderAsset
 import net.tgnra.morningissue.engine.RankingConfig
 import net.tgnra.morningissue.sync.CandidateFetcher
@@ -103,12 +109,11 @@ interface AppContainer {
     val candidates: CandidateFetcher
 
     val editionPublisher: EditionPublisher
-    val editionScheduler: EditionScheduler
 
     /** Changes the reset time and the Evening edition's time so that they apply from the next release. */
     val releaseTimes: ReleaseTimes
 
-    /** Print now: the foreground build of an edition that was not printed in the background. */
+    /** Prints editions in the foreground: the due one when the stand opens, Print now and the Extra edition. */
     val editionPrinter: EditionPrinter
 
     /** Gemini Nano on the phone, when it has it: its status, its download, and its ratings for N. */
@@ -256,10 +261,42 @@ class DefaultAppContainer(context: Context) : AppContainer {
     }
 
     override val editionPublisher: EditionPublisher get() = edition.publisher
-    override val editionScheduler: EditionScheduler get() = edition.scheduler
     override val releaseTimes: ReleaseTimes get() = edition.releaseTimes
     override val editionPrinter: EditionPrinter by lazy {
-        EditionPrinter(appScope, earlyBuild = { EarlyBuild.from(this) }, clock = clock)
+        val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
+        EditionPrinter(
+            scope = appScope,
+            press = {
+                EditionPress(
+                    feedSyncer = feedSyncer,
+                    publisher = editionPublisher,
+                    editions = editions,
+                    settings = settings,
+                    clock = clock,
+                    rating = PrintRating { ids, budget, onProgress -> onDeviceAi.rateFor(ids, budget, onProgress)?.rated ?: 0 },
+                    lastSyncAt = { database.feedDao().lastSyncAt() },
+                    isOnline = {
+                        val capabilities = connectivity?.getNetworkCapabilities(connectivity.activeNetwork)
+                        capabilities != null &&
+                            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                    },
+                )
+            },
+            clock = clock,
+            dueStatus = {
+                val current = settings.settings.first()
+                DueEditions.status(
+                    now = clock.instant(),
+                    schedule = current.schedule,
+                    zone = ZoneId.systemDefault(),
+                    released = editions.observeReleasedEditions().first(),
+                    nothingNewFor = current.nothingNewFor,
+                    hasSources = feeds.observeFeeds().first().isNotEmpty(),
+                )
+            },
+            prefetch = { EditionPrefetch(editions, fullTextFetcher, StoringImagePrefetcher(images)) },
+        )
     }
 
     override val editions: EditionRepository by lazy { RoomEditionRepository(database, editionPublisher, clock) }

@@ -81,6 +81,14 @@ interface FeedDao {
     @Query("UPDATE feed SET status = 'DISCOVERED', addedAt = :addedAt, discoveredAt = :discoveredAt WHERE id = :feedId")
     suspend fun revertToDiscovered(feedId: Long, addedAt: Instant, discoveredAt: Instant?)
 
+    /**
+     * When a subscribed feed last answered a sync (a fetch that succeeded or found the feed
+     * unchanged), the latest of any; null before the first. The print on open asks it to
+     * decide whether to sync first.
+     */
+    @Query("SELECT MAX(lastSyncAt) FROM feed WHERE status = 'SUBSCRIBED'")
+    suspend fun lastSyncAt(): Instant?
+
     @Query("UPDATE feed SET etag = :etag, lastModified = :lastModified, lastSyncAt = :lastSyncAt WHERE id = :feedId")
     suspend fun updateSyncState(feedId: Long, etag: String?, lastModified: String?, lastSyncAt: Instant)
 

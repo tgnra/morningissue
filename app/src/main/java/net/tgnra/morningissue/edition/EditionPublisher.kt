@@ -7,7 +7,8 @@ import net.tgnra.morningissue.data.db.EditionDao
 /**
  * Builds and releases editions. **Owned by the engine/edition agent**; the stub wired in
  * milestone 0 is [StoredEditionPublisher]. Called through `EditionRepository` by the UI and
- * directly by `EarlyBuildWorker`.
+ * directly by the print (`EditionPress`), which runs in the foreground when the reader opens
+ * the app.
  *
  * Implementations run the pure `engine.EditionBuilder` over candidates from the DAOs and store
  * the result with `EditionDao.insertEditionWithItems`. A stored edition is frozen: it is never
@@ -21,20 +22,11 @@ interface EditionPublisher {
      * no edition exists and none can be built (no feeds or no posts). Safe to call concurrently
      * and repeatedly; at most one edition is created per date and kind.
      *
-     * This used to run every time the newsstand opened (the on-open fallback). It no longer
-     * does: it is the build stage of Print now and of a background run that started after its
-     * reset (both through `EarlyBuild`), and onboarding's first edition.
+     * This is the build stage of the print on open, of Print now (both through `EditionPress`)
+     * and of onboarding's first edition. Nothing builds an edition ahead of its release any
+     * more.
      */
     suspend fun ensureCurrentEdition(): Long?
-
-    /**
-     * Builds the edition for the *next* release ahead of time (`cutoffAt = now`, `releaseAt` =
-     * the next reset, or the evening edition's time when that is switched on and comes first)
-     * and stores it unreleased. Does not sync or prefetch; the caller does that
-     * around this call. Returns the edition's ID, the existing one if it was already built, or
-     * null when there is nothing to build from.
-     */
-    suspend fun buildNextEdition(): Long?
 
     /**
      * When the next edition will be released, from the reset time (and, when it is switched
@@ -62,25 +54,19 @@ interface EditionPublisher {
     suspend fun publishExtraEdition(feedIds: Set<Long>): Long? = null
 
     /**
-     * The article IDs of the next scheduled edition's best [limit] candidates, best first, by
-     * their score without the model's rating: what the on-device model should rate before
-     * that edition is built (`ai/InterestRater`). Reads only. Empty when the next edition is
-     * already built or has nothing new.
+     * The article IDs of the best [limit] candidates of the next build, best first, by their
+     * score without the model's rating: what the on-device model should rate before that build
+     * (`ai/InterestRater`). The next build is the due edition while it is still to be printed
+     * (what [ensureCurrentEdition] would build now), otherwise the edition of the coming
+     * release. Reads only. Empty when there is nothing new for it.
      */
     suspend fun shortlist(limit: Int): List<Long> = emptyList()
-}
 
-/**
- * Keeps the early build scheduled. **Owned by the engine/edition agent**; the stub is
- * [NoOpEditionScheduler]. Called from `MorningIssueApp` on process start and whenever the reset
- * time setting changes, and from `TimeChangeReceiver` when the clock or time zone changes.
- */
-interface EditionScheduler {
     /**
-     * (Re)schedules the unique one-off `EarlyBuildWorker` for `nextReset − earlyBuildLead`,
-     * replacing any earlier schedule. Idempotent and cheap; must not block.
+     * The same for the Extra edition [publishExtraEdition] would print from [feedIds] now
+     * (or reprint, when today already has one). Reads only.
      */
-    fun scheduleEarlyBuild()
+    suspend fun extraShortlist(feedIds: Set<Long>, limit: Int): List<Long> = emptyList()
 }
 
 /** Shows whatever editions are already stored; never builds one. */
@@ -89,10 +75,5 @@ class StoredEditionPublisher(
     private val clock: Clock,
 ) : EditionPublisher {
     override suspend fun ensureCurrentEdition(): Long? = editionDao.getLatestReleased(clock.instant())?.id
-    override suspend fun buildNextEdition(): Long? = null
     override suspend fun nextReleaseAt(): Instant? = null
-}
-
-class NoOpEditionScheduler : EditionScheduler {
-    override fun scheduleEarlyBuild() = Unit
 }

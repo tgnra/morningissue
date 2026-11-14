@@ -8,9 +8,8 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import net.tgnra.morningissue.edition.PrintState
 import net.tgnra.morningissue.sync.SyncStatus
 import net.tgnra.morningissue.sync.TeaserBackfillWorker
 
@@ -26,21 +25,17 @@ class MorningIssueApp : Application(), SingletonImageLoader.Factory {
             container.syncScheduler.ensurePeriodicSync()
             // Once after upgrading: fetch the pages of stored posts whose feed gave only a teaser.
             TeaserBackfillWorker.ensureDone(this@MorningIssueApp)
-            // Runs once now and again whenever a release time changes.
-            container.settings.settings
-                .map { listOf(it.resetTime, it.eveningEditionEnabled, it.eveningEditionTime, it.resetChange, it.eveningChange) }
-                .distinctUntilChanged()
-                .collect { container.editionScheduler.scheduleEarlyBuild() }
         }
         watchOnDeviceAi()
-        // Work that earlier versions scheduled and this one no longer has: the Kobo relay's,
-        // and the server client's sync. A worker class that is gone would only fail.
+        // Work that earlier versions scheduled and this one no longer has: the Kobo relay's, the
+        // server client's sync, and the early edition build (editions are now printed in the
+        // foreground when the app is opened). A worker class that is gone would only fail.
         val workManager = WorkManager.getInstance(this)
         for (name in RETIRED_WORK) workManager.cancelUniqueWork(name)
         // Posts stored before database version 2, or brought in while the app was not running,
         // get their traits and embeddings. On the app scope's background threads, and only once
-        // the newsstand has had time to show and to build today's edition if it has to: the
-        // pass writes in short transactions, and the build should not queue behind one.
+        // the newsstand has had time to show and to start printing today's edition if it has
+        // to: the pass writes in short transactions, and the build should not queue behind one.
         container.appScope.launch {
             delay(SIGNALS_START_DELAY_MILLIS)
             try {
@@ -64,9 +59,9 @@ class MorningIssueApp : Application(), SingletonImageLoader.Factory {
     /**
      * The on-device model (Gemini Nano): where it stands, checked once the start has settled,
      * which also asks for its download when the phone supports it but does not have it; then a
-     * rating pass after every sync that finishes while the app is in the foreground. AICore
-     * refuses the background, so nothing is rated otherwise (the newsstand asks too, when it
-     * comes to the foreground).
+     * rating pass after every sync that finishes while the app is in the foreground, so the next
+     * print has less to rate. AICore refuses the background, so nothing is rated otherwise. A
+     * print rates its own shortlist (`EditionPress`), so no pass is started while one runs.
      */
     private fun watchOnDeviceAi() {
         container.appScope.launch {
@@ -77,7 +72,8 @@ class MorningIssueApp : Application(), SingletonImageLoader.Factory {
             var syncing = false
             container.feedSyncer.status.collect { status ->
                 val running = status is SyncStatus.Running
-                if (syncing && !running && container.foreground.isForeground) container.onDeviceAi.rateSoon()
+                val printing = container.editionPrinter.state.value is PrintState.Printing
+                if (syncing && !running && container.foreground.isForeground && !printing) container.onDeviceAi.rateSoon()
                 syncing = running
             }
         }
@@ -87,8 +83,8 @@ class MorningIssueApp : Application(), SingletonImageLoader.Factory {
     override fun newImageLoader(context: PlatformContext): ImageLoader = container.imageLoader
 }
 
-/** Unique work names of earlier versions: the relay sync's, and the server client's. */
-private val RETIRED_WORK = listOf("relay-publish", "relay-cleanup", "client-sync", "client-sync-release", "client-sync-now")
+/** Unique work names of earlier versions: the relay sync's, the server client's, and the early edition build's. */
+private val RETIRED_WORK = listOf("relay-publish", "relay-cleanup", "client-sync", "client-sync-release", "client-sync-now", "early-edition-build")
 
 /** How long after process start the first `SignalsUpkeep` pass begins. */
 private const val SIGNALS_START_DELAY_MILLIS = 5_000L

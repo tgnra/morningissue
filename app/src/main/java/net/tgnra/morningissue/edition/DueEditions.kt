@@ -40,30 +40,32 @@ sealed interface DueStatus {
  * Pure, so every case can be tested; the newsstand shows the placeholder cover exactly when
  * [status] returns [DueStatus.NotPrinted].
  *
- * Editions are built in the background by the early build (`EarlyBuild`, run by WorkManager)
- * and never silently when the app is opened. So once a release time has passed, one of three
- * things is true of its edition:
+ * Editions are printed in the foreground: when the stand comes to the foreground and this
+ * says the due edition is [DueStatus.NotPrinted], `EditionPrinter` prints it at once (the
+ * stand shows the placeholder with the print's progress meanwhile). Nothing is built in the
+ * background. So once a release time has passed, one of three things is true of its edition:
  *
  * 1. **It was printed**: an edition for it is stored and released.
- * 2. **There was nothing new to print**: a run reached the feeds, built, and found no new
- *    post to print. The publisher stores no empty or reprint-only paper, so no edition exists,
- *    and without a record this would look like case 3. The run therefore writes the release
- *    time down (`AppSettings.nothingNewFor`), and that record is the only thing added to
- *    storage for this decision.
- * 3. **It failed to build**: everything else, which is to say no edition and no such record.
- *    That covers a build that threw; a run whose sync reached no feed and which found nothing
- *    stored to print (it cannot know there was nothing new); and a run that never happened,
- *    because WorkManager did not start it (Doze, the app force-stopped, the device off or
- *    without a network), or it started too late or was stopped part-way. These are not told
- *    apart, because the reader's remedy is the same: Print now.
+ * 2. **There was nothing new to print**: a print from current posts (its sync reached the
+ *    feeds, or one had shortly before) built, and found no new post to print. The publisher
+ *    stores no empty or reprint-only paper, so no edition exists, and without a record this
+ *    would look like case 3. The print therefore writes the release time down
+ *    (`AppSettings.nothingNewFor`), and that record is the only thing added to storage for
+ *    this decision.
+ * 3. **It is not printed (yet)**: everything else, which is to say no edition and no such
+ *    record. Until the reader opens the app after the release, that is simply where every
+ *    release is; the open prints it. After a print it covers a build that threw or ran out of
+ *    time, and a print offline that found nothing stored to print (it cannot know there was
+ *    nothing new). The stand then keeps the placeholder with Try again; the automatic print is
+ *    made once per release in a process.
  *
  * The special cases:
  *
  * - **No sources.** Nothing can be new, so it is never a failure: a brand-new install shows
  *   the empty stand and its "Add sources" button, not the placeholder.
  * - **Sources but no edition yet** (onboarding was skipped, or its first sync found nothing
- *   recent). The latest reset is due like any other, so the placeholder shows until an
- *   edition is printed or a run records that there was nothing new.
+ *   recent). The latest reset is due like any other, so the stand prints it when it comes to
+ *   the foreground; a print that finds nothing records that there was nothing new.
  * - **Onboarding** prints the first edition itself, in the foreground, when it finishes its
  *   sync. Once that edition exists the stand is in case 1.
  * - **Evening edition** (when switched on, from its release time until the next morning

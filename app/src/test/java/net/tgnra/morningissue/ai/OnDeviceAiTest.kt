@@ -2,7 +2,17 @@ package net.tgnra.morningissue.ai
 
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import java.time.Duration
 import java.time.Instant
+import kotlinx.coroutines.CompletableDeferred
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import net.tgnra.morningissue.data.db.ArticleEntity
@@ -151,4 +161,77 @@ class OnDeviceAiTest {
 
         assertEquals(1, model.calls)
     }
+
+    // The print's rating is held to a budget on the clock, and the database answers on its own
+    // threads, so these run on real time rather than the test's virtual time.
+
+    @Test
+    fun thePrintsRatingNeedsTheSettingAndTheModelAndReportsProgress() = runTest {
+        withContext(Dispatchers.Default) {
+            onePostToRate()
+            val off = Model(NanoStatus.AVAILABLE)
+            assertNull(realAi(off, FakeSettings(AppSettings(onDeviceAiRanking = false))).rateFor(shortlist, Duration.ofSeconds(45)) { _, _ -> })
+            assertNull(realAi(Model(NanoStatus.DOWNLOADABLE)).rateFor(shortlist, Duration.ofSeconds(45)) { _, _ -> })
+            assertEquals(0, off.calls)
+
+            val progress = mutableListOf<Pair<Int, Int>>()
+            val report = realAi(Model(NanoStatus.AVAILABLE)).rateFor(shortlist, Duration.ofSeconds(45)) { done, total -> progress += done to total }
+            assertEquals(1, report!!.rated)
+            assertEquals(listOf(0 to 1, 1 to 1), progress)
+        }
+    }
+
+    @Test
+    fun thePrintsRatingWaitsForAPassUnderWayAndDoesNotAskAgain() = runTest {
+        withContext(Dispatchers.Default) {
+            onePostToRate()
+            val gate = CompletableDeferred<Unit>()
+            val model = object : NanoModel {
+                val calls = AtomicInteger()
+                override suspend fun status() = NanoStatus.AVAILABLE
+                override suspend fun generate(prompt: String): String {
+                    calls.incrementAndGet()
+                    gate.await()
+                    return "{\"1\": 2}"
+                }
+                override suspend fun download() = true
+            }
+            val ai = realAi(model)
+            ai.rateSoon()
+            withTimeout(5_000) { while (model.calls.get() == 0) delay(10) }
+            launch {
+                delay(300)
+                gate.complete(Unit)
+            }
+
+            val report = ai.rateFor(shortlist, Duration.ofSeconds(45)) { _, _ -> }
+
+            assertNotNull("waited for the pass instead of giving up at once", report)
+            assertEquals("the pass under way rated it; it is not asked again", 1, model.calls.get())
+            assertEquals(2, db.interestDao().ratingsOf(shortlist).values.single().rating)
+        }
+    }
+
+    @Test
+    fun thePrintsRatingGivesUpAtItsBudget() = runTest {
+        withContext(Dispatchers.Default) {
+            onePostToRate()
+            val model = object : NanoModel {
+                override suspend fun status() = NanoStatus.AVAILABLE
+                override suspend fun generate(prompt: String): String = CompletableDeferred<String>().await()
+                override suspend fun download() = true
+            }
+            val started = System.nanoTime()
+            assertNull(realAi(model).rateFor(shortlist, Duration.ofMillis(300)) { _, _ -> })
+            assertTrue((System.nanoTime() - started) / 1_000_000 < 5_000)
+        }
+    }
+
+    private fun realAi(model: NanoModel, settings: FakeSettings = FakeSettings()) = OnDeviceAi(
+        model = model,
+        settings = settings,
+        rater = InterestRater(db, model, MutableClock(now), shortlist = { shortlist }, isForeground = { true }),
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        scheduleDownload = { downloadsAsked++ },
+    )
 }

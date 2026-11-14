@@ -1,6 +1,5 @@
 package net.tgnra.morningissue.edition
 
-import androidx.work.WorkManager
 import kotlinx.coroutines.flow.first
 import net.tgnra.morningissue.CoreComponents
 import net.tgnra.morningissue.sync.SyncComponents
@@ -8,19 +7,17 @@ import net.tgnra.morningissue.sync.SyncComponents
 /** What the edition layer offers to the rest of the app. */
 class EditionComponents(
     val publisher: EditionPublisher,
-    val scheduler: EditionScheduler,
     /** Changes the release times so that they apply from the next release. */
     val releaseTimes: ReleaseTimes,
 )
 
 /**
  * The edition layer's wiring. **Owned by the engine/edition agent**: replace the stubs below
- * with the real implementations here, so `AppContainer` never needs to change. [sync] gives
- * the early build its final sync (`feedSyncer`) and full-text prefetch (`fullTextFetcher`).
+ * with the real implementations here, so `AppContainer` never needs to change.
  *
- * `EarlyBuildWorker` is created by WorkManager, not here: it takes the syncer, the fetcher and
- * the two components below from the app container when it runs (see `EarlyBuild.from`), so
- * [sync] is not needed at wiring time.
+ * Nothing is scheduled: editions are printed in the foreground when the reader opens the app
+ * (`EditionPrinter`, which the app container wires with the syncer and the on-device model),
+ * so [sync] is not needed at wiring time.
  */
 object EditionModule {
     @Suppress("UNUSED_PARAMETER")
@@ -34,13 +31,6 @@ object EditionModule {
             interestRatings = RoomEditionPublisher.InterestRatings.stored(core.database) {
                 core.settings.settings.first().onDeviceAiRanking
             },
-        ),
-        scheduler = WorkManagerEditionScheduler(
-            workManager = { WorkManager.getInstance(core.appContext) },
-            settings = core.settings,
-            editionDao = core.database.editionDao(),
-            clock = core.clock,
-            scope = core.appScope,
         ),
         releaseTimes = ReleaseTimes(
             settings = core.settings,

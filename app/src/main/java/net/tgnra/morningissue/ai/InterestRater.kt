@@ -42,8 +42,9 @@ enum class StopReason {
 /**
  * Asks Gemini Nano to rate the posts most likely to make the next edition, and stores what it
  * says (`article_interest`). Runs only while the app is in the foreground, because AICore will
- * not serve an app in the background; the edition build, which mostly runs in the background,
- * only reads the stored ratings.
+ * not serve an app in the background: as a stage of the print on open (`edition/EditionPress`),
+ * just before the build, and ahead of time when the app is open anyway. The build itself only
+ * reads the stored ratings.
  *
  * One pass:
  *
@@ -82,13 +83,22 @@ class InterestRater(
         return TasteProfile.build(tags, feeds, recent, config.neutralAffinity)
     }
 
-    suspend fun rate(): RatingReport {
+    /**
+     * One pass over [articleIds] (by default the [shortlist]) within [budget]. [onProgress] is
+     * told how many of the posts to rate have been asked about, first with 0 once the model is
+     * really going to be asked, then after each call.
+     */
+    suspend fun rate(
+        articleIds: List<Long>? = null,
+        budget: Duration = this.budget,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): RatingReport {
         val started = clock.instant()
         val profile = profile()
         if (profile.isEmpty) return RatingReport(stoppedBy = StopReason.NO_PROFILE)
         val hash = profile.hash()
 
-        val ids = shortlist()
+        val ids = articleIds ?: shortlist()
         if (ids.isEmpty()) return RatingReport()
         val stored = dao.ratingsOf(ids)
         // Never rated first, then rated under an older profile; each group in shortlist order.
@@ -98,9 +108,12 @@ class InterestRater(
         if (model.status() != NanoStatus.AVAILABLE) return RatingReport(stoppedBy = StopReason.MODEL_UNAVAILABLE)
 
         val posts = dao.postsForRating(todo).associateBy { it.articleId }
+        val asked = todo.mapNotNull { posts[it] }
         var rated = 0
         var calls = 0
-        for (batch in todo.mapNotNull { posts[it] }.chunked(InterestPrompt.BATCH_SIZE)) {
+        var done = 0
+        onProgress(0, asked.size)
+        for (batch in asked.chunked(InterestPrompt.BATCH_SIZE)) {
             if (!isForeground()) return RatingReport(rated, calls, StopReason.BACKGROUND)
             if (Duration.between(started, clock.instant()) >= budget) return RatingReport(rated, calls, StopReason.BUDGET)
             val reply = try {
@@ -111,7 +124,11 @@ class InterestRater(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: NanoException) {
-                if (e.failure == NanoFailure.OTHER) continue
+                if (e.failure == NanoFailure.OTHER) {
+                    done += batch.size
+                    onProgress(done, asked.size)
+                    continue
+                }
                 return RatingReport(rated, calls, StopReason.REFUSED)
             }
             val now = clock.instant()
@@ -120,6 +137,8 @@ class InterestRater(
             }
             if (ratings.isNotEmpty()) dao.upsert(ratings)
             rated += ratings.size
+            done += batch.size
+            onProgress(done, asked.size)
         }
         return RatingReport(rated, calls)
     }

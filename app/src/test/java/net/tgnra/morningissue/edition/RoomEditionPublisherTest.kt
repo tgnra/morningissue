@@ -172,50 +172,26 @@ class RoomEditionPublisherTest {
     }
 
     @Test
-    fun aPostSeenAfterTheEarlyBuildWaitsForTheNextEdition() = runTest {
+    fun aPostSeenAfterThePrintWaitsForTheNextEdition() = runTest {
         addSlowPosts(6, seenAt = minutesBefore(morning, 30))
         publisher.ensureCurrentEdition()!!
 
-        // 05:00 the next day: the early build freezes tomorrow's paper.
-        clock.now = Instant.parse("2026-11-11T05:00:00Z")
-        val inTime = addSlowPosts(3, seenAt = minutesBefore(clock.now, 10), prefix = "In time")
-        val early = publisher.buildNextEdition()!!
-        // Fetched at 05:40, after that cutoff and before the 06:30 release.
-        val tooLate = addPost(addFeed("Straggler"), firstSeenAt = Instant.parse("2026-11-11T05:40:00Z"))
-
-        clock.now = Instant.parse("2026-11-11T07:00:00Z")
-        assertEquals(early, publisher.ensureCurrentEdition())
-        assertEquals(inTime.toSet(), articleIdsOf(early))
+        // 07:20 the next day: the reader opens the app and the edition is printed.
+        clock.now = Instant.parse("2026-11-11T07:20:00Z")
+        val inTime = addSlowPosts(3, seenAt = Instant.parse("2026-11-11T05:00:00Z"), prefix = "In time")
+        val second = publisher.ensureCurrentEdition()!!
+        assertEquals(clock.now, db.editionDao().getById(second)!!.cutoffAt)
+        assertEquals(Instant.parse("2026-11-11T06:30:00Z"), db.editionDao().getById(second)!!.releaseAt)
+        // First seen at 07:40, after that cutoff.
+        val tooLate = addPost(addFeed("Straggler"), firstSeenAt = Instant.parse("2026-11-11T07:40:00Z"))
+        clock.now = Instant.parse("2026-11-11T08:00:00Z")
+        assertEquals(second, publisher.ensureCurrentEdition())
+        assertEquals(inTime.toSet(), articleIdsOf(second))
 
         clock.now = Instant.parse("2026-11-12T07:00:00Z")
         val third = publisher.ensureCurrentEdition()!!
         assertEquals(setOf(tooLate), articleIdsOf(third))
         assertEquals(3, db.editionDao().getById(third)!!.number)
-    }
-
-    @Test
-    fun earlyBuildIsStoredUnreleasedForTheNextReset() = runTest {
-        addSlowPosts(6, seenAt = minutesBefore(morning, 30))
-        val first = publisher.ensureCurrentEdition()!!
-
-        clock.now = Instant.parse("2026-11-11T05:00:00Z")
-        addSlowPosts(5, seenAt = minutesBefore(clock.now, 10), prefix = "Overnight")
-        val next = publisher.buildNextEdition()!!
-
-        val edition = db.editionDao().getById(next)!!
-        assertEquals(LocalDate.of(2026, 11, 11), edition.date)
-        assertEquals(Instant.parse("2026-11-11T06:30:00Z"), edition.releaseAt)
-        assertEquals(clock.now, edition.cutoffAt)
-        assertEquals(2, edition.number)
-        // Building again returns the stored edition; before the reset the old one is current.
-        assertEquals(next, publisher.buildNextEdition())
-        assertEquals(first, publisher.ensureCurrentEdition())
-        assertEquals(Instant.parse("2026-11-11T06:30:00Z"), publisher.nextReleaseAt())
-
-        clock.now = Instant.parse("2026-11-11T06:30:00Z")
-        assertEquals(next, publisher.ensureCurrentEdition())
-        assertEquals(2, db.editionDao().count())
-        assertEquals(Instant.parse("2026-11-12T06:30:00Z"), publisher.nextReleaseAt())
     }
 
     @Test
@@ -255,21 +231,6 @@ class RoomEditionPublisherTest {
         assertEquals(10, db.editionDao().getItems(ids.first()!!).size)
     }
 
-    @Test
-    fun concurrentEarlyBuildAndOpenDoNotDuplicate() = runTest {
-        addSlowPosts(6, seenAt = minutesBefore(morning, 30))
-        publisher.ensureCurrentEdition()!!
-        clock.now = Instant.parse("2026-11-11T05:00:00Z")
-        addSlowPosts(5, seenAt = minutesBefore(clock.now, 10), prefix = "Overnight")
-
-        val ids = withContext(Dispatchers.Default) {
-            (0 until 12).map { async { publisher.buildNextEdition() } }.awaitAll()
-        }
-
-        assertEquals(1, ids.toSet().size)
-        assertEquals(2, db.editionDao().count())
-    }
-
     /** A feed found through discovery, with one post the reader saved [savedAt] and never read. */
     private suspend fun addSavedDiscoveredPost(title: String, seenAt: Instant, savedAt: Instant = seenAt): Long {
         val feedId = db.feedDao().insert(
@@ -293,7 +254,6 @@ class RoomEditionPublisherTest {
 
         // First seen in the window, saved and unread, yet not from a subscription: no paper.
         assertNull(publisher.ensureCurrentEdition())
-        assertNull(publisher.buildNextEdition())
         assertEquals(0, db.editionDao().count())
 
         // Nor once there is an edition to follow.
@@ -354,11 +314,9 @@ class RoomEditionPublisherTest {
     @Test
     fun nothingToBuildReturnsNull() = runTest {
         assertNull(publisher.ensureCurrentEdition())
-        assertNull(publisher.buildNextEdition())
 
         addFeed("Empty")
         assertNull(publisher.ensureCurrentEdition())
-        assertNull(publisher.buildNextEdition())
         assertEquals(0, db.editionDao().count())
     }
 
@@ -367,8 +325,6 @@ class RoomEditionPublisherTest {
         addSlowPosts(6, seenAt = minutesBefore(morning, 30))
         val first = publisher.ensureCurrentEdition()!!
 
-        clock.now = Instant.parse("2026-11-11T05:00:00Z")
-        assertNull(publisher.buildNextEdition())
         clock.now = Instant.parse("2026-11-11T08:00:00Z")
         assertEquals(first, publisher.ensureCurrentEdition())
         assertEquals(1, db.editionDao().count())
@@ -541,25 +497,22 @@ class RoomEditionPublisherTest {
         assertEquals(1, db.editionDao().count())
         // The next local reset is the 10th at 06:30 HST; that date's edition already exists.
         assertEquals(Instant.parse("2026-11-10T16:30:00Z"), publisher.nextReleaseAt())
-        assertEquals(first, publisher.buildNextEdition())
     }
 
     @Test
-    fun travellingEastDoesNotShowAnEditionBeforeItsOwnReleaseTime() = runTest {
+    fun travellingEastPrintsTheEditionOfTheLocalReset() = runTest {
         addSlowPosts(6, seenAt = minutesBefore(morning, 30))
-        val first = publisher.ensureCurrentEdition()!!
+        publisher.ensureCurrentEdition()!!
         clock.now = Instant.parse("2026-11-11T05:00:00Z")
-        addSlowPosts(4, seenAt = minutesBefore(clock.now, 10), prefix = "Overnight")
-        val early = publisher.buildNextEdition()!!
+        val overnight = addSlowPosts(4, seenAt = minutesBefore(clock.now, 10), prefix = "Overnight")
 
-        // In Tokyo it is already 14:10 on the 11th, past the local reset, but the stored
-        // edition for the 11th is released at 06:30 UTC.
+        // In Tokyo it is already 14:10 on the 11th, past the local reset (21:30 UTC on the 10th).
         clock.now = Instant.parse("2026-11-11T05:10:00Z")
         zone = ZoneId.of("Asia/Tokyo")
-        assertEquals(first, publisher.ensureCurrentEdition())
-
-        clock.now = Instant.parse("2026-11-11T06:30:00Z")
-        assertEquals(early, publisher.ensureCurrentEdition())
-        assertEquals(2, db.editionDao().count())
+        val tokyo = publisher.ensureCurrentEdition()!!
+        val edition = db.editionDao().getById(tokyo)!!
+        assertEquals(LocalDate.of(2026, 11, 11), edition.date)
+        assertEquals(Instant.parse("2026-11-10T21:30:00Z"), edition.releaseAt)
+        assertEquals(overnight.toSet(), articleIdsOf(tokyo))
     }
 }

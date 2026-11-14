@@ -1,5 +1,6 @@
 package net.tgnra.morningissue.ai
 
+import java.time.Duration
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -9,6 +10,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import net.tgnra.morningissue.data.settings.SettingsRepository
 
 /**
@@ -19,9 +22,12 @@ import net.tgnra.morningissue.data.settings.SettingsRepository
  * - [refresh] asks ML Kit where the model stands. When the phone supports it but does not have
  *   it yet (`DOWNLOADABLE`) and the setting is on, it asks for the download, which waits for
  *   an unmetered network and a charger ([scheduleDownload], `NanoDownloadWorker`).
- * - [rateSoon] runs one [InterestRater] pass on [scope]: after a sync that finished while the
- *   app was in the foreground, and when the newsstand comes to the foreground. One pass at a
- *   time; a call while one runs does nothing.
+ * - [rateFor] is the print's rating stage: the shortlist of the edition about to be printed,
+ *   rated in the foreground just before the build.
+ * - [rateSoon] runs one [InterestRater] pass on [scope] ahead of time, so the next print has
+ *   less to rate: after a sync that finished while the app was in the foreground, and when the
+ *   newsstand comes to the foreground with nothing to print. One pass at a time; a call while
+ *   one runs does nothing.
  *
  * Nothing here is needed for an edition: the build reads whatever ratings are stored, and with
  * none every post scores as if there were no model.
@@ -81,6 +87,31 @@ class OnDeviceAi(
             null
         } finally {
             passing.unlock()
+        }
+    }
+
+    /**
+     * The print's rating stage (`edition/EditionPress`): rates [articleIds] if the setting is
+     * on and the model is available, within [budget] in all. A pass already under way (one
+     * started when the stand came to the foreground) is waited for inside that budget, and
+     * this pass then rates what it left. Ratings stored before the budget runs out are kept.
+     * Null when nothing was asked; never throws but for cancellation.
+     */
+    suspend fun rateFor(articleIds: List<Long>, budget: Duration, onProgress: (done: Int, total: Int) -> Unit): RatingReport? {
+        if (!settings.settings.first().onDeviceAiRanking) return null
+        val started = System.nanoTime()
+        return withTimeoutOrNull(budget.toMillis()) {
+            passing.withLock {
+                try {
+                    if (refresh() != NanoStatus.AVAILABLE) return@withLock null
+                    val left = budget.minusNanos(System.nanoTime() - started)
+                    rater.rate(articleIds, left, onProgress)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
+            }
         }
     }
 
