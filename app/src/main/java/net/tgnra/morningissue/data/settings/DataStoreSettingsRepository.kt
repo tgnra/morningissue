@@ -127,6 +127,20 @@ class DataStoreSettingsRepository(
         }
     }
 
+    override suspend fun restoreSchedule(restored: AppSettings) {
+        dataStore.edit {
+            it[RESET_MINUTE_OF_DAY] = restored.resetTime.hour * 60 + restored.resetTime.minute
+            it[EDITION_LENGTH] = restored.editionLength.name
+            it[EVENING_EDITION] = restored.eveningEditionEnabled
+            it[EVENING_MINUTE_OF_DAY] = restored.eveningEditionTime.hour * 60 + restored.eveningEditionTime.minute
+            it[ONBOARDING_DONE] = restored.onboardingDone
+            val nothingNew = restored.nothingNewFor.sortedDescending().take(AppSettings.NOTHING_NEW_KEPT)
+            if (nothingNew.isEmpty()) it.remove(NOTHING_NEW_FOR) else it[NOTHING_NEW_FOR] = nothingNew.joinToString(",") { at -> at.toEpochMilli().toString() }
+            restored.resetChange?.let { change -> it[RESET_CHANGE] = encode(change) } ?: it.remove(RESET_CHANGE)
+            restored.eveningChange?.let { change -> it[EVENING_CHANGE] = encode(change) } ?: it.remove(EVENING_CHANGE)
+        }
+    }
+
     /** Epoch milliseconds separated by commas; anything unreadable is dropped. */
     private fun releaseTimes(stored: String?): List<Instant> =
         stored.orEmpty().split(',').mapNotNull { it.trim().toLongOrNull() }.map(Instant::ofEpochMilli)

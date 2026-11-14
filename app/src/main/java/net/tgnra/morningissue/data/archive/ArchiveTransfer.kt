@@ -57,6 +57,8 @@ data class ImportReport(
     val editionsSkipped: Int = 0,
     /** Feeds in the archive that were not subscribed and have been added back. */
     val feedsAdded: Int = 0,
+    /** Whether the file's `settings.json` was taken on: only by a library that held nothing before. */
+    val settingsApplied: Boolean = false,
 )
 
 /** How far an export or import has got, in posts (the bulk of the work). */
@@ -82,16 +84,22 @@ interface ArchiveTransfer {
      * must return a fresh stream each time; each is closed here.
      *
      * - A feed is matched by its normalised address; one not held is added back with its
-     *   tags, slider and status (a feed that only held posts saved from discovery comes back
-     *   as such). Feeds already held keep their own tags and slider; one held only as
-     *   discovered becomes a subscription when the file says it is one. A version 1 file's
+     *   tags, slider, mute and status (a feed that only held posts saved from discovery comes
+     *   back as such). Feeds already held keep their own tags, slider and mute; one held only
+     *   as discovered becomes a subscription when the file says it is one. A version 1 file's
      *   feeds are all subscriptions.
      * - A post is matched by feed and post ID. One already held is left alone, except that
      *   text it has lost to trimming is put back.
      * - Engagement is merged without overwriting anything set locally.
      * - A post's categories are added when it has none. Traits and embeddings are not in the
      *   file; `TraitsBackfill` and the embedder rebuild them for imported posts.
-     * - An edition is matched by date and kind; one already held is skipped.
+     * - An edition is matched by date and kind; one already held is skipped. One added
+     *   keeps its page views, and whether it recorded them, so that the seen rule treats it
+     *   as it did where it was read.
+     * - `settings.json` (the schedule and edition settings) is taken on only when the library
+     *   held nothing before the import (no feed, post or edition): a fresh install, or one
+     *   cleared after leaving a server. A library already in use keeps its own settings, as
+     *   it keeps its own tags and sliders.
      *
      * @throws ArchiveFormatException when the file is not an archive, or is from a newer version.
      */
@@ -103,8 +111,13 @@ class RoomArchiveTransfer(
     private val clock: Clock,
     private val config: RankingConfig = RankingConfig.Default,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
-    /** The settings written to `settings.json`; null writes no such entry. Import ignores the entry. */
+    /** The settings written to `settings.json`; null writes no such entry. */
     private val settings: (suspend () -> AppSettings)? = null,
+    /**
+     * Writes the settings an import into a fresh library takes from `settings.json`: the
+     * current ones ([settings]) with the file's schedule and edition fields. Null ignores the entry.
+     */
+    private val restoreSettings: (suspend (AppSettings) -> Unit)? = null,
     /** The time zone written with the settings: the phone's own. */
     private val zone: () -> ZoneId = { ZoneId.systemDefault() },
 ) : ArchiveTransfer {
@@ -241,6 +254,13 @@ class RoomArchiveTransfer(
         if (manifest.version > ArchiveFormat.VERSION) throw ArchiveFormatException(ArchiveFormatException.Reason.NEWER_VERSION)
 
         var report = ImportReport()
+        // Decided before anything is written: only a library that held nothing takes on the file's settings.
+        val fresh = restoreSettings != null && database.withReadTransaction { archiveDao.isEmpty() }
+        val archivedSettings = if (fresh) {
+            readEntry(open, ArchiveFormat.SETTINGS) { lines -> lines.firstOrNull()?.let { decode<ArchiveSettings>(it) } }
+        } else {
+            null
+        }
 
         // Feeds: archive number to local feed ID.
         val feedIds = HashMap<Long, Long>()
@@ -264,6 +284,7 @@ class RoomArchiveTransfer(
                                 url = feed.url, siteUrl = feed.siteUrl, title = feed.title, iconUrl = feed.iconUrl,
                                 sliderStep = enumOrNull<SliderStep>(feed.sliderStep) ?: SliderStep.AUTO,
                                 addedAt = Instant.ofEpochMilli(feed.addedAt),
+                                muteUntil = feed.muteUntil?.let(Instant::ofEpochMilli),
                                 status = status,
                                 discoveredAt = if (status == FeedStatus.DISCOVERED) Instant.ofEpochMilli(feed.discoveredAt ?: feed.addedAt) else null,
                             ),
@@ -314,6 +335,12 @@ class RoomArchiveTransfer(
 
         // Imported runs and engagement are evidence for affinity like any other.
         database.withWriteTransaction { AffinityLearner(database, config).refresh(clock.instant()) }
+
+        if (archivedSettings != null && restoreSettings != null) {
+            val current = settings?.invoke() ?: AppSettings()
+            restoreSettings.invoke(archivedSettings.applyTo(current))
+            report = report.copy(settingsApplied = true)
+        }
         report
     }
 
@@ -393,15 +420,21 @@ class RoomArchiveTransfer(
             val itemKind = enumOrNull<ItemKind>(item.kind) ?: return@mapNotNull null
             EditionItemEntity(0, articleId, item.page, item.section, item.slot, itemKind, item.score, item.reason)
         }.distinctBy { it.articleId }
-        editionDao.insertEditionWithItems(
+        val editionId = editionDao.insertEditionWithItems(
             EditionEntity(
                 date = date, kind = kind, cutoffAt = Instant.ofEpochMilli(edition.cutoffAt),
                 releaseAt = Instant.ofEpochMilli(edition.releaseAt), builtAt = Instant.ofEpochMilli(edition.builtAt),
                 length = length, number = edition.number, openedAt = edition.openedAt?.let(Instant::ofEpochMilli),
                 finishedAt = edition.finishedAt?.let(Instant::ofEpochMilli),
+                // Absent in older files: such an edition is untracked, as every edition from before page views was.
+                pageViewsTracked = edition.pageViewsTracked ?: false,
             ),
             items,
         )
+        for (view in edition.pageViews.orEmpty().distinctBy { it.page }) {
+            if (view.page < 1) continue
+            editionDao.recordPageView(editionId, view.page, view.ms, Instant.ofEpochMilli(view.firstSeenAt))
+        }
         return true
     }
 

@@ -113,6 +113,7 @@ class SubscribedOnlyQueryTest {
             "ArticleDao.trimmableContentIds" to "storage trimming applies to every stored post",
             "ArticleDao.trimCandidates" to "storage trimming applies to every stored post",
             "ArchiveDao.articlesAfter" to "the archive keeps every post",
+            "ArchiveDao.isEmpty" to "whether an import may take on the file's settings: any feed or post counts",
             "ArticleSignalDao.articlesNeedingTraits" to "traits are computed for every stored post",
             "ArticleSignalDao.countWithoutEmbedding" to "vectors are computed for every stored post",
             "ArticleSignalDao.articlesWithoutEmbedding" to "vectors are computed for every stored post",

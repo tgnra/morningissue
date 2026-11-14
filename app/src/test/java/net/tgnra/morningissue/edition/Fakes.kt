@@ -69,6 +69,14 @@ internal class FakeSettings(initial: AppSettings = AppSettings()) : SettingsRepo
     override suspend fun setOnboardingDone(done: Boolean) = state.update { it.copy(onboardingDone = done) }
     override suspend fun recordNothingNew(releaseAt: Instant) =
         state.update { it.copy(nothingNewFor = (listOf(releaseAt) + it.nothingNewFor).distinct().take(AppSettings.NOTHING_NEW_KEPT)) }
+    override suspend fun restoreSchedule(restored: AppSettings) = state.update {
+        it.copy(
+            resetTime = restored.resetTime, editionLength = restored.editionLength,
+            eveningEditionEnabled = restored.eveningEditionEnabled, eveningEditionTime = restored.eveningEditionTime,
+            onboardingDone = restored.onboardingDone, nothingNewFor = restored.nothingNewFor,
+            resetChange = restored.resetChange, eveningChange = restored.eveningChange,
+        )
+    }
 
     val current: AppSettings get() = state.value
 }

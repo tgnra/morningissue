@@ -25,6 +25,10 @@ interface ArchiveDao {
     @Query("SELECT * FROM edition_item WHERE editionId = :editionId ORDER BY page, slot")
     suspend fun items(editionId: Long): List<EditionItemEntity>
 
+    /** True when the library holds no feed (of any status), post or edition: nothing an import could merge with. */
+    @Query("SELECT NOT EXISTS (SELECT 1 FROM feed) AND NOT EXISTS (SELECT 1 FROM article) AND NOT EXISTS (SELECT 1 FROM edition)")
+    suspend fun isEmpty(): Boolean
+
     @Upsert
     suspend fun upsertEngagement(engagement: EngagementEntity)
 }

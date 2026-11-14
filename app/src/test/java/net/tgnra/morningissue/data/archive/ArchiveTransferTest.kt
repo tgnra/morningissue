@@ -614,7 +614,139 @@ class ArchiveTransferTest {
         )
         assertEquals(settings.resetChange, written.resetChange!!.toReleaseChange())
 
-        // Today's reader ignores all of it.
+        // A reader that is given no settings store still imports the library.
         assertEquals(12, import(target, out.toByteArray()).postsImported)
+    }
+
+    /** [source]'s library with a muted feed, page views on a tracked edition, and [settings] in `settings.json`. */
+    private suspend fun exportWithEverything(settings: AppSettings): Pair<Library, ByteArray> {
+        val library = seed(source)
+        source.feedDao().updateMuteUntil(library.news, day(40))
+        val tracked = source.editionDao().insertEditionWithItems(
+            EditionEntity(
+                date = LocalDate.of(2026, 10, 20), kind = EditionKind.MORNING, cutoffAt = day(5), releaseAt = day(5),
+                builtAt = day(5).minusSeconds(5400), length = EditionLength.STANDARD, number = 4, openedAt = day(5).plusSeconds(30),
+                pageViewsTracked = true,
+            ),
+            listOf(
+                EditionItemEntity(0, library.posts.getValue("blog-5"), 1, null, 0, ItemKind.LEAD, 1.0),
+                EditionItemEntity(0, library.posts.getValue("news-5"), 2, null, 0, ItemKind.FRONT, 0.5),
+            ),
+        )
+        source.editionDao().recordPageView(tracked, 1, 4_000, day(5).plusSeconds(40))
+        source.editionDao().recordPageView(tracked, 2, 300, day(5).plusSeconds(50))
+        val out = ByteArrayOutputStream()
+        RoomArchiveTransfer(source, clock, settings = { settings }, zone = { ZoneId.of("Europe/London") }).export(out)
+        return library to out.toByteArray()
+    }
+
+    private val exportedSettings = AppSettings(
+        resetTime = LocalTime.of(5, 45), editionLength = EditionLength.LONG, eveningEditionEnabled = true,
+        eveningEditionTime = LocalTime.of(19, 15), onboardingDone = true, nothingNewFor = listOf(day(2)),
+        resetChange = ReleaseChange(settled = day(1), kept = null, from = day(3)),
+    )
+
+    @Test
+    fun aFreshLibraryTakesOnTheMutesPageViewsAndSettings() = runBlocking<Unit> {
+        val (_, file) = exportWithEverything(exportedSettings)
+        // The phone's own display settings are not in the file and stay as they are.
+        val phone = FakeSettings(AppSettings(storageBudgetMb = 1000, greyscaleImages = true))
+        val report = RoomArchiveTransfer(target, clock, settings = { phone.current }, restoreSettings = { phone.restoreSchedule(it) })
+            .import({ ByteArrayInputStream(file) })
+        assertTrue(report.settingsApplied)
+        assertEquals(4, report.editionsImported)
+
+        val news = target.feedDao().getUrls().single { it.url == "http://www.news.example/rss" }.id
+        assertEquals(day(40), target.feedDao().getById(news)!!.muteUntil)
+        val blog = target.feedDao().getUrls().single { it.url == "https://blog.example/feed.xml" }.id
+        assertNull(target.feedDao().getById(blog)!!.muteUntil)
+
+        val tracked = target.editionDao().getByDate(LocalDate.of(2026, 10, 20), EditionKind.MORNING)!!
+        assertTrue(tracked.pageViewsTracked)
+        assertEquals(
+            listOf(1 to (4_000L to day(5).plusSeconds(40)), 2 to (300L to day(5).plusSeconds(50))),
+            target.editionDao().getPageViews(tracked.id).map { it.page to (it.msVisible to it.firstSeenAt) },
+        )
+        val older = target.editionDao().getByDate(LocalDate.of(2026, 10, 11), EditionKind.MORNING)!!
+        assertEquals(false, older.pageViewsTracked)
+        assertTrue(target.editionDao().getPageViews(older.id).isEmpty())
+
+        assertEquals(
+            AppSettings(
+                resetTime = LocalTime.of(5, 45), editionLength = EditionLength.LONG, eveningEditionEnabled = true,
+                eveningEditionTime = LocalTime.of(19, 15), onboardingDone = true, nothingNewFor = listOf(day(2)),
+                resetChange = ReleaseChange(settled = day(1), kept = null, from = day(3)),
+                storageBudgetMb = 1000, greyscaleImages = true,
+            ),
+            phone.current,
+        )
+    }
+
+    @Test
+    fun aLibraryInUseKeepsItsOwnSettingsAndMutes() = runBlocking<Unit> {
+        val (_, file) = exportWithEverything(exportedSettings)
+        val held = target.feedDao().insert(FeedEntity(url = "http://www.news.example/rss", title = "The News", addedAt = day(1)))
+        val phone = FakeSettings(AppSettings(resetTime = LocalTime.of(7, 0), onboardingDone = true))
+        val before = phone.current
+        val report = RoomArchiveTransfer(target, clock, settings = { phone.current }, restoreSettings = { phone.restoreSchedule(it) })
+            .import({ ByteArrayInputStream(file) })
+        assertEquals(false, report.settingsApplied)
+        assertEquals(before, phone.current)
+        // A feed already held keeps its own mute (none), as it keeps its tags and slider.
+        assertNull(target.feedDao().getById(held)!!.muteUntil)
+        // Page views still come with every edition the library did not hold.
+        val tracked = target.editionDao().getByDate(LocalDate.of(2026, 10, 20), EditionKind.MORNING)!!
+        assertEquals(2, target.editionDao().getPageViews(tracked.id).size)
+    }
+
+    @Test
+    fun anArchiveFromTheServerRestoresTheScheduleIntoAFreshLibrary() = runBlocking<Unit> {
+        // What a server export may hold: feeds with a mute, an edition with page views, and settings
+        // with no change records, in a zone other than the phone's.
+        val file = ByteArrayOutputStream().also { out ->
+            ZipOutputStream(out).use { zip ->
+                fun entry(name: String, text: String) {
+                    zip.putNextEntry(ZipEntry(name))
+                    zip.write(text.toByteArray())
+                    zip.closeEntry()
+                }
+                entry("manifest.json", """{"format":"morning-issue-archive","version":2,"exportedAt":${T0.toEpochMilli()},"feeds":1,"posts":1,"editions":1}""")
+                entry("feeds.jsonl", """{"n":7,"url":"https://quiet.example/feed","title":"Quiet","addedAt":${day(0).toEpochMilli()},"status":"SUBSCRIBED","muteUntil":${day(45).toEpochMilli()}}""")
+                entry("posts.jsonl", """{"n":70,"feed":7,"guid":"q-1","title":"Quiet one","publishedAt":${day(1).toEpochMilli()},"firstSeenAt":${day(1).toEpochMilli()}}""")
+                entry(
+                    "editions.jsonl",
+                    """{"date":"2026-10-12","kind":"MORNING","cutoffAt":${day(2).toEpochMilli()},"releaseAt":${day(2).toEpochMilli()},"builtAt":${day(2).toEpochMilli()},""" +
+                        """"length":"SHORT","number":1,"items":[{"post":70,"page":1,"slot":0,"kind":"LEAD","score":1.0}],""" +
+                        """"pageViewsTracked":true,"pageViews":[{"page":1,"ms":2500,"firstSeenAt":${day(2).plusSeconds(9).toEpochMilli()}}]}""",
+                )
+                entry("settings.json", """{"resetTime":"06:10","editionLength":"SHORT","eveningEnabled":false,"eveningTime":"bad","timeZone":"America/New_York","onboardingDone":true,"futureField":1}""")
+            }
+        }.toByteArray()
+        val phone = FakeSettings(AppSettings(eveningEditionTime = LocalTime.of(20, 0)))
+        val report = RoomArchiveTransfer(target, clock, settings = { phone.current }, restoreSettings = { phone.restoreSchedule(it) })
+            .import({ ByteArrayInputStream(file) })
+        assertTrue(report.settingsApplied)
+        assertEquals(1, report.postsImported)
+        assertEquals(LocalTime.of(6, 10), phone.current.resetTime)
+        assertEquals(EditionLength.SHORT, phone.current.editionLength)
+        // A time that does not read keeps the phone's.
+        assertEquals(LocalTime.of(20, 0), phone.current.eveningEditionTime)
+        assertTrue(phone.current.onboardingDone)
+        val feed = target.feedDao().getUrls().single()
+        assertEquals(day(45), target.feedDao().getById(feed.id)!!.muteUntil)
+        val edition = target.editionDao().getByDate(LocalDate.of(2026, 10, 12), EditionKind.MORNING)!!
+        assertTrue(edition.pageViewsTracked)
+        assertEquals(listOf(2_500L), target.editionDao().getPageViews(edition.id).map { it.msVisible })
+    }
+
+    @Test
+    fun aFreshLibraryWithoutSettingsInTheFileKeepsItsOwn() = runBlocking<Unit> {
+        seed(source)
+        val (file, _) = export(source)
+        val phone = FakeSettings(AppSettings(resetTime = LocalTime.of(8, 0)))
+        val report = RoomArchiveTransfer(target, clock, settings = { phone.current }, restoreSettings = { phone.restoreSchedule(it) })
+            .import({ ByteArrayInputStream(file) })
+        assertEquals(false, report.settingsApplied)
+        assertEquals(LocalTime.of(8, 0), phone.current.resetTime)
     }
 }

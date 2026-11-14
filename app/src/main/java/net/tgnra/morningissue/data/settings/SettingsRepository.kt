@@ -68,4 +68,12 @@ interface SettingsRepository {
      * kept.
      */
     suspend fun recordNothingNew(releaseAt: Instant)
+
+    /**
+     * Writes the schedule and edition settings of [restored] in one go: the reset time, the
+     * edition length, the Evening edition, onboarding, `nothingNewFor` and the records of how
+     * release-time changes take effect. Device settings (theme, display, greyscale, storage)
+     * are left alone. For an archive import into a fresh library (`settings.json`).
+     */
+    suspend fun restoreSchedule(restored: AppSettings) = Unit
 }

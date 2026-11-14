@@ -170,7 +170,13 @@ class DefaultAppContainer(context: Context) : AppContainer {
     override val articles: ArticleRepository by lazy { RoomArticleRepository(database, clock) }
     override val storage: StorageRepository by lazy { RoomStorageRepository(database, settings, clock, images = images) }
     override val archive: ArchiveController by lazy {
-        ArchiveController(appScope, appContext.contentResolver, RoomArchiveTransfer(database, clock, settings = { settings.settings.first() }), storage)
+        val transfer = RoomArchiveTransfer(
+            database,
+            clock,
+            settings = { settings.settings.first() },
+            restoreSettings = { settings.restoreSchedule(it) },
+        )
+        ArchiveController(appScope, appContext.contentResolver, transfer, storage)
     }
 
     override val embedder: EmbedderAsset by lazy { EmbedderAsset(appContext) }

@@ -1,11 +1,14 @@
 package net.tgnra.morningissue.data.archive
 
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import net.tgnra.morningissue.model.AppSettings
+import net.tgnra.morningissue.model.EditionLength
 import net.tgnra.morningissue.model.ReleaseChange
 
 /**
@@ -26,12 +29,14 @@ import net.tgnra.morningissue.model.ReleaseChange
  *   without categories.
  * - `editions.jsonl`: one [ArchiveEdition] per line, with its items.
  * - `settings.json`, optional: one [ArchiveSettings], the schedule and edition settings the
- *   phone had, so that a server account that has none yet can take them on. Older files have
- *   no such entry; older readers ignore it.
+ *   library had. An import takes them on only into a library that held nothing before.
+ *   Older files have no such entry; older readers ignore it.
  *
  * Feeds' `muteUntil` and editions' `pageViewsTracked` and `pageViews` were added, with
- * `settings.json`, for moving a library to a self-hosted server, again without raising the
- * version. Readers ignore what they do not know.
+ * `settings.json`, without raising the version, when the 0.5 releases moved libraries to a
+ * self-hosted server; that server's export (`morningissue-server export`, or
+ * `GET /api/v1/export`) writes this same format, which is how a library comes back to the
+ * phone. Readers ignore what they do not know.
  *
  * Feeds and posts carry a number that is only meaningful inside the file; posts point at
  * their feed, and edition items at their post, by it. Times are epoch milliseconds, dates ISO
@@ -182,6 +187,23 @@ data class ArchiveSettings(
     /** How the last change of the Evening edition's time, or switching it on, takes effect. */
     val eveningChange: ArchiveReleaseChange? = null,
 ) {
+    /**
+     * [current] with this entry's schedule and edition fields. A field that does not read (a
+     * time that is not `HH:mm`, an unknown length) keeps the current value. Times of day are
+     * taken as they are, on the phone's clock, whatever [timeZone] the file was written in.
+     * Onboarding stays done once it is.
+     */
+    fun applyTo(current: AppSettings): AppSettings = current.copy(
+        resetTime = timeOrNull(resetTime) ?: current.resetTime,
+        editionLength = EditionLength.entries.firstOrNull { it.name == editionLength } ?: current.editionLength,
+        eveningEditionEnabled = eveningEnabled,
+        eveningEditionTime = timeOrNull(eveningTime) ?: current.eveningEditionTime,
+        onboardingDone = current.onboardingDone || onboardingDone,
+        nothingNewFor = nothingNewFor.map(Instant::ofEpochMilli).sortedDescending().take(AppSettings.NOTHING_NEW_KEPT),
+        resetChange = resetChange?.toReleaseChange(),
+        eveningChange = eveningChange?.toReleaseChange(),
+    )
+
     companion object {
         /** What the archive keeps of [settings], with the phone's [zone]. */
         fun of(settings: AppSettings, zone: ZoneId): ArchiveSettings = ArchiveSettings(
@@ -197,6 +219,13 @@ data class ArchiveSettings(
         )
 
         private val TIME_OF_DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
+        private fun timeOrNull(text: String): LocalTime? =
+            try {
+                LocalTime.parse(text, TIME_OF_DAY)
+            } catch (_: DateTimeParseException) {
+                null
+            }
     }
 }
 

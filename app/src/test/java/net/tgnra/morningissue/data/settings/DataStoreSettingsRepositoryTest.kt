@@ -123,4 +123,35 @@ class DataStoreSettingsRepositoryTest {
         repository.setResetTime(LocalTime.of(7, 0))
         assertEquals(null, repository.settings.first().resetChange)
     }
+
+    @Test
+    fun restoreScheduleWritesTheScheduleAndLeavesTheDeviceSettings() = scope.runTest {
+        val repository = repository()
+        repository.setThemeMode(ThemeMode.Dark)
+        repository.setStorageBudgetMb(1000)
+        repository.changeEveningEdition(true, LocalTime.of(18, 0), ReleaseChange(null, null, Instant.ofEpochMilli(5)))
+        val restored = AppSettings(
+            resetTime = LocalTime.of(5, 15),
+            editionLength = EditionLength.SHORT,
+            eveningEditionEnabled = false,
+            eveningEditionTime = LocalTime.of(20, 30),
+            onboardingDone = true,
+            nothingNewFor = listOf(Instant.ofEpochMilli(1_000), Instant.ofEpochMilli(3_000)),
+            resetChange = ReleaseChange(Instant.ofEpochMilli(1), null, Instant.ofEpochMilli(2)),
+            // Not written: device settings.
+            themeMode = ThemeMode.Light,
+            storageBudgetMb = 50,
+        )
+        repository.restoreSchedule(restored)
+
+        assertEquals(
+            restored.copy(
+                themeMode = ThemeMode.Dark,
+                storageBudgetMb = 1000,
+                nothingNewFor = listOf(Instant.ofEpochMilli(3_000), Instant.ofEpochMilli(1_000)),
+                eveningChange = null,
+            ),
+            repository.settings.first(),
+        )
+    }
 }
