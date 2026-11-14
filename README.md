@@ -10,7 +10,7 @@ The 0.5 releases were the client of a self-hosted Morning Issue server, with a K
 
 Installing 0.6 over the server client clears what the phone held for the server, and onboarding then offers to bring your library back. To do that:
 
-1. On the server, export your library to an archive, either from the command line with `morningissue-server export <user> library.zip`, or by downloading `GET /api/v1/export` while signed in as that user.
+1. Update the server to the last server build, commit `c7db777` (the export is not in 0.5.3 or earlier: check it out and rebuild the image or `./gradlew -PserverOnly :server:installDist`). Then export your library to an archive, either from the command line with `morningissue-server export <user> library.zip`, or by downloading `GET /api/v1/export` while signed in as that user.
 2. Copy the file to the phone.
 3. In the app, choose **Import a file** on the onboarding screen, or later **Settings › Archive › Import a file**.
 
