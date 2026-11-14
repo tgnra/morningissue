@@ -8,7 +8,7 @@ What is built, what is being built and what is left. How the built parts work is
 - [x] **Sync.** RSS, Atom and JSON Feed parsing; conditional fetching; feed discovery from a site address; full-text extraction; periodic background sync; cadence and tiers.
 - [x] **OPML import and export** in Sources and onboarding; every ancestor folder becomes a tag.
 - [x] **Scoring**: A × F × S × P with all constants in `RankingConfig`.
-- [x] **Daily edition**: front page, Top stories, In brief, back-page index; early build with prefetch; on-open fallback (since replaced by the unprinted placeholder and Print now, below); frozen once stored.
+- [x] **Daily edition**: front page, Top stories, In brief, back-page index; printed in the foreground when the app is opened after the release (the early build in the background and the on-open fallback are gone; see "Printing on open" below); frozen once stored.
 - [x] **No empty or reprint-only editions**: with no new posts nothing is built and the previous edition stays current.
 - [x] **Newsstand** with drawn covers, rack and labelled button bar; **paper** pager with contents list; **reader** with Like, Save, text size and read tracking; **back issues** calendar; **source pages**; **Saved and Liked** lists; basic **search**; **Settings**; **onboarding** with first sync.
 - [x] **Tablet layouts** (Compact, Medium, Expanded) and **e-ink mode** (paged movement, no animation, greyscale images).
@@ -104,13 +104,13 @@ Open:
 
 - [ ] **Run it on a device.** Unseen: real WebP sizes and encoding time on a phone (the figures in the docs are from Robolectric's desktop build of Android's encoder), the encoder on Android 8 to 10 (the older `WEBP` format, exercised only under Robolectric at API 28), memory while a very large photograph is handled, the full-screen picture's gestures, the Settings option, and how the dither looks on a phone screen and on an e-ink panel.
 - [ ] **The grain at 16 levels may be too faint on a dense phone screen.** It was chosen from enlarged samples on a desktop. `Dither.LEVELS` at 8 is the stronger alternative.
-- [ ] **An edition printed offline stores no images** until its articles are opened. Print now with the sources unreachable prints from stored posts, and its picture downloads fail with the rest. A background pass that stores the current edition's pictures when a connection returns would close this.
-- [ ] **The early build's time limit is shared.** Full text and images together have four minutes. A long edition with many body images may not finish; what is missing is stored when the article is opened.
+- [ ] **An edition printed offline stores no images** until its articles are opened. A print with the sources unreachable prints from stored posts, and its picture downloads fail with the rest. A background pass that stores the current edition's pictures when a connection returns would close this.
+- [ ] **The prefetch after a print has a shared time limit.** Full text and images together have four minutes, on the app's scope after the cover is up. A long edition with many body images may not finish, and a process killed in the background stops it; what is missing is stored when the article is opened. It could become a WorkManager job.
 - [ ] **A stored image belongs to one post.** A picture several posts share (a podcast's cover on every episode) is trimmed with the first post that stored it, whatever the others are, and fetched again.
 - [ ] **Opening an article can download a picture twice**: once by the screen and once by the store, when the store starts before Coil has finished. The store waits four seconds and takes what Coil has cached; a slow connection defeats that.
 - [ ] **The full-screen original is not dithered** in greyscale and E-ink, because it is drawn scaled. Re-dithering at each zoom step would be needed for E-ink.
 - [ ] **No animated or vector decoder is included**, as before: a GIF shows its first frame and an SVG shows nothing. The store keeps their bytes untouched so that adding `coil-gif` or `coil-svg` later needs no re-download.
-- [ ] `CoilImagePrefetcher` in `edition/EarlyBuild.kt` is no longer used and can be removed.
+- [x] `CoilImagePrefetcher` is removed, with `EarlyBuild`.
 
 ### Archive export and import
 
@@ -146,31 +146,36 @@ Built; see "Archive export and import" in `docs/how-it-works.md`. The file-picke
 - [x] The newsstand offers one after sources are added; covers and paper headers say "Extra".
 - [x] Checked on the emulator in the light phone layout: the offer after an OPML import, printing (18 s for 15 sources), and the "No. 2 · Extra" label on the cover and in the paper. Not checked in dark, e-ink or tablet layouts, nor "Not now".
 - [ ] The Back issues calendar shows one edition per day, the morning one, so an Extra or Evening edition on the same date cannot be opened from it once it has left the rack.
-- [ ] If sources are added after tomorrow's edition was pre-built but before it is released, the Extra and the pre-built edition can both carry the same stories. Untested.
+- [x] Editions are no longer built ahead of their release, so an Extra and a pre-built edition can no longer carry the same stories.
+- [x] Printing goes through the same printer as the scheduled edition (sync, the model's rating of its own shortlist, build); its result notices are held by the printer.
 - [x] The day's Extra edition can be reprinted to take in sources added after it was printed: in place, under the same ID and number, set again as a whole. The newsstand offers "Reprint the Extra with 3 new sources". Engine and offer rule unit-tested; the offer has not been seen on a device.
 - [ ] Still only one Extra edition per calendar date, because `edition` has a unique `(date, kind)` index. The reprint removes the practical cost (later sources no longer have to wait), but two separate Extras on one date would still need a schema change.
 - [ ] A reprint rewrites the paper while it may be open in the paper screen or reader. The screens observe the edition, so they should follow; not checked on a device.
 
-### Unprinted placeholder and Print now
+### Printing on open
 
-Built; see "When an edition failed to build" in `docs/how-it-works.md`. Not seen on a device or emulator at all: the logic is unit-tested, the screen is not.
+Built; see "Printing on open" and "When an edition is not printed" in `docs/how-it-works.md`. The stages, limits, results and the due rule are unit-tested (`EditionPrinterTest`, `OnDeviceAiTest`, `DueEditionsTest`); nothing of it has been seen on a device or emulator.
 
-- [x] The newsstand's refresh button and pull-to-refresh gesture are removed.
-- [x] Opening the app no longer builds an edition. When the due edition failed to build (no edition, and no record that a run found nothing new) the stand shows an unprinted placeholder cover with Print now.
-- [x] Print now runs the early build's stages in the foreground from an app-scoped holder (`EditionPrinter`): sync, build, full text, pictures, with progress; it survives rotation and leaving the screen, cannot be started twice, prints from stored posts when offline and says so, and offers Try again on failure.
-- [x] `nothingNewFor` in the settings store records the releases a run found nothing new for, so "No new edition today" is not mistaken for a failure.
-- [ ] Look at the placeholder, the progress display and the result notices on a phone, a small tablet and a landscape tablet, in Light, Dark and E-ink.
-- [x] A changed reset time or Evening edition time applies from the next release, never retroactively (`ReleaseSchedule`, `ReleaseTimes`), so changing it no longer puts the placeholder up. An edition already built for the old time is released at the old time.
+- [x] No edition is built in the background. `EarlyBuild`, `EarlyBuildWorker`, `WorkManagerEditionScheduler`, `EditionScheduler` and `TimeChangeReceiver` are gone; work queued as `early-edition-build` by an earlier version is cancelled at start.
+- [x] When the newsstand comes to the foreground (or a release passes on screen) and `DueEditions` says the due edition is not printed, `EditionPrinter` prints it: a sync only when no feed has answered one for two hours and the phone is online (20 s), the on-device model's rating of the shortlist (45 s, foreground checked before every call), the build (60 s); sync and rating held to 75 s together, the whole print to three minutes. "Printing today's edition…" with the stage and one bar over the unprinted cover.
+- [x] The cutoff is the moment of the build: posts the print's own sync stores count; later ones go to the next edition. A post's first-seen time is read in the transaction that stores it, so a sync running alongside a build cannot lose a post between two editions.
+- [x] One print at a time; a second open joins it; idempotent across process death through the publisher's transaction. A failed automatic print is not repeated in the same process; the placeholder offers Try again.
+- [x] Print now (Try again, "Check for new posts") and the Extra edition run the same stages, so they are rated too. Print now always syncs when online.
+- [x] Full text and pictures are fetched after the cover is up, not before.
+- [x] Ahead-of-time rating kept: after a foreground sync, and when the stand opens with nothing to print. It is cheap when the shortlist is already rated and shortens the next print.
+- [x] `nothingNewFor` records the releases a print from current posts found nothing new for, so "No new edition today" is not mistaken for a failure.
+- [x] Onboarding's first sync is recent enough that the print on open does not sync again; if it found nothing, the print records it and the stand shows the "nothing recent" empty state, not the placeholder.
+- [ ] **Not seen on a device:** the printing state, the progress display, the placeholder and the result notices on a phone, a small tablet and a landscape tablet, in Light, Dark and E-ink; how long a print takes with real feeds and with Gemini Nano; what the reader sees when they leave the app mid-print and come back.
+- [ ] **The two-hour sync threshold is a guess.** It matches the periodic sync's longer interval, so a print syncs only when that has fallen behind. A shorter one gives fresher papers and longer waits.
+- [ ] **Posts that arrive between the release and the open go into that edition**, because the cutoff is when it is printed: a reader who opens at 14:00 gets the morning's posts and those of the morning after the release, scored as of the release. Cutting off at the release time instead would make the print's own sync pointless (its posts would all fall after the cutoff), delay posts a day whenever the background sync was held back, and leave onboarding's first edition and "Check for new posts" with nothing to print.
+- [ ] **While you were away rarely appears now.** It needs editions that were released and never opened; with printing on open, a day the reader does not open the app has no edition at all (its posts go into the next one), so only editions printed when the stand was opened but not read count.
 - [ ] Settings does not say when a changed time takes effect ("from tomorrow's edition"). The schedule knows; the screen does not show it.
-- [ ] A release time changed while the early build is running is not handled specially.
-- [ ] Onboarding's first edition is still built by onboarding itself, without the full-text and picture prefetch and without recording "nothing new". If its sync found nothing recent, the stand shows the placeholder rather than the "nothing recent" empty state until Print now has been pressed once.
-- [x] Result notices on the newsstand (Print now's and the Extra edition's) have a close button; a closed notice stays closed until there is a new result.
-- [ ] Print now's result says only whether the sources could be reached at all, not how many failed.
+- [ ] A print's result says only whether the sources could be reached at all, not how many failed.
 
 ### Benchmark
 
-- [x] A Macrobenchmark for the build from stored posts, formerly the on-open fallback build (`:macrobenchmark`, `OnOpenEditionBuildBenchmark`): 1,000 unread posts from 40 feeds, cold start, measuring the trace section around the build. Opening the app no longer builds, so the benchmark triggers the build with a broadcast to the seeding receiver. How to run it is in `docs/how-it-works.md`.
-- [ ] The broadcast trigger compiles but has not been run on a device or emulator.
+- [x] A Macrobenchmark for the build from stored posts, formerly the on-open fallback build (`:macrobenchmark`, `OnOpenEditionBuildBenchmark`): 1,000 unread posts from 40 feeds, cold start, measuring the trace section around the build. The build is now the print on open's last stage; the seeded feeds count as just synced, so the print does not sync them. How to run it is in `docs/how-it-works.md`.
+- [ ] This version of the benchmark compiles but has not been run on a device or emulator.
 - [ ] Run it on a real low-end phone. The budget is under 300 ms there; an emulator's numbers are only indicative. On the software-rendered API 37 emulator, on a host short of memory, five cold starts gave 371 ms at best, 573 ms median and 1,061 ms at worst for the build, which is over budget there. If a real phone is over too, see "Scores kept current during sync" below.
 
 ### Discovery (Find sources)
@@ -247,19 +252,20 @@ Open:
 
 Built and wired into every edition build; how it works is under "Model interest (Gemini Nano)" in `docs/how-it-works.md`. It is **not proven**: nothing has run on a phone with Gemini Nano, and the call into ML Kit is untested.
 
-- [x] **The N factor** in `Scorer` (`engine/Interest.kt`): a 1-to-5 rating mapped onto 0.8..1.25 with 3 as 1, unrated 1; every threshold held against the score without N, so it only reorders. Edition identical to before when nothing is rated.
+- [x] **The N factor** in `Scorer` (`engine/Interest.kt`): a 1-to-5 rating mapped onto 0.8..1.25 with 3 as 1; every threshold held against the score without N, so it only reorders. Edition identical to before when nothing is rated.
+- [x] **Unrated posts take the reader's mean rating**: the mean of the ratings of the last 30 days, once there are 20, mapped and interpolated the same way; 1 with fewer, with the setting off or without the model. The reason line speaks only for rated posts.
 - [x] **Ratings stored per post** (`article_interest`: rating, time, profile hash), database version 9 with its migration. A rebuild reuses them.
 - [x] **The prompt and the reply**: a local taste profile (strongest tags, Favourite and More feeds, recent Likes and saves), 10 posts a call by title, feed and first two sentences, strict JSON asked for and read defensively.
-- [x] **Foreground only.** ML Kit's `GenAiException.ErrorCode.BACKGROUND_USE_BLOCKED` (30) and its message confirm AICore refuses background inference, so the shortlist (the next edition's 40 best by the score without N) is rated when the newsstand comes to the foreground and after a sync that finishes in the foreground, within a time budget; builds only read stored ratings.
+- [x] **Foreground only.** ML Kit's `GenAiException.ErrorCode.BACKGROUND_USE_BLOCKED` (30) and its message confirm AICore refuses background inference. Editions are therefore printed in the foreground when the app is opened, and the print has the model rate the shortlist (the edition's 40 best by the score without N) just before the build, within 45 s; builds only read stored ratings. Also rated ahead of time when the stand opens with nothing to print and after a foreground sync.
 - [x] **Availability**: ML Kit's feature status gates everything; a downloadable model is fetched on an unmetered network while charging (WorkManager); `android.hardware.npu` declared as not required.
 - [x] **Setting** "On-device AI ranking (Gemini Nano)", on by default, with the model's status; off, builds ignore the ratings.
 - [x] **The reason line** names the model when N moved a story by at least 0.1.
 
 Open:
 
-- [ ] **Run it on a phone with Gemini Nano.** Untested on hardware: the status check, the download through AICore (and whether it is allowed from a background job; the worker retries up to five times), the prompt's real token count against `getTokenLimit()`, the replies Nano actually gives to this prompt (whether it keeps to the JSON), the time a call takes, and battery quotas (`PER_APP_BATTERY_USE_QUOTA_EXCEEDED`).
-- [ ] **Coverage is low for a reader who opens the app once a day.** Only posts first seen before the reader last had the app open can be rated; the early build runs before the morning visit, so most of the next edition arrives later and goes in unrated. In the simulation, with a glance at the stand in the evening as well, 15.5% of front-page stories were rated. Options: rate at the end of a foreground sync more eagerly, rate a wider pool than the next edition's shortlist when the app is open, or ask whether ML Kit allows inference from a foreground service.
-- [ ] **Unrated posts gain on rated ones.** Most ratings are low (most of a reader's posts are not for them), so a rated post usually gets 0.8 or 0.9 while an unrated one keeps 1. In the simulation this let the Scotland reader's unrated business posts reach the front page or Top stories slightly more often (39.1% against 37.7%). Centring unrated posts on the reader's mean rating, or applying N only within a shortlist that was rated in full, would remove the bias; both change the agreed design, so neither is done.
+- [ ] **Run it on a phone with Gemini Nano.** Untested on hardware: the status check, the download through AICore (and whether it is allowed from a background job; the worker retries up to five times), the prompt's real token count against `getTokenLimit()`, the replies Nano actually gives to this prompt (whether it keeps to the JSON), the time a call takes, and so whether 45 s rates the whole shortlist of 40 (four calls), how long the reader waits at open, whether the foreground check and AICore agree when the reader leaves mid-print, and battery quotas (`PER_APP_BATTERY_USE_QUOTA_EXCEEDED`), which a rating at every open may meet sooner.
+- [x] **Coverage.** With the print on open, every front-page story and 97% of printed stories were rated in the simulation (15.5% of front-page stories when the early build used ratings from earlier visits). On a phone it depends on how fast Nano answers.
+- [x] **Unrated posts gained on rated ones** (39.1% against 37.7% for the Scotland reader's business posts, with the check's margin lowered to 8 points). With unrated posts at the reader's mean and nearly everything rated, they reach 35.1% against 38.0% without the model, and the margin is back at 10 points.
 - [ ] **Validate on real labels**, as for W: whether Nano's ratings predict what the reader opens better than the score without N. The bounds 0.8 and 1.25 are guesses.
 - [ ] **Ratings are not exported** in the archive; an import starts unrated.
 - [ ] **Prompt wording is untuned**, and English only.
@@ -318,7 +324,7 @@ Built, shipped and taken out again. Git history keeps the code and the documents
 ## Known rough edges and unverified areas
 
 - [ ] **The release workflow has never run.** GitHub has not registered `.github/workflows/release.yml` since the first push. The cause is unknown.
-- [ ] **The early build has only run under tests**, never overnight on a device. Whether WorkManager runs it in time under Doze is unknown. This matters more now: when it does not run, the reader sees the unprinted placeholder and has to press Print now, where before the edition was built silently on open.
+- [ ] **The print on open has only run under tests**, never on a device: its waiting time with real feeds, and on a phone with Gemini Nano.
 - [ ] **Relearning affinity on every engagement change** (each open, read, Save or Like) is unmeasured for performance.
 - [ ] **OPML export on a device is untested.** The writer is unit-tested; the file-picker path is not.
 - [ ] **E-ink: a long page can end on a mostly blank screen**, because steps snap to anchors.

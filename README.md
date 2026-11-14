@@ -1,6 +1,6 @@
 # Morning Issue
 
-Morning Issue is an Android RSS reader that publishes one personal newspaper a day from your feeds. Each edition is finite: a front page, a section per tag, a column of briefs and a back page, and when you reach the back page you're done for the day. Everything happens on the phone: it fetches the feeds, learns what you care about and builds each edition before your morning release. All data stays on the phone, and there is nothing to host. On a phone with Gemini Nano, the on-device model also rates the likeliest stories of the next edition, which nudges their order; it runs on the phone too, and can be switched off in Settings.
+Morning Issue is an Android RSS reader that publishes one personal newspaper a day from your feeds. Each edition is finite: a front page, a section per tag, a column of briefs and a back page, and when you reach the back page you're done for the day. Everything happens on the phone: it fetches the feeds in the background, learns what you care about and prints each edition when you open the app after its release time, which takes a few seconds. All data stays on the phone, and there is nothing to host. On a phone with Gemini Nano, the on-device model first rates the likeliest stories of the edition being printed, which nudges their order; it runs on the phone too, and can be switched off in Settings.
 
 The app is in early development and not everything in the design is built yet. [How it works](docs/how-it-works.md) describes what is built; [todo.md](todo.md) lists what is left.
 

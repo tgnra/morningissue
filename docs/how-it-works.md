@@ -38,11 +38,11 @@ Everything runs on the device. There is no account and no internet service; the 
 
 ## What the reader sees
 
-1. **First launch.** Onboarding asks for feeds, by address or by importing an OPML file. It then fetches every feed, builds the first edition and opens the newsstand. This is the only time the app waits on the network unasked; Print now, when the reader presses it, is the other.
+1. **First launch.** Onboarding asks for feeds, by address or by importing an OPML file. It then fetches every feed, builds the first edition and opens the newsstand. The app waits on the network at first launch, when it prints an edition on open and its sources have not been synced for two hours, and when the reader asks for a print.
 2. **The newsstand** is the home screen: the latest edition facing out, the six before it racked behind, and four labelled buttons (Search, Saved, Sources, Settings).
 3. **The paper.** Tapping a cover opens that edition. Pages turn with a horizontal swipe, from the front page to the back page, which says "That's today's edition" and when the next one is due.
 4. **The reader.** Tapping a story opens it in the paper's typography, with Like and Save at the end.
-5. **The next morning**, at the reset time (06:30 by default), a new edition takes over. Until then the edition never changes, whatever arrives in the feeds. If that edition could not be built overnight, an unprinted cover stands in its place with a Print now button.
+5. **The next morning**, at the reset time (06:30 by default), a new edition is due. It is printed when the reader next opens the app: the newsstand shows "Printing today's edition…" over an unprinted cover for a few seconds (up to about a minute on a phone with Gemini Nano, which reads the likeliest stories first), then the new cover. Once printed an edition never changes, whatever arrives in the feeds. If printing failed, the unprinted cover stays with a Try again button.
 
 ## Terms
 
@@ -50,9 +50,9 @@ Everything runs on the device. There is no account and no internet service; the 
 | --- | --- |
 | Edition | One day's paper. Once built it is frozen: its stories and their order never change. The one exception is an Extra edition reprinted the same day (see [The Extra edition](#the-extra-edition)). |
 | Reset time | The local time at which a new edition is released. 06:30 by default, set in Settings. |
-| Release | The moment an edition becomes visible (its `releaseAt`). An edition built ahead of time is hidden until then. |
+| Release | The moment an edition is due (its `releaseAt`): the reset time, or the Evening edition's. It is printed when the app is next opened after it. |
 | First-seen time | When the app first fetched a post (`article.firstSeenAt`). This, not the publish date, decides which edition a post belongs to. |
-| Cutoff | The instant an edition was built (`edition.cutoffAt`). An edition covers posts first seen after the previous edition's cutoff and up to its own. |
+| Cutoff | The instant an edition was built (`edition.cutoffAt`), which is when it was printed. An edition covers posts first seen after the previous edition's cutoff and up to its own. |
 | Cadence | How often a feed posts: its median gap between posts. |
 | Tier | A feed's cadence class: Firehose, Daily, Weekly or Rare. |
 | Affinity | One number per feed and per tag, 0 to 1, for how much the reader cares about it. 0.5 is neutral. |
@@ -85,12 +85,13 @@ After every full sync, `MaintainedFeedSyncer` runs four pieces of housekeeping o
 | --- | --- |
 | Every 2 hours on any connection, unless the battery is low | Periodic `SyncWorker` (`periodic-sync`) |
 | Every hour while charging on an unmetered network | A second periodic `SyncWorker` (`periodic-sync-charging`) |
-| Print now on the newsstand, when an edition failed to build | The same sync, then the build and the prefetch (see [When an edition failed to build](#when-an-edition-failed-to-build)) |
+| Printing the edition on open, when no feed has answered a sync for two hours and the phone is online | All feeds, for at most 20 seconds (see [Printing on open](#printing-on-open)) |
+| Print now, Try again or "Check for new posts" on the newsstand | All feeds, for at most 20 seconds, then the print |
+| Printing an Extra edition | The new sources, for at most 60 seconds |
 | After adding a feed or importing OPML in Sources | That feed, or all feeds |
-| About 90 minutes before the reset time | The early build's final sync (see [Timing](#timing)) |
 | Onboarding | The first sync |
 
-WorkManager's periodic work is inexact and can be delayed by Doze, so these are intervals, not guarantees. Runs that overlap share one sync. Opening the app never syncs, apart from first launch, and the newsstand has no refresh button or pull gesture: a sync there could only fetch posts for the next edition.
+WorkManager's periodic work is inexact and can be delayed by Doze, so these are intervals, not guarantees. Runs that overlap share one sync. The periodic sync is what fills the next edition: it stores new posts, fetches the pages of teaser posts (see [Full text](#full-text)) and runs the housekeeping. Opening the app syncs only to print an edition that is due, and only when the periodic sync has fallen two hours behind; the newsstand has no refresh button or pull gesture: once the day's edition is printed, a sync there could only fetch posts for the next one.
 
 Fetching (`sync/FeedFetcher.kt`) uses the shared OkHttp client with conditional requests (`ETag` and `Last-Modified`), a 45-second timeout and an 8 MB size limit. Plain `http` feeds are allowed (`usesCleartextTraffic` in the manifest). A permanent redirect (301 or 308) updates the stored feed address.
 
@@ -166,7 +167,7 @@ Posts fetched by a single-feed sync (after adding a feed, or for an Extra editio
 
 ### Full text
 
-Many feeds carry only an excerpt. `DefaultFullTextFetcher` downloads the article's page, extracts the text with Readability4J and stores it as blocks. It is called when the reader opens an article and by the early build for every printed story. Feed text counts as complete, and the page is not fetched, when it has at least 250 words and does not end like a teaser ("…", "read more", "continue reading"). The page is fetched at most once per article.
+Many feeds carry only an excerpt. `DefaultFullTextFetcher` downloads the article's page, extracts the text with Readability4J and stores it as blocks. It is called when the reader opens an article and, after an edition is printed, for every printed story (see [Printing on open](#printing-on-open)). Feed text counts as complete, and the page is not fetched, when it has at least 250 words and does not end like a teaser ("…", "read more", "continue reading"). The page is fetched at most once per article.
 
 A post whose feed body is a short teaser that sends the reader to the site (it ends with "Read in full on …", "Read more", "Continue reading", "Read the full story" or an ellipsis; `DefaultFullTextFetcher.isTeaser`) has its page fetched during the sync that first stores it, not only when it is opened, so the text is there to read offline. At most 10 such posts per feed per sync, newest first, two at a time. A failure leaves the teaser, and the reader tries again on opening.
 
@@ -207,7 +208,7 @@ Multiplying means any factor near zero sinks the post: affinity cannot rescue st
 | P, seen penalty | `0.5 ^ editionsRunUnopened`; 0 once the post is read | Halves for each edition the post was printed in without being opened. |
 | C, comeback boost | 1.5 for a feed's first post after 90 quiet days; otherwise 1 | See [Welcome back](#welcome-back). |
 | W, within-feed weight | 0.5 to 2.0 (a key alone 0.7 to 1.4); 1 when nothing is known | How this post compares with its own feed's other posts for this reader. See [Ranking posts within a feed](#ranking-posts-within-a-feed). |
-| N, model interest | 0.8 to 1.25 from the on-device model's 1-to-5 rating; 1 when unrated | Only on a phone with Gemini Nano, and only for posts it has rated. It reorders posts and nothing else. See [Model interest](#model-interest-gemini-nano). |
+| N, model interest | 0.8 to 1.25 from the on-device model's 1-to-5 rating; an unrated post takes the reader's mean rating; 1 without the model | Only on a phone with Gemini Nano. It reorders posts and nothing else. See [Model interest](#model-interest-gemini-nano). |
 
 The slider turns learned affinity into the value used in A:
 
@@ -457,7 +458,9 @@ Nano does not make embeddings: the text taste of [Ranking posts within a feed](#
 | --- | --- | --- | --- | --- | --- |
 | N | 0.8 | 0.9 | 1.0 | 1.125 | 1.25 |
 
-The rating maps linearly onto `interestMinWeight..interestMaxWeight` (`engine/Interest.kt`, constants in `RankingConfig`) on each side of 3, which is 1. An unrated post, or a rating that cannot be read, is 1. The `Scorer` holds whatever the source gives it to those bounds.
+The rating maps linearly onto `interestMinWeight..interestMaxWeight` (`engine/Interest.kt`, constants in `RankingConfig`) on each side of 3, which is 1. The `Scorer` holds whatever the source gives it to those bounds.
+
+**An unrated post takes the reader's mean rating.** The model does not rate every candidate (only the shortlist, and only as far as its time allows), and most of a reader's posts are not for them, so most ratings are low. Were an unrated post 1, it would gain on every rated post near it just by not having been asked about. So a post without a rating, or with one that cannot be read, takes N from the mean of the ratings stored over the last 30 days (`interestMeanWindowDays`), once there are at least 20 of them (`interestMeanMinRatings`), mapped the same way and interpolated between whole ratings: a mean of 1.8 gives 0.88. With fewer ratings it is 1. With no ratings at all, the setting off or no model, every post is 1 and the edition is exactly what it would be without the model.
 
 N only reorders. The score without it (`Score.base`) is what every threshold is held against: a held-over post's `heldOverMinScore`, In brief's `briefMinScore` and While you were away's `awayMinScore`. So the model never puts a story on a page or takes one off; it changes the order within the pages. The rules it does not touch:
 
@@ -467,7 +470,7 @@ N only reorders. The score without it (`Score.base`) is what every threshold is 
 - sliders and mutes (a muted feed's posts are not candidates; a turned-down feed's small A is multiplied like everything else);
 - the slider's effect is never undone: at most ×1.25 against ×0.8 is a factor of about 1.56, under a day of a daily feed's freshness (`0.5 ^ (24 / 36) ≈ 0.63`, a factor of 1.59).
 
-**The reason line.** When N is at least 0.1 from 1 (`interestReasonMinShift`), "Why is this here?" gets a tail after its usual reason, as the "also in 2 other feeds" tail does: "; the on-device model rated it a likely read for you" or "; the on-device model rated it an unlikely read for you". A rating of 4 or 5 gives the first, 1 or 2 the second, 3 none.
+**The reason line.** When the model rated the post and N is at least 0.1 from 1 (`interestReasonMinShift`), "Why is this here?" gets a tail after its usual reason, as the "also in 2 other feeds" tail does: "; the on-device model rated it a likely read for you" or "; the on-device model rated it an unlikely read for you". A rating of 4 or 5 gives the first, 1 or 2 the second, 3 none. The mean an unrated post takes never gives a tail: it says nothing about that post.
 
 ### What the model is asked
 
@@ -479,22 +482,21 @@ The model is shown a short taste profile (`ai/TasteProfile.kt`), built on the ph
 
 With none of these (a new reader) the model is not asked at all: it would be rating for nobody in particular. The profile has a hash (the first 16 hex digits of its SHA-256), stored with each rating.
 
-The posts are the next scheduled edition's shortlist (`RoomEditionPublisher.shortlist`): its 40 best candidates (`interestShortlist`) by the score without N, leaving out finished posts and those under the freshness floor. Each is shown by its title, its feed's name and the first two sentences of its summary (at most 160 characters). They go 10 to a call (`InterestPrompt.BATCH_SIZE`), numbered 1 to 10, with the question "would this reader want it near the front page?", 1 to 5, and an answer asked for as a JSON object from number to rating. A call comes to well under a thousand tokens. Temperature is 0, so the same posts get the same answer.
+The posts are the next build's shortlist (`RoomEditionPublisher.shortlist`): the edition that is due while it is not printed yet, otherwise the coming one; its 40 best candidates (`interestShortlist`) by the score without N, leaving out finished posts and those under the freshness floor. Each is shown by its title, its feed's name and the first two sentences of its summary (at most 160 characters). They go 10 to a call (`InterestPrompt.BATCH_SIZE`), numbered 1 to 10, with the question "would this reader want it near the front page?", 1 to 5, and an answer asked for as a JSON object from number to rating. A call comes to well under a thousand tokens. Temperature is 0, so the same posts get the same answer.
 
 The reply is read defensively (`ai/InterestReply.kt`): the outermost JSON object (or array) is taken out of whatever prose or code fence surrounds it, keys outside 1..10 are ignored, a rating must be a whole number from 1 to 5 (4, 4.0 and "4" all count), a post given two different ratings is unrated, and anything that is not JSON gives no ratings. Every post not read with confidence is unrated, which is N = 1.
 
 ### When ratings happen
 
-AICore runs inference only for an app in the foreground: called from the background it fails with `BACKGROUND_USE_BLOCKED` ("Background usage is blocked. Please use the API when your app is in the foreground instead.", error code 30 in the library's `GenAiException.ErrorCode`). Most builds run in the background (the early build, an hour and a half before the reset), so a build never asks the model. It reads the ratings already stored (`article_interest`), and a post without one is unrated.
+AICore runs inference only for an app in the foreground: called from the background it fails with `BACKGROUND_USE_BLOCKED` ("Background usage is blocked. Please use the API when your app is in the foreground instead.", error code 30 in the library's `GenAiException.ErrorCode`). That is why editions are printed in the foreground, when the reader opens the app (see [Printing on open](#printing-on-open)): the print has the model rate the shortlist of the edition it is about to build, then builds it. The build itself never asks the model; it reads the ratings stored (`article_interest`), so it does not depend on the app staying in the foreground.
 
-Ratings are made while the app is open (`ai/InterestRater.kt`, run by `ai/OnDeviceAi.kt`):
+The print's rating (`OnDeviceAi.rateFor`, `ai/InterestRater.kt`) has 45 seconds in all, waiting for a pass already under way included. It rates the shortlist's posts that have no rating first, then those rated under an older profile (a new Like changes the hash), in shortlist order, 10 to a call, checking before every call that the app is still in the foreground and giving each call 12 seconds. It stops at the first refusal (background, a battery quota, AICore busy) or timeout; an ordinary failure skips its batch. A reader who leaves the app mid-print stops the rating there, and the build goes on with what is rated. Ratings already stored are kept and reused by every later build, whatever profile they were given under.
 
-- when the newsstand comes to the foreground;
-- after a sync that finishes while an activity of the app is started (`ai/ForegroundTracker.kt`), such as Print now's or a periodic sync that happens to run while the app is open.
+Ratings are also made ahead of time, so that the next print has less to rate (`OnDeviceAi.rateSoon`, one pass of at most 30 seconds, one at a time, the same order and checks): when the newsstand comes to the foreground with nothing to print, and after a sync that finishes while an activity of the app is started (`ai/ForegroundTracker.kt`) and no print is running. They cost nothing when the shortlist is already rated.
 
-A pass rates the shortlist's posts that have no rating first, then those rated under an older profile (a new Like changes the hash), in shortlist order. It checks before every call that the app is still in the foreground, gives each call 12 seconds and the whole pass 30, and stops at the first refusal (background, a battery quota, AICore busy) or timeout; an ordinary failure skips its batch. One pass runs at a time. A rebuild, and every later build, reuses the stored ratings; the build uses a rating whatever profile it was given under.
+Print now, Try again and the Extra edition go through the same print, so they are rated too (the Extra edition's shortlist is its own candidates').
 
-**What that means for coverage.** Only posts first seen before the reader last had the app open can be rated. For a reader who opens the paper once each morning, after the early build, the next edition's posts mostly arrive later in the day and go into it unrated. In the ranking simulation, a Scotland reader who also glances at the stand once in the evening had 15.5% of front-page stories rated. Because most of a reader's posts are not for them, most ratings are low, and a rated post is more often pushed down than up; an unrated post keeps 1 and so gains a little on rated posts near it (see the simulation below).
+**Coverage.** Every edition printed on a phone with the model has its shortlist rated before it is built, as far as 45 seconds allow (about 40 posts at a second or two per call of 10). In the ranking simulation, with a rater that answers at once, every front-page story and 97% of printed stories were rated (15.5% of front-page stories when editions were built in the background and only earlier visits' ratings could be used). On a phone the time a call takes is not known (see `todo.md`).
 
 ### Availability, download and the setting
 
@@ -524,7 +526,7 @@ Everything stays on the phone. The profile, the posts and the replies go only to
    - New posts: everything first seen after the previous morning edition's cutoff, up to now, except stories that an Evening or Extra edition printed in between. With no earlier edition, the last 3 days.
    - Held-over posts: for each loved Weekly or Rare feed, its 5 newest untouched posts from before the previous cutoff.
    - Left out: posts of feeds muted at release time, and new posts published more than 30 days before release (a newly added feed's back catalogue). Held-over posts are exempt from the age limit.
-3. **Score** every candidate at the release time, W and N included (N from the ratings already stored), and rank them. Ties go to the newer post.
+3. **Score** every candidate at the release time, W and N included (N from the ratings stored, which the print has just had the model make; an unrated post takes the reader's mean rating), and rank them. Ties go to the newer post.
 4. **Deduplicate** stories syndicated across feeds. See [Cross-feed deduplication](#cross-feed-deduplication).
 5. **Apply carry-over and the freshness floor.** See [Carry-over and From the archive](#carry-over-and-from-the-archive) and [Scoring](#scoring).
 6. **Front page.** The best 5 stories, at most one per feed. The highest score leads, with or without an image.
@@ -597,7 +599,7 @@ Daylight saving: on the day the clocks go forward, a reset time inside the skipp
 
 ### Changing a release time
 
-A changed reset time, and likewise a changed Evening edition time, **applies from the next release and never to one that has already come** (`engine/ReleaseSchedule.kt`, a pure class; `edition/ReleaseTimes.kt` is what Settings calls). The latest release at the moment of the change stays the latest release, so whatever was settled for it (printed, nothing new, or failed to build) stays settled, and no edition becomes due, or due again, on the day of the change.
+A changed reset time, and likewise a changed Evening edition time, **applies from the next release and never to one that has already come** (`engine/ReleaseSchedule.kt`, a pure class; `edition/ReleaseTimes.kt` is what Settings calls). The latest release at the moment of the change stays the latest release, so whatever was settled for it (printed, nothing new, or not printed) stays settled, and no edition becomes due, or due again, on the day of the change.
 
 With the reset at 06:30:
 
@@ -607,97 +609,88 @@ With the reset at 06:30:
 | 09:00 | 10:00, later today | Stays the 06:30 release. No second release at 10:00 | 10:00 |
 | 05:00 (today's edition still to come) | 07:00, or 05:30: still ahead today | The edition comes at the new time | The new time |
 | 05:00 | 04:00, already passed today | The edition still comes at 06:30: making it due at once would be retroactive, and skipping it would lose a day | 04:00 |
-| 05:30, with today's edition already built ahead of time | Any | The built edition is released at 06:30, the time it was built for. It is not re-timed, rebuilt or discarded | The new time |
+| 05:30, with today's edition already built ahead of time (only by a version before the print on open) | Any | The built edition is released at 06:30, the time it was built for. It is not re-timed, rebuilt or discarded | The new time |
 
 So there is exactly one release per date across any change. Changing the time again before the first change has taken effect starts from the same settled release.
 
 The mechanism is a small record stored beside each time (`resetChange`, `eveningChange` in the settings store): the release instants on either side of the change, namely the latest release when it was made, a coming release that stays at the old time if there is one, and the first release at the new time. Until that first release the schedule is read from those instants; after it, from the plain time. Keeping the instants (rather than the old time) is what makes the settled release still match its edition and its "nothing new" record.
 
-Everything that asks for a release time goes through the schedule: the publisher (which edition to build, and its release time), the early build's scheduler (which run to queue; it is re-aimed when a time changes), the newsstand (what is due, and the "Next edition at" in its notice) and the back page's "next edition" time.
+Everything that asks for a release time goes through the schedule: the publisher (which edition to build, and its release time), the printer (whether an edition is due), the newsstand (what is due, and the "Next edition at" in its notice) and the back page's "next edition" time.
 
 **Evening edition.** Its time follows the same rule. Switching it on counts as a change: switched on at 19:00 with the time at 18:00, tonight's edition is not due and the first one is tomorrow's. Switching it off takes effect at once.
 
-Not covered: a time changed in the few minutes while the early build is running may or may not see that run's edition as built.
+### Printing on open
 
-### Early build
+Editions are not built in the background. When a release time has come, its edition is printed the next time the reader opens the app, in the foreground, where Gemini Nano can rate its likeliest stories first (AICore refuses inference from the background; see [When ratings happen](#when-ratings-happen)). The reader waits a few seconds, on a phone with the model up to about a minute.
 
-Android will not reliably run a job at an exact time, so the edition is built ahead of time and released by a clock check.
+**When.** The newsstand asks the app-wide printer (`edition/EditionPrinter.kt`) whenever it comes to the foreground and whenever a release time passes while it is on screen. The printer asks `edition/DueEditions.kt` where the stand is with the edition that is due (see [When an edition is not printed](#when-an-edition-is-not-printed)) and prints when it is not printed. Opening the app before the reset time shows the current edition, whose back page gives the time of the next one, and prints nothing.
 
-- `WorkManagerEditionScheduler` keeps one one-off `EarlyBuildWorker` queued, aimed at 90 minutes before the coming reset, and requiring a network connection. If that moment has already passed, the job runs as soon as it can.
-- With the Evening edition switched on, the job aims at whichever release comes next, the morning reset or the evening time, and builds that edition.
-- The job (`edition/EarlyBuild.kt`) does a final sync, builds the next edition with `cutoffAt` = now and `releaseAt` = the coming reset, and stores it unreleased. It then prefetches full text for every printed story (briefs included) and puts those stories' pictures in the [image store](#the-image-store), so the edition reads offline. Last, it schedules the next run.
-- Each stage is isolated. A failed or slow sync (four-minute limit) does not stop the build, and a failed prefetch does not undo it.
-- If the job runs so late that the reset it aimed for has passed, or the next reset is more than 3 hours away, it makes sure the current edition exists instead of freezing tomorrow's paper a day early.
-- When its sync reached the feeds and there was still nothing new to print, it writes that down for the release it was for. That record is what separates "nothing new" from a build that failed; see [When an edition failed to build](#when-an-edition-failed-to-build).
-- The schedule is renewed on process start, when the reset time or an Evening edition setting changes (see [Changing a release time](#changing-a-release-time) for which release it then aims at), and when the device's clock or time zone changes (`TimeChangeReceiver`).
+**The print** (`edition/EditionPress.kt`), shown over an unprinted cover in today's place on the rack, with "Printing today's edition…" (or "this evening's", or "the edition of 12 Nov"), a line naming the stage and one unanimated bar:
 
-Anything fetched after the early build belongs to the following edition, because posts are assigned by first-seen time.
+| Stage | What it does | Shown as | Time limit |
+| --- | --- | --- | --- |
+| 1. Sync | Only when no feed has answered a sync for two hours (`syncIfOlderThan`, the periodic sync's longer interval, so in practice when the background sync was held back by Doze or the phone was offline), and only online. Print now, Try again and "Check for new posts" always sync when online | "Gathering the last dispatches from 42 sources…", with the count | 20 s; a sync that runs over carries on in the background |
+| 2. Rate | The on-device model rates the shortlist of the edition about to be built, checking the foreground before every call. Skipped when the model is off or missing, or the reader is new | "Reading the stories through…", "12 of 40" | 45 s, a pass already under way included |
+| 3. Build | Build and freeze, exactly as before (see [How an edition is assembled](#how-an-edition-is-assembled)): one transaction, from stored posts and stored ratings, independent of the foreground | "Setting the pages…" | 60 s |
 
-### Release
+Sync and rating together are held to 75 seconds, so the build always starts, and the whole print to three minutes; past it the print ends as failed and the stand offers Try again. A failed sync or rating never stops the build. Offline the sync is skipped and the edition is printed from what is stored; without the model the rating is skipped. The cover appears as soon as the edition is stored. Afterwards, without the reader waiting, the full text of every printed story (briefs included) is fetched and their pictures put in the [image store](#the-image-store), so the edition reads offline; at most four minutes, and a story without its text is fetched when it is opened.
 
-Release needs no job and no build. An edition built ahead of time carries its release time, and the newsstand lists the editions whose release time has passed; it looks again when it comes to the foreground and whenever a release time passes while it is on screen. Opening the app never builds an edition and never touches the network.
+**Which posts an edition takes.** The cutoff is the moment of the build, as it always was for an edition built in the foreground (Print now, onboarding, the old on-open build): the edition takes every post first seen since the previous cutoff and up to then. A post is first seen when a sync stores it, so posts the print's own sync stores are in it. A post first seen after the cutoff, including one stored by a sync that outran its 20 seconds and finished in the background, is in the next edition; nothing is lost or printed twice, because the next edition starts at this cutoff. (A post's first-seen time is read inside the transaction that stores it, so a sync running at the same moment as a build cannot slip a post between the two.) The release time is what freshness is measured at, so a reader who opens the app at 09:00 gets an edition scored as of 06:30 with the posts that arrived by 09:00.
 
-Opening the app before the reset time shows the current edition, whose back page gives the time of the next one.
+**One print at a time.** The printer belongs to the app, not the screen, and works in the app's scope: a rotation, another screen or the app going to the background loses nothing (the rating stops in the background; the build carries on), and the stand shows where the print has got to when it comes back. A second open during a print joins it; Print now and the Extra edition's button start nothing while one runs. Printing is idempotent besides: the publisher builds at most one edition per date and kind, in one transaction, so a print cut short by the process being killed is simply made again at the next open, and finds the edition if it was stored. A print the stand started on its own that failed is not repeated on its own in the same process; the placeholder offers Try again.
 
-### When an edition failed to build
+**What the background still does.** The periodic `SyncWorker` (every two hours on any connection, every hour on Wi-Fi while charging) fetches the feeds, stores new posts with their traits and embeddings, fetches the pages of teaser posts, runs the health check and trims storage; `TeaserBackfillWorker` runs once after an upgrade; `NanoDownloadWorker` fetches the model where it is wanted. Nothing else is scheduled. A version that had the early build queued (`early-edition-build`) has that work cancelled at start.
 
-The early build is best effort. When a scheduled edition is due (its release time has passed) and was not built in the background, the app does not build it silently on open, as it used to. The newsstand shows a **placeholder** in today's place on the rack: an unprinted cover (masthead, date, "Not printed", and dashed outlines where the photo and columns would be) with the line "Today's edition has not been printed." and a **Print now** button beneath it.
+**Release.** An edition carries its release time, and the newsstand lists the editions whose release time has passed. The publisher only builds an edition once its release time has come, so an edition built ahead of time exists only if a version before the print on open built it; it is still released at its own time.
 
-**What "failed to build" means** (`edition/DueEditions.kt`, a pure function over what is stored). Once a release time has passed, exactly one of these holds:
+**Long gaps and missed days.** Days the reader does not open the app get no edition; the next print covers everything first seen since the last cutoff, in one edition (see [Long gaps](#long-gaps)). While you were away still follows editions that were printed (the stand was opened) and not read, and an evening paper is printed only while it is current.
+
+### When an edition is not printed
+
+When a scheduled edition is due (its release time has passed) and is not printed, the newsstand puts a **placeholder** in today's place on the rack: an unprinted cover (masthead, date, "Not printed", and dashed outlines where the photo and columns would be). Normally that is only while the print on open runs, with its progress. When a print fails, the placeholder stays, with the line "Today's edition has not been printed." and a **Try again** button.
+
+**What counts** (`edition/DueEditions.kt`, a pure function over what is stored). Once a release time has passed, exactly one of these holds:
 
 | Case | What is stored | The stand shows |
 | --- | --- | --- |
 | Printed | A released edition of that kind for that date (or a later one) | The cover |
-| Nothing new to print: a run reached the feeds, built, and no new post was printable | No edition; the release time is in `nothingNewFor` | The previous paper and "No new edition today" (see below). Not a failure |
-| Failed to build | No edition and no such record | The placeholder and Print now |
+| Nothing new to print: a print from current posts built, and no new post was printable | No edition; the release time is in `nothingNewFor` | The previous paper and "No new edition today" (see below). Not a failure |
+| Not printed | No edition and no such record | The print on open, then the placeholder with Try again if it failed |
 
-"Failed to build" therefore covers, without telling them apart: the build threw; the sync reached no feed and nothing stored was printable (the run cannot know there was nothing new); WorkManager never started the run (Doze, a force stop, the device off or without a network); the run started too late or was stopped part-way. The remedy is the same for all of them.
-
-The one thing added to storage for this is `nothingNewFor` in the settings store: the release times (the newest four) for which a run found nothing new. An edition's existence was already stored; a failure needs no record, because it is the absence of both. A sync "reached the feeds" when it finished within its four minutes and at least one feed answered, or there were no feeds to ask.
+"Current posts" means the print's sync reached the feeds (finished within its 20 seconds with at least one feed answering, or there were none to ask), or it did not sync because a feed had answered within two hours. A print offline, after an older sync, that finds nothing stored to print cannot know there was nothing new, so it records nothing. The one thing added to storage for this is `nothingNewFor` in the settings store: the release times (the newest four) for which a print found nothing new.
 
 Special cases:
 
-- **No sources.** Never a failure: nothing can be new. A brand-new install shows the empty stand with "Add sources".
-- **Sources but no edition yet** (onboarding skipped, or its first sync failed or found nothing recent). The latest reset is due like any other, so the placeholder shows. After a Print now that reaches the feeds and finds nothing, the empty stand says the sources have had nothing recent and offers "Check for new posts".
-- **Onboarding** prints the first edition itself, in the foreground, straight after its first sync, as before. It does not go through Print now and writes no record.
-- **Evening edition.** Due from its release time until the next morning reset, and treated the same: a placeholder ("This evening's edition has not been printed.") when it failed to build, nothing said when there was nothing new for it. The newest printed paper settles the day: with the evening edition on the stand, a morning edition missed earlier that day is not asked for (its posts wait for the next morning edition). With no evening edition because nothing was new, the question falls back to the morning one. When both failed, the placeholder asks for the morning edition, and printing it leaves nothing for the evening.
-- **Extra editions** are printed on request and are never due. One on the stand does not count as today's paper. While the placeholder is up the offer of an Extra edition is withheld: Print now fetches the new sources too.
+- **No sources.** Never due: nothing can be new. A brand-new install shows the empty stand with "Add sources".
+- **Sources but no edition yet** (onboarding skipped, or its first sync failed or found nothing recent). The latest reset is due like any other, so the stand prints it on open. A print that finds nothing records it, and the empty stand then says the sources have had nothing recent and offers "Check for new posts".
+- **Onboarding** prints the first edition itself, in the foreground, straight after its first sync, as before. If the stand opens while it is still building, the print on open finds the edition (or finds nothing new and says so).
+- **Evening edition.** Due from its release time until the next morning reset, and treated the same. The newest printed paper settles the day: with the evening edition on the stand, a morning edition missed earlier that day is not asked for (its posts wait for the next morning edition). When both are due, the morning one is printed and takes everything; the evening one then has nothing new, which is recorded.
+- **Extra editions** are printed on request and are never due. One on the stand does not count as today's paper. While today's edition is unprinted the offer of an Extra edition is withheld: the print takes the new sources too.
 - **Time zones.** An edition dated after the latest local reset (after travelling west) counts as printed.
 - **Before today's reset** the edition that is due is yesterday's.
 - **A release time changed in Settings** never makes an edition due on the day it is changed, and never un-settles one: see [Changing a release time](#changing-a-release-time).
 
-**Print now** (`edition/EditionPrinter.kt`) runs in the foreground with its progress shown where the button was. It runs the early build's own stages (`EarlyBuild.run(BuildTarget.Current)`), not a copy of them:
-
-1. **Sync** every feed ("Fetching 42 feeds…", with the count). Four-minute limit.
-2. **Build** the edition that is due from stored posts ("Setting the pages…"): `ensureCurrentEdition()`, which builds the morning edition for the latest reset and, when it is switched on and its time has passed, the evening one. Unlike the background job it never builds the coming edition, however near its release is.
-3. **Fetch** the full text of every printed story ("Fetching the stories…", "12 of 40") and then the pictures the pages show. The edition is already stored at this point; the stand keeps the placeholder up until the run ends, so the cover appears with its stories fetched.
-4. Schedule the next background run, as the early build does.
-
-How a run ends:
+**Print now** is the same print, started by the reader: the placeholder's Try again, the "Check for new posts" link of the "No new edition today" notice and of the empty stand. It always syncs when online. How a print ends:
 
 | Result | What the reader sees |
 | --- | --- |
 | Printed | The cover replaces the placeholder |
-| Printed, but no feed could be reached (no network) | The cover, and "Your sources could not be reached, so this edition was printed from the posts already stored." |
-| The feeds were reached and nothing was new | The placeholder goes; "Your sources had nothing new to print." and, for the morning edition, the "No new edition today" notice. The release is recorded as nothing new |
-| No feed could be reached and nothing stored was printable | The placeholder stays, with "Your sources could not be reached, and nothing new is stored to print. Try again when you are connected." and the button reading "Try again" |
-| The build threw | The placeholder stays, with "The edition could not be printed. Try again." and "Try again" |
+| Printed, but no feed could be reached and the last sync was over two hours old | The cover, and "Your sources could not be reached, so this edition was printed from the posts already stored." |
+| The posts were current and nothing was new | The placeholder goes; "Your sources had nothing new to print." and, for the morning edition, the "No new edition today" notice. The release is recorded as nothing new |
+| No feed could be reached and nothing stored was printable | The placeholder stays, with "Your sources could not be reached, and nothing new is stored to print. Try again when you are connected." and "Try again" |
+| The build threw or ran out of time | The placeholder stays, with "The edition could not be printed. Try again." and "Try again" |
 
-Each of these notices has a close button (an X: a 48 dp target with its own description, unanimated, so the same in E-ink mode). Closing one forgets the result, in the app-wide printer, so it does not come back on rotation or on returning to the stand; only a later run's result is said. Without it the notice goes at the next release time. The Extra edition's results ("Extra edition printed", "Extra edition reprinted", "Nothing recent from the new sources to print…") have the same button. Closing an error also turns "Try again" back into "Print now"; the placeholder itself stays.
+Each of these notices has a close button (an X: a 48 dp target with its own description, unanimated, so the same in E-ink mode). Closing one forgets the result, in the app-wide printer, so it does not come back on rotation or on returning to the stand; only a later print's result is said. Without it the notice goes at the next release time. The Extra edition's results ("Extra edition printed", "Extra edition reprinted", "Nothing recent from the new sources to print…", "The Extra edition could not be printed. Try again.") are held by the same printer and have the same button. Closing an error also turns "Try again" back into "Print now"; the placeholder itself stays.
 
 Not dismissible, on purpose: the "No new edition today" notice, which is the standing reason the cover is an old one and goes with the next edition; the offer of an Extra edition, whose "Not now" is its dismissal; and the placeholder. The Subscriptions desk notice is on the paper's back page, not the newsstand, and is unchanged.
 
-A fetch of text or pictures that fails does not undo the edition: it counts as printed, and a story without its text is fetched when it is opened.
-
-The run belongs to the app, not the screen: `EditionPrinter` is held by the app container and works in the app's scope, so it carries on through a rotation, another screen or the app going to the background, and the stand shows where it has got to when it comes back. It cannot be started twice; a second request while one is running does nothing. If the process is killed mid-run the edition, once stored, is on the stand at the next launch; before that the placeholder is back.
-
-The progress display is a line of words and one unanimated bar, redrawn only when a feed or a story finishes, so it is the same in E-ink mode. The placeholder takes the cover's place in all three window classes: above the shelf on a phone and a small tablet, in the left column on a tablet in landscape, with its words capped at 360 dp.
+The progress display is a line of words and one unanimated bar, redrawn only when a feed or a batch of ratings finishes, so it is the same in E-ink mode. The placeholder takes the cover's place in all three window classes: above the shelf on a phone and a small tablet, in the left column on a tablet in landscape, with its words capped at 360 dp.
 
 ### When there are no new posts
 
 No edition is built unless at least one post first seen since the previous cutoff is printed. If there are no new posts, or they are all muted, too old or already read, nothing is stored. Held-over posts alone do not make a paper. The cutoff stays where it was, the previous edition stays current, and the posts are offered to the next build.
 
-The newsstand then says so: a "No new edition today" notice above the cover names the last paper, gives the time of the next edition and offers a link to check for new posts, and the cover is captioned "Latest edition" with its date instead of "Today's edition". The notice appears only when a run has recorded that there was nothing new for this reset (or there are no sources); otherwise the edition counts as failed to build and the placeholder shows instead. The link runs Print now, which prints today's edition if anything has arrived since.
+The newsstand then says so: a "No new edition today" notice above the cover names the last paper, gives the time of the next edition and offers a link to check for new posts, and the cover is captioned "Latest edition" with its date instead of "Today's edition". The notice appears only when a print has recorded that there was nothing new for this reset (or there are no sources); otherwise the edition counts as not printed, and the stand prints it. The link runs Print now, which syncs and prints today's edition if anything has arrived since.
 
 ### The Evening edition
 
@@ -705,7 +698,7 @@ Optional and off by default. Settings has the switch and, when it is on, the rel
 
 - **What it covers.** Posts of Firehose and Daily feeds first seen since the latest Morning or Evening cutoff. Weekly and Rare posts are not placed in it at all; they wait for the morning paper. It has no held-over posts.
 - **Structure.** A front page (1 lead + 4), In brief (8, 15 or 23 lines by edition length) and the back page with the index. No Top stories, sections, From the archive or While you were away.
-- **When it is built.** Ahead of time by the early build, or by Print now after its release time when that did not happen (see [When an edition failed to build](#when-an-edition-failed-to-build)). It is only built while it is current: between its release time and the next morning reset. A missed evening is not built the next day. If the reader first opens the app in the evening and no morning edition exists for the day, the morning edition is built first and takes everything.
+- **When it is built.** Printed on open, like the morning edition, the first time the app is opened after its release time (see [Printing on open](#printing-on-open)). It is only built while it is current: between its release time and the next morning reset. A missed evening is not built the next day. If the reader first opens the app in the evening and no morning edition exists for the day, the morning edition is built first and takes everything.
 - **Nothing lost, nothing printed twice.** The next morning edition's window still starts at the previous *morning* cutoff. It takes everything first seen since then except the stories the evening edition printed. So the Weekly and Rare posts of the day are new in the morning, as are the fast posts the evening edition only listed in its index, and its printed stories do not return.
 - **Counters.** Building an evening edition supersedes the morning one, and the next morning edition supersedes the evening one. Each superseded edition's untouched printed stories get one more unopened run, once. With no fast posts to print, no evening edition is stored and nothing is superseded.
 - It has its own running number, the date of its release and the kind `EVENING`, and it appears on the newsstand and in back issues like any edition. The back page's "next edition" time is the next release of either kind. The newsstand's "No new edition today" notice still only knows the morning reset.
@@ -714,7 +707,7 @@ Optional and off by default. Settings has the switch and, when it is on, the rel
 
 `EditionPublisher.publishExtraEdition(feedIds)` (also on `EditionRepository`) prints an edition at once from chosen feeds, meant for sources the reader has just added. The caller syncs those feeds first.
 
-The newsstand makes the offer (`ui/newsstand/ExtraOffer.kt`). Sources added after the newest edition's cutoff bring up a notice with "Print an Extra edition" and "Not now". Printing syncs those sources and calls `publishExtraEdition`. "Not now" is remembered (`AppSettings.extraOfferDismissedAt`), so the same sources are not offered twice; they join the next scheduled edition as usual. Nothing is offered before the first edition. On a date that already has an Extra edition, sources added after it went to press are offered as a reprint of it (below). Covers and paper headers read "No. 12 · Extra".
+The newsstand makes the offer (`ui/newsstand/ExtraOffer.kt`). Sources added after the newest edition's cutoff bring up a notice with "Print an Extra edition" and "Not now". Printing goes through the same printer as the scheduled edition: it syncs those sources (at most 60 seconds), has the on-device model rate the Extra edition's own shortlist (at most 45 seconds) and calls `publishExtraEdition`. "Not now" is remembered (`AppSettings.extraOfferDismissedAt`), so the same sources are not offered twice; they join the next scheduled edition as usual. Nothing is offered before the first edition. On a date that already has an Extra edition, sources added after it went to press are offered as a reprint of it (below). Covers and paper headers read "No. 12 · Extra".
 
 - **What it covers.** Those feeds' posts first seen in the last 3 days that no edition has printed. Each feed's 5 newest posts are exempt from the 30-day age limit and the freshness floor, so a quiet blog still shows what it has.
 - **Structure.** The same as a morning edition, without held-over posts or a pull-out. Kind `EXTRA`, the next running number, released immediately, dated today.
@@ -731,11 +724,11 @@ The newsstand makes the offer (`ui/newsstand/ExtraOffer.kt`). Sources added afte
 
 ### Long gaps
 
-If the phone was off or the jobs were held back for days, the next build covers everything first seen since the last cutoff in one edition. Days with no build get no edition; they are not filled in afterwards.
+If the reader does not open the app for days (or the phone was off), the next print covers everything first seen since the last cutoff in one edition. Days with no print get no edition; they are not filled in afterwards.
 
 ### Time zones
 
-The time zone is read on every call, so a change applies at once. Travelling west can put the latest reset on a date older than the newest released edition; that edition then stays current. Travelling east can put the local reset ahead of the release time of an edition already built for that date; it stays hidden until its own release time and the previous edition remains current.
+The time zone is read on every call, so a change applies at once. Travelling west can put the latest reset on a date older than the newest released edition; that edition then stays current. Travelling east brings the local reset sooner, and the edition for that date is printed on open from then, released at the local reset.
 
 ## Carry-over and From the archive
 
@@ -965,7 +958,7 @@ The 0.5 releases were the client of a self-hosted server, and their database (ve
 
 Either way the client's records, the server's address and the token with them, are deleted, and the unique work the client scheduled (`client-sync`, `client-sync-release`, `client-sync-now`) is cancelled at start, with the relay's (`relay-publish`, `relay-cleanup`). Events that were waiting in `outbox_event` for the server are dropped with the table; the engagement they recorded was already in the database.
 
-Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, whether pictures are shown in greyscale, whether the on-device model ranks (`on_device_ai_ranking`, default on), the storage budget (default 500 MB), whether onboarding is done, and whether onboarding shows the notice to restore a library from a server (`server_restore_notice`, see [Upgrading from the server client](#upgrading-from-the-server-client)). The same store holds two things that are not settings: when the offer of an Extra edition was last turned down, `nothingNewFor`, the last four release times for which a run found nothing new to print (see [When an edition failed to build](#when-an-edition-failed-to-build)), `resetChange` and `eveningChange`, how the last change of each release time takes effect (see [Changing a release time](#changing-a-release-time)). A migration of the store (`RetiredSettings`) removes, on first read, the keys of settings that are gone: everything the Kobo sync of earlier versions kept (the relay's address, token, owner secret and timestamps, `kobo_image_widths` and `db_id`, the install ID a Kobo checked). The reader's text size is in its own preferences file.
+Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, whether pictures are shown in greyscale, whether the on-device model ranks (`on_device_ai_ranking`, default on), the storage budget (default 500 MB), whether onboarding is done, and whether onboarding shows the notice to restore a library from a server (`server_restore_notice`, see [Upgrading from the server client](#upgrading-from-the-server-client)). The same store holds two things that are not settings: when the offer of an Extra edition was last turned down, `nothingNewFor`, the last four release times for which a print found nothing new to print (see [When an edition is not printed](#when-an-edition-is-not-printed)), `resetChange` and `eveningChange`, how the last change of each release time takes effect (see [Changing a release time](#changing-a-release-time)). A migration of the store (`RetiredSettings`) removes, on first read, the keys of settings that are gone: everything the Kobo sync of earlier versions kept (the relay's address, token, owner secret and timestamps, `kobo_image_widths` and `db_id`, the install ID a Kobo checked). The reader's text size is in its own preferences file.
 
 ### The image store
 
@@ -973,7 +966,7 @@ Pictures are kept in the app's files (`files/images/`, not the cache, which Andr
 
 **When an image is stored.**
 
-- When an edition is prefetched by the early build: the lead image and the body images of every printed story, briefs included. Lead images of the stories the pages show come first, so a build that runs out of time has the pages' pictures.
+- After an edition is printed: the lead image and the body images of every printed story, briefs included. Lead images of the stories the pages show come first, so a fetch that runs out of time has the pages' pictures.
 - When an article is opened in the reader, from anywhere (an edition built on open, a back issue, a source page, search, Saved): that article's lead and body images, four seconds after its text is in hand, on the app's scope.
 - Not otherwise. A picture passed in a list (a source page, search results, the Saved shelf, a cover) or in an edition that was built on open is shown from the network and held for a while in Coil's own disk cache, as before. Storing every thumbnail scrolled past would fill the budget with pictures of articles nobody opened.
 - At most 24 body images per article, and none the feed says is narrower than 80 px (the reader does not show those).
@@ -1076,7 +1069,7 @@ Newsstand ─┬─ Paper ── Reader
 - The rack is drawn from flat theme colours with shelf edges and soft shadows. There is no texture.
 - A plain labelled button bar: Search, Saved, Sources, Settings. Along the bottom on phones and small tablets, a rail down the side on tablets in landscape.
 - There is no refresh button and no pull gesture. A sync from the stand could only fetch posts for the next edition, so it showed nothing but a notice; both were removed.
-- When the edition that is due failed to build, an unprinted placeholder cover stands in today's place with a Print now button (see [When an edition failed to build](#when-an-edition-failed-to-build)). The covers already printed are racked behind it as usual.
+- When the edition that is due is not printed, an unprinted placeholder cover stands in today's place while it is printed on open, with the print's progress, and with a Try again button if the print failed (see [Printing on open](#printing-on-open)). The covers already printed are racked behind it as usual.
 - With no edition yet and no sources, the stand shows a blank cover and offers to add sources.
 
 ### Paper (`ui/paper/`)
@@ -1193,7 +1186,7 @@ In E-ink mode:
 - **Movement is paged.** Dragging does nothing until the finger lifts; then the content jumps one screen in the direction of the swipe, snapped to a story row or text line with a one-line overlap. In the paper a sideways swipe turns a whole page. Volume keys, page keys, arrow keys and space step forward and back. Previous and Next buttons appear under the content; in the paper they step through a long page before turning it.
 - **Images** are greyscale with raised contrast, dithered to 16 greys (see [Greyscale pictures](#greyscale-pictures)). Small thumbnails are dropped in favour of text. A picture opened full screen is enlarged in steps and moved a screen at a time.
 - The phone shelf wraps instead of scrolling sideways.
-- Print now's progress is words and an unanimated bar, as everywhere.
+- The print's progress is words and an unanimated bar, as everywhere.
 - **Code blocks** cannot scroll sideways, so they are set smaller, just far enough for the longest line to fit (down to 70% of the usual size). Only lines longer than that wrap.
 
 ## Architecture
@@ -1217,9 +1210,9 @@ net.tgnra.morningissue
              FeedHealthChecker, FeedRepairer
   engine/    pure Kotlin, no Android imports: RankingConfig, Cadence, Scorer, Affinity,
              WithinFeed, Interest, EditionBuilder, EditionClock, ReleaseSchedule, FeedHealthRules
-  edition/   RoomEditionPublisher, EarlyBuild, EarlyBuildWorker, WorkManagerEditionScheduler,
-             TimeChangeReceiver, DueEditions (pure: did the due edition fail to build?),
-             EditionPrinter (Print now), ReleaseTimes (changing a release time)
+  edition/   RoomEditionPublisher, EditionPress (a print's stages: sync, rate, build),
+             EditionPrinter (when to print; one print at a time), EditionPrefetch,
+             DueEditions (pure: is the due edition printed?), ReleaseTimes (changing a release time)
   ui/        theme, layout, navigation, components, newsstand, paper, reader, backissues,
              sources, saved, search, settings, onboarding
 ```
@@ -1227,7 +1220,7 @@ net.tgnra.morningissue
 - **Dependency injection** is hand-written. `AppContainer.kt` holds one instance per process of everything the UI and workers depend on, including the embedder asset and the signals upkeep. `SyncModule` and `EditionModule` wire their own layers.
 - **Data flow.** Sync and the reader only write to the database. The publisher reads it, runs the pure engine and stores a frozen edition. The UI observes repositories as Flows and never touches DAOs.
 - **The engine is pure.** It takes plain data and an instant, so every ranking and layout rule is unit-tested on the JVM.
-- **Background work** is WorkManager: two periodic sync requests, one one-off early build, and on a phone that can have Gemini Nano but does not yet, one download request that waits for Wi-Fi and a charger. The signals upkeep is not a job of its own: it runs inside each full sync and once on the app's own scope after process start.
+- **Background work** is WorkManager: two periodic sync requests, the one-off teaser backfill after an upgrade, and on a phone that can have Gemini Nano but does not yet, one download request that waits for Wi-Fi and a charger. Editions are not built in the background: they are printed in the foreground on open, on the app's own scope. The signals upkeep is not a job of its own: it runs inside each full sync and once on the app's own scope after process start.
 
 | Concern | Choice |
 | --- | --- |
@@ -1253,11 +1246,11 @@ You need JDK 21 and the Android SDK (platform 37).
 ./gradlew :macrobenchmark:connectedBenchmarkAndroidTest   # the edition build benchmark; replaces the installed app and its data
 ```
 
-**Benchmark.** The `:macrobenchmark` module measures the budget "building an edition from stored posts takes under 300 ms on a low-end phone". That build was the on-open fallback; it is now the middle stage of Print now and of a late background run, and the budget, the trace section and the class (`OnOpenEditionBuildBenchmark`) keep their names. It runs against the app's `benchmark` build type: the release build made profileable and signed with the debug key, plus a seeding receiver (`app/src/benchmark`) that only the shell can call. Each iteration stores 1,000 unread posts from 40 feeds, with their traits and embeddings, and no edition or reading history, and starts the app cold. Opening the app no longer builds anything, so the benchmark then sends the receiver a second broadcast (`--ez print true`) that calls `ensureCurrentEdition()` in the running app, and measures the trace section `MorningIssue.onOpenEditionBuild`, which wraps the build in `RoomEditionPublisher.ensureCurrentEdition`. It does not press Print now, because that would first sync the seeded feeds, which do not exist. The changed trigger compiles but has not been run. Results are written under `macrobenchmark/build/outputs/connected_android_test_additional_output/`. Numbers from an emulator are only indicative, and it has not yet been run on a phone. To run it without Gradle, install `app-benchmark.apk` and `macrobenchmark-benchmark.apk` and start `net.tgnra.morningissue.macrobenchmark/androidx.test.runner.AndroidJUnitRunner` with `am instrument -w` (add `-e androidx.benchmark.suppressErrors EMULATOR` on an emulator).
+**Benchmark.** The `:macrobenchmark` module measures the budget "building an edition from stored posts takes under 300 ms on a low-end phone". That build is the last stage of the print on open, and the budget, the trace section and the class (`OnOpenEditionBuildBenchmark`) keep the names they had as the on-open fallback. It runs against the app's `benchmark` build type: the release build made profileable and signed with the debug key, plus a seeding receiver (`app/src/benchmark`) that only the shell can call. Each iteration stores 1,000 unread posts from 40 feeds, with their traits and embeddings, and no edition or reading history, and starts the app cold. The newsstand prints the due edition on open; the seeded feeds count as just synced, so the print does not sync them (they do not exist on the network). The benchmark measures the trace section `MorningIssue.onOpenEditionBuild`, which wraps the build in `RoomEditionPublisher.ensureCurrentEdition`, and waits for the cover; on a phone with Gemini Nano the rating comes first and is outside the section. This version of it compiles but has not been run. Results are written under `macrobenchmark/build/outputs/connected_android_test_additional_output/`. Numbers from an emulator are only indicative, and it has not yet been run on a phone. To run it without Gradle, install `app-benchmark.apk` and `macrobenchmark-benchmark.apk` and start `net.tgnra.morningissue.macrobenchmark/androidx.test.runner.AndroidJUnitRunner` with `am instrument -w` (add `-e androidx.benchmark.suppressErrors EMULATOR` on an emulator).
 
-Unit tests are in `app/src/test`: the engine (scoring, cadence, affinity, within-feed ranking, edition building, sections, carry-over, the clock), the publisher and early build against an in-memory database and `work-testing`, the sync layer against saved feed fixtures and a mock web server, the embedder against the real asset and reference vectors from the original model, the migrations against the exported schemas, the image store against a local web server and Robolectric's native graphics (real decoding and WebP encoding, on the desktop), the greyscale option through a real Coil loader, the archive's round trip and merge rules (mutes, page views and settings included, and a file written as the server's export writes it), the upgrade from the server client, and the pure parts of the UI. The debug sample data has traits and embeddings (the upkeep runs after it is loaded) but no categories.
+Unit tests are in `app/src/test`: the engine (scoring, cadence, affinity, within-feed ranking, edition building, sections, carry-over, the clock), the publisher and the print (`EditionPrinterTest`, with every time limit on virtual time) against an in-memory database and fakes, the sync layer against saved feed fixtures and a mock web server, the embedder against the real asset and reference vectors from the original model, the migrations against the exported schemas, the image store against a local web server and Robolectric's native graphics (real decoding and WebP encoding, on the desktop), the greyscale option through a real Coil loader, the archive's round trip and merge rules (mutes, page views and settings included, and a file written as the server's export writes it), the upgrade from the server client, and the pure parts of the UI. The debug sample data has traits and embeddings (the upkeep runs after it is loaded) but no categories.
 
-**Ranking simulation.** `RankingSimulationTest` (`app/src/test/.../simulation/`) has simulated readers use the app for 180 days: 14 real feeds saved on 2026-11-11 (`app/src/test/resources/simulation/`, with a README) replayed by a seeded generator at their own cadences, synced by the production syncer through an OkHttp interceptor in place of the network, embedded with the real potion-base-8M asset, built by the production early build at 05:00 and released at 06:30, and read through the article and edition repositories, with missed days, a week's holiday, front-page-only visits, Likes, saves and a change of taste on day 120. Five personas (a Scotland reader, a hobbyist, a tech reader, a drifter and a lapsed reader) and a reader who opens stories at random are checked with thresholds and orderings measured after a 30-day warm-up; the run is deterministic. The Scotland reader runs a second time with a simulated on-device model, a rater that knows the persona's taste with noise, rating the next edition's shortlist through the production `InterestRater` at the morning visit and at a glance at the stand in the evening (the only times the app is in the foreground). Every check of the plain run passes again but one, which passes with a smaller margin: business posts reach the front page or Top stories 39.1% of the time against 37.7% without the model and 48.0% for the random reader. Only 15.5% of front-page stories were rated, most ratings are low, and a rated post pushed down to 0.8 or 0.9 falls behind the unrated posts that keep 1. It takes 1.5 to 2 minutes, four personas at a time. `-PsimulationReport` writes a report per persona to `app/build/reports/simulation/`, showing how affinity, W and the front page moved. Simulated readers record page views like the paper: on a full visit every page is on screen for a couple of seconds plus a few per story, with one page in ten after the front flicked past; a front-page-only visit views the front page alone; a missed day views nothing. Three checks the simulation first found failing are now kept as tests, each with the measurements before and after its fix: a week away no longer lowers a loved feed's affinity (it lowered it by about a third while every unseen page counted as ignored), a slow feed read every time becomes loved (the prior outweighed its whole record), and a link blog's own articles come first on most days that also have link posts.
+**Ranking simulation.** `RankingSimulationTest` (`app/src/test/.../simulation/`) has simulated readers use the app for 180 days: 14 real feeds saved on 2026-11-11 (`app/src/test/resources/simulation/`, with a README) replayed by a seeded generator at their own cadences, synced by the production syncer through an OkHttp interceptor in place of the network, embedded with the real potion-base-8M asset, synced at 05:00 and 17:00 and printed by the production print (`EditionPress`) at the 06:30 release, and read through the article and edition repositories, with missed days, a week's holiday, front-page-only visits, Likes, saves and a change of taste on day 120. Five personas (a Scotland reader, a hobbyist, a tech reader, a drifter and a lapsed reader) and a reader who opens stories at random are checked with thresholds and orderings measured after a 30-day warm-up; the run is deterministic. The Scotland reader runs a second time with a simulated on-device model, a rater that knows the persona's taste with noise, and editions printed as the app prints them: when the reader opens the app (07:00 to 09:00, only on the days they do), with the rater rating the shortlist through the production `InterestRater` before the build. Every check of the plain run passes again with the same margins. Every front-page story and 97% of printed stories were rated; business posts reach the front page or Top stories 35.1% of the time against 38.0% without the model and 48.0% for the random reader. (When editions were built in the background, only 15.5% of front-page stories were rated, and with unrated posts at 1 rather than the reader's mean they reached 39.1%, so that check's margin had been lowered to 8 points.) It takes 3 to 4 minutes, four personas at a time. `-PsimulationReport` writes a report per persona to `app/build/reports/simulation/`, showing how affinity, W and the front page moved. Simulated readers record page views like the paper: on a full visit every page is on screen for a couple of seconds plus a few per story, with one page in ten after the front flicked past; a front-page-only visit views the front page alone; a missed day views nothing. Three checks the simulation first found failing are now kept as tests, each with the measurements before and after its fix: a week away no longer lowers a loved feed's affinity (it lowered it by about a third while every unseen page counted as ignored), a slow feed read every time becomes loved (the prior outweighed its whole record), and a link blog's own articles come first on most days that also have link posts.
 
 **Continuous integration.** Every push and pull request runs `.github/workflows/tests.yml`: the unit tests, the ranking simulation among them, with the simulation's reports kept as a workflow artifact.
 
@@ -1270,7 +1263,7 @@ Signing is configured in `app/build.gradle.kts` only when `KEYSTORE_FILE`, `KEYS
 These are described in [`todo.md`](../todo.md) with the detail needed to build them.
 
 - **Planned:** nothing from the three milestones is left unbuilt. The smaller gaps against the original spec are in `todo.md`.
-- **Built, not proven:** ranking posts within a feed (the W factor) has not been validated on real reading history or run on a device. Nor has model interest (the N factor): it has never run on a phone with Gemini Nano. The open items are in `todo.md`.
+- **Built, not proven:** ranking posts within a feed (the W factor) has not been validated on real reading history or run on a device. Nor has model interest (the N factor): it has never run on a phone with Gemini Nano. Nor has the print on open: its stages, limits and the newsstand's printing state are unit-tested, not seen on a device. The open items are in `todo.md`.
 - **Engine built, screen missing:** the Extra edition has no button, the comeback label is not shown as a badge, and the While you were away page has no "12 posts from 7 feeds" summary line.
 - **Built, not seen:** the image store, the full-screen picture and the greyscale option have not been run on a device. Nor has the upgrade from the server client: it is tested against the client's schema and records, not on a phone that ran 0.5. Nor has discovery. Its ranking is tested on simulated readers only, and the app has not yet run with the real catalogue.
 - **Out of scope for now:** notifications, compression of stored content, and PDF export.
