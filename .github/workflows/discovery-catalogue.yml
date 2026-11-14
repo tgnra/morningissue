@@ -64,7 +64,7 @@ jobs:
 
       # The embedder is in :core, a plain JVM module, so no Android SDK is needed.
       - name: Check vector parity with the app's embedder
-        run: ./gradlew -PserverOnly :core:test --tests 'net.tgnra.morningissue.embedding.CatalogueParityTest'
+        run: ./gradlew :core:test --tests 'net.tgnra.morningissue.embedding.CatalogueParityTest'
 
       - name: Open a pull request
         env:

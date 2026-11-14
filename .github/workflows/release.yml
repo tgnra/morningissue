@@ -1,6 +1,5 @@
 # Pushing a tag that starts with "v" builds a signed APK and publishes it as a GitHub release,
-# then builds the Kobo reader zip and attaches it to the same release. (The server's image is
-# built by server-image.yml.)
+# then builds the Kobo reader zip and attaches it to the same release.
 # Running the workflow by hand (Actions > Release > Run workflow) builds the same signed APK
 # and uploads it as a workflow artifact, without creating a release.
 name: Release
@@ -53,7 +52,7 @@ jobs:
           echo "code=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Run unit tests
-        run: ./gradlew :core:test :server:test :app:testDebugUnitTest
+        run: ./gradlew :core:test :app:testDebugUnitTest
 
       - name: Decode the keystore
         env:

@@ -1,8 +1,5 @@
-# Runs the unit tests (the shared :core module, the self-hosted :server with the 180-day ranking
-# simulation and the end-to-end test, and the app) and the Kobo reader's tests on every push and
-# pull request.
-# The simulation's per-persona reports (how affinity and W moved) and the test reports are kept
-# as workflow artifacts, so a failing ranking check can be diagnosed from the run's page.
+# Runs the unit tests (the shared :core module and the app) and the Kobo reader's tests on every
+# push and pull request. The test reports are kept as workflow artifacts when a run fails.
 name: Tests
 
 on:
@@ -45,15 +42,7 @@ jobs:
           "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
 
       - name: Run unit tests
-        run: ./gradlew :core:test :server:test :app:testDebugUnitTest -PsimulationReport
-
-      - name: Upload the ranking simulation reports
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: ranking-simulation-reports
-          path: server/build/reports/simulation/
-          if-no-files-found: ignore
+        run: ./gradlew :core:test :app:testDebugUnitTest
 
       - name: Upload the test reports
         if: failure()
@@ -62,7 +51,6 @@ jobs:
           name: unit-test-reports
           path: |
             core/build/reports/tests/test/
-            server/build/reports/tests/test/
             app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: ignore
 
