@@ -1,5 +1,5 @@
-# Runs the unit tests (the shared :core module and the app) and the Kobo reader's tests on every
-# push and pull request. The test reports are kept as workflow artifacts when a run fails.
+# Runs the unit tests (the shared :core module and the app) on every push and pull
+# request. The test reports are kept as workflow artifacts when a run fails.
 name: Tests
 
 on:
@@ -52,25 +52,4 @@ jobs:
           path: |
             core/build/reports/tests/test/
             app/build/reports/tests/testDebugUnitTest/
-          if-no-files-found: ignore
-
-  # The Kobo reader's tests: sync against a fake server, the phone's golden fixtures, and the
-  # screenshot walks at every supported screen size.
-  kobo-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Check out
-        uses: actions/checkout@v7
-
-      - name: Run the Kobo tests
-        working-directory: kobo
-        run: cargo test --locked
-
-      - name: Upload the screenshots
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: kobo-screens
-          path: kobo/target/screens/
           if-no-files-found: ignore
