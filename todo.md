@@ -225,7 +225,7 @@ Built and wired into every edition build; how it works is under "Ranking posts w
 - [x] **Database version 2** with a migration, and background upkeep that fills the new tables for an upgraded library (after each sync and once after app start).
 - [x] **Posts in non-Latin scripts** get no vector, because the English model would encode their script; they are ranked on categories and traits.
 - [x] **The length key reads the feed's own word count** (`article.feedWordCount`), which full-text fetching never changes. Before, an excerpt-only feed's opened posts counted as long and its new posts as brief, and the new posts were marked down together. For a library upgraded from version 1 the count is estimated from the summary where a fetched page had already replaced the feed's text.
-- Considered and not built: a small generative model asked to rank (foreground-only or over a gigabyte, slow, hard to explain) and gradient-boosted trees (they memorise posts at this number of labels).
+- Considered and not built: a small generative model asked to rank on its own (foreground-only or over a gigabyte, slow, hard to explain; Gemini Nano now only nudges, see "Model interest" below) and gradient-boosted trees (they memorise posts at this number of labels).
 
 Open:
 
@@ -242,6 +242,27 @@ Open:
 - [ ] **A marked post is never retried.** A post marked as unembeddable (no known words, or non-Latin) stays marked until the model ID changes, even if better text is fetched for it.
 - [ ] **The debug sample data has no categories**, so it shows length, code, link-post and text signals only.
 - [ ] Tuning: the image and link counts are stored and unused; decide after validation whether they earn a key.
+
+## Model interest (Gemini Nano)
+
+Built and wired into every edition build; how it works is under "Model interest (Gemini Nano)" in `docs/how-it-works.md`. It is **not proven**: nothing has run on a phone with Gemini Nano, and the call into ML Kit is untested.
+
+- [x] **The N factor** in `Scorer` (`engine/Interest.kt`): a 1-to-5 rating mapped onto 0.8..1.25 with 3 as 1, unrated 1; every threshold held against the score without N, so it only reorders. Edition identical to before when nothing is rated.
+- [x] **Ratings stored per post** (`article_interest`: rating, time, profile hash), database version 9 with its migration. A rebuild reuses them.
+- [x] **The prompt and the reply**: a local taste profile (strongest tags, Favourite and More feeds, recent Likes and saves), 10 posts a call by title, feed and first two sentences, strict JSON asked for and read defensively.
+- [x] **Foreground only.** ML Kit's `GenAiException.ErrorCode.BACKGROUND_USE_BLOCKED` (30) and its message confirm AICore refuses background inference, so the shortlist (the next edition's 40 best by the score without N) is rated when the newsstand comes to the foreground and after a sync that finishes in the foreground, within a time budget; builds only read stored ratings.
+- [x] **Availability**: ML Kit's feature status gates everything; a downloadable model is fetched on an unmetered network while charging (WorkManager); `android.hardware.npu` declared as not required.
+- [x] **Setting** "On-device AI ranking (Gemini Nano)", on by default, with the model's status; off, builds ignore the ratings.
+- [x] **The reason line** names the model when N moved a story by at least 0.1.
+
+Open:
+
+- [ ] **Run it on a phone with Gemini Nano.** Untested on hardware: the status check, the download through AICore (and whether it is allowed from a background job; the worker retries up to five times), the prompt's real token count against `getTokenLimit()`, the replies Nano actually gives to this prompt (whether it keeps to the JSON), the time a call takes, and battery quotas (`PER_APP_BATTERY_USE_QUOTA_EXCEEDED`).
+- [ ] **Coverage is low for a reader who opens the app once a day.** Only posts first seen before the reader last had the app open can be rated; the early build runs before the morning visit, so most of the next edition arrives later and goes in unrated. In the simulation, with a glance at the stand in the evening as well, 15.5% of front-page stories were rated. Options: rate at the end of a foreground sync more eagerly, rate a wider pool than the next edition's shortlist when the app is open, or ask whether ML Kit allows inference from a foreground service.
+- [ ] **Unrated posts gain on rated ones.** Most ratings are low (most of a reader's posts are not for them), so a rated post usually gets 0.8 or 0.9 while an unrated one keeps 1. In the simulation this let the Scotland reader's unrated business posts reach the front page or Top stories slightly more often (39.1% against 37.7%). Centring unrated posts on the reader's mean rating, or applying N only within a shortlist that was rated in full, would remove the bias; both change the agreed design, so neither is done.
+- [ ] **Validate on real labels**, as for W: whether Nano's ratings predict what the reader opens better than the score without N. The bounds 0.8 and 1.25 are guesses.
+- [ ] **Ratings are not exported** in the archive; an import starts unrated.
+- [ ] **Prompt wording is untuned**, and English only.
 
 ## Later
 

@@ -11,16 +11,17 @@ This describes the app as the code on this branch behaves today. Work that is pl
 5. [Scoring](#scoring)
 6. [Affinity learning](#affinity-learning)
 7. [Ranking posts within a feed](#ranking-posts-within-a-feed)
-8. [How an edition is assembled](#how-an-edition-is-assembled)
-9. [Timing](#timing)
-10. [Carry-over and From the archive](#carry-over-and-from-the-archive)
-11. [Discovery](#discovery)
-12. [What is stored](#what-is-stored)
-13. [The screens](#the-screens)
-14. [Themes, tablets and e-ink](#themes-tablets-and-e-ink)
-15. [Architecture](#architecture)
-16. [Building, testing and releasing](#building-testing-and-releasing)
-17. [Not built yet](#not-built-yet)
+8. [Model interest (Gemini Nano)](#model-interest-gemini-nano)
+9. [How an edition is assembled](#how-an-edition-is-assembled)
+10. [Timing](#timing)
+11. [Carry-over and From the archive](#carry-over-and-from-the-archive)
+12. [Discovery](#discovery)
+13. [What is stored](#what-is-stored)
+14. [The screens](#the-screens)
+15. [Themes, tablets and e-ink](#themes-tablets-and-e-ink)
+16. [Architecture](#architecture)
+17. [Building, testing and releasing](#building-testing-and-releasing)
+18. [Not built yet](#not-built-yet)
 
 ## The idea
 
@@ -193,7 +194,7 @@ Posts sharing a timestamp count once. A feed with fewer than 5 distinct timestam
 Every candidate post gets a score from multiplied factors (`engine/Scorer.kt`). All constants live in `engine/RankingConfig.kt`.
 
 ```
-score = A × F × S × P × C × W
+score = A × F × S × P × C × W × N
 ```
 
 Multiplying means any factor near zero sinks the post: affinity cannot rescue stale news, and a post the reader has finished never returns.
@@ -206,6 +207,7 @@ Multiplying means any factor near zero sinks the post: affinity cannot rescue st
 | P, seen penalty | `0.5 ^ editionsRunUnopened`; 0 once the post is read | Halves for each edition the post was printed in without being opened. |
 | C, comeback boost | 1.5 for a feed's first post after 90 quiet days; otherwise 1 | See [Welcome back](#welcome-back). |
 | W, within-feed weight | 0.5 to 2.0 (a key alone 0.7 to 1.4); 1 when nothing is known | How this post compares with its own feed's other posts for this reader. See [Ranking posts within a feed](#ranking-posts-within-a-feed). |
+| N, model interest | 0.8 to 1.25 from the on-device model's 1-to-5 rating; 1 when unrated | Only on a phone with Gemini Nano, and only for posts it has rated. It reorders posts and nothing else. See [Model interest](#model-interest-gemini-nano). |
 
 The slider turns learned affinity into the value used in A:
 
@@ -226,7 +228,7 @@ Half-life by tier:
 | Weekly | 7 days | 10 days (the ceiling) |
 | Rare | 30 days | 10 days (the ceiling) |
 
-Worked examples, all untouched posts scored at release time, with W at 1:
+Worked examples, all untouched posts scored at release time, with W and N at 1:
 
 | Post | Affinity | Age at release | A | F | S | Score |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -242,7 +244,7 @@ The week-old post from the blog you love beats this morning's news.
 
 **Freshness floor.** A new post whose F has dropped below 0.05 (`RankingConfig.minFreshness`) is not printed. That is about 52 hours for a firehose and six and a half days for a daily feed; Weekly and Rare feeds reach the 30-day age limit first. The post is still listed in the back-page index. Held-over posts are exempt, as are the newest posts of each feed in an Extra edition.
 
-Each printed story also stores a one-line reason (`Scorer.reason`), for example "You read most posts from Daring Fireball", "Rare post: this blog publishes about once a month", "You usually read Planet's posts about space" or "New from The Verge since the last edition". The line names whichever of affinity, scarcity and W pulls hardest. It is stored in `edition_item.reason` and shown by "Why is this here?" in the story menu.
+Each printed story also stores a one-line reason (`Scorer.reason`), for example "You read most posts from Daring Fireball", "Rare post: this blog publishes about once a month", "You usually read Planet's posts about space" or "New from The Verge since the last edition". The line names whichever of affinity, scarcity and W pulls hardest; when the on-device model moved the story (N at least 0.1 from 1) a short tail says so. It is stored in `edition_item.reason` and shown by "Why is this here?" in the story menu.
 
 ### Welcome back
 
@@ -441,6 +443,78 @@ Nothing is read when there is no evidence (a first edition). Candidates' vectors
 
 **Cost.** Measured on a desktop JVM against an in-memory database with 3,000 labelled posts and 1,000 candidates, all with two categories, traits and a vector (`WithinFeedBuildCostTest`): step 2 took a median of 30 ms and step 3 a median of 7 ms, in a build that took 171 ms in all. Reading the vectors made no measurable difference to either read; the cost is in the rows. It has not been measured on a phone, and the macrobenchmark seeds no reading history, so it does not measure it either.
 
+## Model interest (Gemini Nano)
+
+On a phone that has Gemini Nano, the small language model Android runs on the device through AICore, the model is asked to rate the posts most likely to make the next edition, and its rating is one more factor in the score: N, model interest. It is a nudge. Affinity, freshness and the reader's own sliders and mutes still decide what is printed; the model can move a story a little up or down among the stories near it. On every other phone, and whenever the model is not available, N is 1 and the edition is exactly what it would be without it.
+
+Nano does not make embeddings: the text taste of [Ranking posts within a feed](#ranking-posts-within-a-feed) keeps the static embedder (potion-base-8M), and Nano only rates.
+
+**This is not proven either.** It has not run on a phone with Nano. Everything up to the call to the model is tested on the JVM with a fake model; the call itself (`ai/MlKitNanoModel.kt`) is written against the ML Kit library's published API and untested on hardware. See `todo.md`.
+
+### The factor
+
+| Rating | 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- | --- |
+| N | 0.8 | 0.9 | 1.0 | 1.125 | 1.25 |
+
+The rating maps linearly onto `interestMinWeight..interestMaxWeight` (`engine/Interest.kt`, constants in `RankingConfig`) on each side of 3, which is 1. An unrated post, or a rating that cannot be read, is 1. The `Scorer` holds whatever the source gives it to those bounds.
+
+N only reorders. The score without it (`Score.base`) is what every threshold is held against: a held-over post's `heldOverMinScore`, In brief's `briefMinScore` and While you were away's `awayMinScore`. So the model never puts a story on a page or takes one off; it changes the order within the pages. The rules it does not touch:
+
+- the freshness floor (F alone);
+- one story per feed on the front page, and the same-feed penalty;
+- a held-over post leads at most twice;
+- sliders and mutes (a muted feed's posts are not candidates; a turned-down feed's small A is multiplied like everything else);
+- the slider's effect is never undone: at most ×1.25 against ×0.8 is a factor of about 1.56, under a day of a daily feed's freshness (`0.5 ^ (24 / 36) ≈ 0.63`, a factor of 1.59).
+
+**The reason line.** When N is at least 0.1 from 1 (`interestReasonMinShift`), "Why is this here?" gets a tail after its usual reason, as the "also in 2 other feeds" tail does: "; the on-device model rated it a likely read for you" or "; the on-device model rated it an unlikely read for you". A rating of 4 or 5 gives the first, 1 or 2 the second, 3 none.
+
+### What the model is asked
+
+The model is shown a short taste profile (`ai/TasteProfile.kt`), built on the phone from what the app has already learned:
+
+- up to 5 tags with the strongest learned affinity, above neutral;
+- up to 8 feeds set to Favourite, then More;
+- the titles of up to 8 posts most recently Liked or saved in subscribed feeds.
+
+With none of these (a new reader) the model is not asked at all: it would be rating for nobody in particular. The profile has a hash (the first 16 hex digits of its SHA-256), stored with each rating.
+
+The posts are the next scheduled edition's shortlist (`RoomEditionPublisher.shortlist`): its 40 best candidates (`interestShortlist`) by the score without N, leaving out finished posts and those under the freshness floor. Each is shown by its title, its feed's name and the first two sentences of its summary (at most 160 characters). They go 10 to a call (`InterestPrompt.BATCH_SIZE`), numbered 1 to 10, with the question "would this reader want it near the front page?", 1 to 5, and an answer asked for as a JSON object from number to rating. A call comes to well under a thousand tokens. Temperature is 0, so the same posts get the same answer.
+
+The reply is read defensively (`ai/InterestReply.kt`): the outermost JSON object (or array) is taken out of whatever prose or code fence surrounds it, keys outside 1..10 are ignored, a rating must be a whole number from 1 to 5 (4, 4.0 and "4" all count), a post given two different ratings is unrated, and anything that is not JSON gives no ratings. Every post not read with confidence is unrated, which is N = 1.
+
+### When ratings happen
+
+AICore runs inference only for an app in the foreground: called from the background it fails with `BACKGROUND_USE_BLOCKED` ("Background usage is blocked. Please use the API when your app is in the foreground instead.", error code 30 in the library's `GenAiException.ErrorCode`). Most builds run in the background (the early build, an hour and a half before the reset), so a build never asks the model. It reads the ratings already stored (`article_interest`), and a post without one is unrated.
+
+Ratings are made while the app is open (`ai/InterestRater.kt`, run by `ai/OnDeviceAi.kt`):
+
+- when the newsstand comes to the foreground;
+- after a sync that finishes while an activity of the app is started (`ai/ForegroundTracker.kt`), such as Print now's or a periodic sync that happens to run while the app is open.
+
+A pass rates the shortlist's posts that have no rating first, then those rated under an older profile (a new Like changes the hash), in shortlist order. It checks before every call that the app is still in the foreground, gives each call 12 seconds and the whole pass 30, and stops at the first refusal (background, a battery quota, AICore busy) or timeout; an ordinary failure skips its batch. One pass runs at a time. A rebuild, and every later build, reuses the stored ratings; the build uses a rating whatever profile it was given under.
+
+**What that means for coverage.** Only posts first seen before the reader last had the app open can be rated. For a reader who opens the paper once each morning, after the early build, the next edition's posts mostly arrive later in the day and go into it unrated. In the ranking simulation, a Scotland reader who also glances at the stand once in the evening had 15.5% of front-page stories rated. Because most of a reader's posts are not for them, most ratings are low, and a rated post is more often pushed down than up; an unrated post keeps 1 and so gains a little on rated posts near it (see the simulation below).
+
+### Availability, download and the setting
+
+`OnDeviceAi` asks ML Kit for the feature's status (`FeatureStatus`) shortly after app start and whenever Settings opens:
+
+| Status | What happens | Settings says |
+| --- | --- | --- |
+| Available | Rating passes run as above | Available. |
+| Downloadable | `NanoDownloadWorker` asks AICore to fetch the model, only on an unmetered network while the phone is charging (WorkManager constraints), retried with backoff up to 5 times; the next start asks again | The model will download over Wi-Fi while the phone is charging. |
+| Downloading | Nothing; checked again later | Downloading. |
+| Unavailable | Nothing, ever: no AICore, an unsupported phone, or a check that failed | Not supported on this device. |
+
+The manifest declares `android.hardware.npu` as not required, so Play does not hide the app from phones without one. The ML Kit library's minimum SDK is 26, the app's own, so no API-level guard is needed: an older phone simply reports Unavailable.
+
+**Settings › Edition › On-device AI ranking (Gemini Nano)** turns it off and on (`AppSettings.onDeviceAiRanking`, on by default, a device setting that an archive import never changes). It is shown only where the model is or can be on the phone. Off, no post is rated, no download is asked for, and builds ignore the stored ratings, so editions are exactly what they were without the model. Turned back on, the stored ratings are used again.
+
+### Privacy
+
+Everything stays on the phone. The profile, the posts and the replies go only to AICore, which runs Gemini Nano on the device; nothing is sent to a server by the app, and the ratings are stored in the app's own database next to the posts they rate. They are not in the archive export. As for any app that uses ML Kit, the library brings Google's own telemetry (its dependencies include Google's data transport), which reports usage statistics as Google describes in the ML Kit terms; the app adds nothing to that and has not checked what it sends.
+
 ## How an edition is assembled
 
 `edition/RoomEditionPublisher.kt` gathers the candidates and `engine/EditionBuilder.kt`, a pure function, lays them out. The whole build runs in one database transaction. This section describes the morning edition; the [Evening](#the-evening-edition) and [Extra](#the-extra-edition) editions differ where their sections say.
@@ -450,7 +524,7 @@ Nothing is read when there is no evidence (a first edition). Candidates' vectors
    - New posts: everything first seen after the previous morning edition's cutoff, up to now, except stories that an Evening or Extra edition printed in between. With no earlier edition, the last 3 days.
    - Held-over posts: for each loved Weekly or Rare feed, its 5 newest untouched posts from before the previous cutoff.
    - Left out: posts of feeds muted at release time, and new posts published more than 30 days before release (a newly added feed's back catalogue). Held-over posts are exempt from the age limit.
-3. **Score** every candidate at the release time, W included, and rank them. Ties go to the newer post.
+3. **Score** every candidate at the release time, W and N included (N from the ratings already stored), and rank them. Ties go to the newer post.
 4. **Deduplicate** stories syndicated across feeds. See [Cross-feed deduplication](#cross-feed-deduplication).
 5. **Apply carry-over and the freshness floor.** See [Carry-over and From the archive](#carry-over-and-from-the-archive) and [Scoring](#scoring).
 6. **Front page.** The best 5 stories, at most one per feed. The highest score leads, with or without an image.
@@ -836,7 +910,7 @@ Both are in `todo.md`.
 
 ## What is stored
 
-A single Room 3 database (`data/db/`, schema version 8, exported to `app/schemas/`) on the platform's own SQLite.
+A single Room 3 database (`data/db/`, schema version 9, exported to `app/schemas/`) on the platform's own SQLite.
 
 | Table | Holds | Key columns |
 | --- | --- | --- |
@@ -854,6 +928,7 @@ A single Room 3 database (`data/db/`, schema version 8, exported to `app/schemas
 | `article_category` | A feed's category for a post | `articleId`, `key` (the two are the primary key), `label` |
 | `article_traits` | A post's structural traits | `articleId`, `traitsVersion`, `linkCount`, `imageCount`, `hasCode`, `enclosure`, `isLinkPost`, `titlePrefix` |
 | `article_embedding` | A post's text vector, or the mark that it has none | `articleId`, `model`, `vector` |
+| `article_interest` | The on-device model's rating of a post | `articleId` (the key), `rating` (1 to 5), `ratedAt`, `profileHash` |
 | `stored_image` | One image kept in the image store | `url` (the key), `articleId`, `fileName`, `byteSize`, `originalBytes`, `width`, `height`, `storedAt` |
 | `discovery_verdict` | A decision on a feed: passed, subscribed from discovery, or unsubscribed | `urlKey` (the key), `url`, `verdict`, `decidedAt`, `title`, `clusterId`, `centroid` |
 | `discovery_candidate` | A feed found on the device, for a crawler not built yet | `urlKey` (the key), `url`, `source`, `foundVia`, `foundViaTitle`, `title`, `siteUrl`, `host`, `description`, `mentions`, `foundAt`, `fetchedAt`, `tier`, `medianIntervalHrs`, `fullTextShare`, `lastPostAt`, `centroid` |
@@ -862,7 +937,7 @@ A single Room 3 database (`data/db/`, schema version 8, exported to `app/schemas
 
 `article_traits.enclosure` is one of `NONE`, `AUDIO`, `VIDEO` or `OTHER`. The last three tables are described under [Post signals](#post-signals).
 
-Removing a feed deletes its posts, their engagement, their signals, their placements in editions and their stored images, files included.
+Removing a feed deletes its posts, their engagement, their signals, their ratings, their placements in editions and their stored images, files included.
 
 ### Schema changes
 
@@ -879,6 +954,7 @@ Every change to the schema raises the database version and ships a migration (`d
 | 6 | Lets `sync_peer.tokenHash` be null and adds its relay columns | The table is rebuilt and every paired Kobo copied. |
 | 7 | The 0.5 server client's database: `sync_peer` dropped, `outbox_event` (events waiting for the server) added | Never written by the local app. |
 | 8 | Drops `sync_peer`, with the Kobo sync | `MIGRATION_6_8` from the local app; `MIGRATION_7_8` from the server client, which also drops `outbox_event`. Every other table is the same in 6, 7 and 8, so every other row stays. What a version 7 database's rows are is decided at the first start (see [Upgrading from the server client](#upgrading-from-the-server-client)). |
+| 9 | Adds `article_interest`, the on-device model's ratings | It starts empty: nothing was rated before, so every post is unrated (N = 1) and the first edition after the upgrade is built as before. |
 
 ### Upgrading from the server client
 
@@ -889,7 +965,7 @@ The 0.5 releases were the client of a self-hosted server, and their database (ve
 
 Either way the client's records, the server's address and the token with them, are deleted, and the unique work the client scheduled (`client-sync`, `client-sync-release`, `client-sync-now`) is cancelled at start, with the relay's (`relay-publish`, `relay-cleanup`). Events that were waiting in `outbox_event` for the server are dropped with the table; the engagement they recorded was already in the database.
 
-Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, whether pictures are shown in greyscale, the storage budget (default 500 MB), whether onboarding is done, and whether onboarding shows the notice to restore a library from a server (`server_restore_notice`, see [Upgrading from the server client](#upgrading-from-the-server-client)). The same store holds two things that are not settings: when the offer of an Extra edition was last turned down, `nothingNewFor`, the last four release times for which a run found nothing new to print (see [When an edition failed to build](#when-an-edition-failed-to-build)), `resetChange` and `eveningChange`, how the last change of each release time takes effect (see [Changing a release time](#changing-a-release-time)). A migration of the store (`RetiredSettings`) removes, on first read, the keys of settings that are gone: everything the Kobo sync of earlier versions kept (the relay's address, token, owner secret and timestamps, `kobo_image_widths` and `db_id`, the install ID a Kobo checked). The reader's text size is in its own preferences file.
+Settings are in a Preferences DataStore: reset time, edition length, whether the Evening edition is on and its release time, theme, display mode, whether pictures are shown in greyscale, whether the on-device model ranks (`on_device_ai_ranking`, default on), the storage budget (default 500 MB), whether onboarding is done, and whether onboarding shows the notice to restore a library from a server (`server_restore_notice`, see [Upgrading from the server client](#upgrading-from-the-server-client)). The same store holds two things that are not settings: when the offer of an Extra edition was last turned down, `nothingNewFor`, the last four release times for which a run found nothing new to print (see [When an edition failed to build](#when-an-edition-failed-to-build)), `resetChange` and `eveningChange`, how the last change of each release time takes effect (see [Changing a release time](#changing-a-release-time)). A migration of the store (`RetiredSettings`) removes, on first read, the keys of settings that are gone: everything the Kobo sync of earlier versions kept (the relay's address, token, owner secret and timestamps, `kobo_image_widths` and `db_id`, the install ID a Kobo checked). The reader's text size is in its own preferences file.
 
 ### The image store
 
@@ -1058,7 +1134,7 @@ A month calendar of every released edition, read ones ticked, with the month's e
 
 ### Settings (`ui/settings/`)
 
-Reset time, edition length (Short, Standard, Long), the Evening edition (Off or On, with its release time when on), theme (System, Light, Dark), display mode (Auto, Standard, E-ink) and pictures (Colour, Greyscale).
+Reset time, edition length (Short, Standard, Long), the Evening edition (Off or On, with its release time when on), On-device AI ranking (Gemini Nano: Off or On, with a status line, and no switch on a phone that does not support it; see [Model interest](#availability-download-and-the-setting)), theme (System, Light, Dark), display mode (Auto, Standard, E-ink) and pictures (Colour, Greyscale).
 
 - **Storage**: the budget for stored text and pictures, moved one step at a time (50, 100, 250, 500 MB, 1, 2, 4, 8, 16 GB) with Less and More, a bar and "Using 132 MB of 500 MB" beneath, then "12 MB of text, 120 MB of pictures". Over budget it says so and offers "Trim now".
 - **Archive**: Export, Export and free up space, and Import, through the system file picker (no storage permission). The job runs in the app's scope, so it carries on if the screen is left; progress and the result ("Imported 1,240 posts, skipped 310.") show under the buttons.
@@ -1134,10 +1210,13 @@ net.tgnra.morningissue
              SignalsUpkeep), upgrade (ServerClientUpgrade)
   embedding/ pure Kotlin apart from EmbedderAsset: StaticEmbedder, WordPieceTokenizer,
              EmbeddableText
+  ai/        Gemini Nano through ML Kit (MlKitNanoModel, the only class that touches it),
+             TasteProfile, InterestPrompt, InterestReply, InterestRater, OnDeviceAi,
+             NanoDownloadWorker, ForegroundTracker
   sync/      FeedFetcher, parsers, FeedDiscovery, FullTextFetcher, OPML, FeedSyncer, SyncWorker,
              FeedHealthChecker, FeedRepairer
   engine/    pure Kotlin, no Android imports: RankingConfig, Cadence, Scorer, Affinity,
-             WithinFeed, EditionBuilder, EditionClock, ReleaseSchedule, FeedHealthRules
+             WithinFeed, Interest, EditionBuilder, EditionClock, ReleaseSchedule, FeedHealthRules
   edition/   RoomEditionPublisher, EarlyBuild, EarlyBuildWorker, WorkManagerEditionScheduler,
              TimeChangeReceiver, DueEditions (pure: did the due edition fail to build?),
              EditionPrinter (Print now), ReleaseTimes (changing a release time)
@@ -1148,7 +1227,7 @@ net.tgnra.morningissue
 - **Dependency injection** is hand-written. `AppContainer.kt` holds one instance per process of everything the UI and workers depend on, including the embedder asset and the signals upkeep. `SyncModule` and `EditionModule` wire their own layers.
 - **Data flow.** Sync and the reader only write to the database. The publisher reads it, runs the pure engine and stores a frozen edition. The UI observes repositories as Flows and never touches DAOs.
 - **The engine is pure.** It takes plain data and an instant, so every ranking and layout rule is unit-tested on the JVM.
-- **Background work** is WorkManager: two periodic sync requests and one one-off early build. The signals upkeep is not a job of its own: it runs inside each full sync and once on the app's own scope after process start.
+- **Background work** is WorkManager: two periodic sync requests, one one-off early build, and on a phone that can have Gemini Nano but does not yet, one download request that waits for Wi-Fi and a charger. The signals upkeep is not a job of its own: it runs inside each full sync and once on the app's own scope after process start.
 
 | Concern | Choice |
 | --- | --- |
@@ -1159,8 +1238,9 @@ net.tgnra.morningissue
 | Feed parsing | Own `XmlPullParser` parser for RSS and Atom; kotlinx.serialization for JSON Feed |
 | Full text | Readability4J and Jsoup, converted to the block model |
 | Images | Coil 3, reading the app's own image store first |
+| On-device model | ML Kit GenAI Prompt API (`com.google.mlkit:genai-prompt` 1.0.0-beta5) over AICore, for Gemini Nano's ratings |
 
-`minSdk` is 26, `targetSdk` 36 and `compileSdk` 37. The only permission is `INTERNET`.
+`minSdk` is 26, `targetSdk` 36 and `compileSdk` 37. The app's own permission is `INTERNET`; the ML Kit library adds AICore's `BIND_SERVICE` permission and a package query for AICore. `android.hardware.npu` is declared as an optional feature.
 
 ## Building, testing and releasing
 
@@ -1177,7 +1257,7 @@ You need JDK 21 and the Android SDK (platform 37).
 
 Unit tests are in `app/src/test`: the engine (scoring, cadence, affinity, within-feed ranking, edition building, sections, carry-over, the clock), the publisher and early build against an in-memory database and `work-testing`, the sync layer against saved feed fixtures and a mock web server, the embedder against the real asset and reference vectors from the original model, the migrations against the exported schemas, the image store against a local web server and Robolectric's native graphics (real decoding and WebP encoding, on the desktop), the greyscale option through a real Coil loader, the archive's round trip and merge rules (mutes, page views and settings included, and a file written as the server's export writes it), the upgrade from the server client, and the pure parts of the UI. The debug sample data has traits and embeddings (the upkeep runs after it is loaded) but no categories.
 
-**Ranking simulation.** `RankingSimulationTest` (`app/src/test/.../simulation/`) has simulated readers use the app for 180 days: 14 real feeds saved on 2026-11-11 (`app/src/test/resources/simulation/`, with a README) replayed by a seeded generator at their own cadences, synced by the production syncer through an OkHttp interceptor in place of the network, embedded with the real potion-base-8M asset, built by the production early build at 05:00 and released at 06:30, and read through the article and edition repositories, with missed days, a week's holiday, front-page-only visits, Likes, saves and a change of taste on day 120. Five personas (a Scotland reader, a hobbyist, a tech reader, a drifter and a lapsed reader) and a reader who opens stories at random are checked with thresholds and orderings measured after a 30-day warm-up; the run is deterministic. It takes 1.5 to 2 minutes, four personas at a time. `-PsimulationReport` writes a report per persona to `app/build/reports/simulation/`, showing how affinity, W and the front page moved. Simulated readers record page views like the paper: on a full visit every page is on screen for a couple of seconds plus a few per story, with one page in ten after the front flicked past; a front-page-only visit views the front page alone; a missed day views nothing. Three checks the simulation first found failing are now kept as tests, each with the measurements before and after its fix: a week away no longer lowers a loved feed's affinity (it lowered it by about a third while every unseen page counted as ignored), a slow feed read every time becomes loved (the prior outweighed its whole record), and a link blog's own articles come first on most days that also have link posts.
+**Ranking simulation.** `RankingSimulationTest` (`app/src/test/.../simulation/`) has simulated readers use the app for 180 days: 14 real feeds saved on 2026-11-11 (`app/src/test/resources/simulation/`, with a README) replayed by a seeded generator at their own cadences, synced by the production syncer through an OkHttp interceptor in place of the network, embedded with the real potion-base-8M asset, built by the production early build at 05:00 and released at 06:30, and read through the article and edition repositories, with missed days, a week's holiday, front-page-only visits, Likes, saves and a change of taste on day 120. Five personas (a Scotland reader, a hobbyist, a tech reader, a drifter and a lapsed reader) and a reader who opens stories at random are checked with thresholds and orderings measured after a 30-day warm-up; the run is deterministic. The Scotland reader runs a second time with a simulated on-device model, a rater that knows the persona's taste with noise, rating the next edition's shortlist through the production `InterestRater` at the morning visit and at a glance at the stand in the evening (the only times the app is in the foreground). Every check of the plain run passes again but one, which passes with a smaller margin: business posts reach the front page or Top stories 39.1% of the time against 37.7% without the model and 48.0% for the random reader. Only 15.5% of front-page stories were rated, most ratings are low, and a rated post pushed down to 0.8 or 0.9 falls behind the unrated posts that keep 1. It takes 1.5 to 2 minutes, four personas at a time. `-PsimulationReport` writes a report per persona to `app/build/reports/simulation/`, showing how affinity, W and the front page moved. Simulated readers record page views like the paper: on a full visit every page is on screen for a couple of seconds plus a few per story, with one page in ten after the front flicked past; a front-page-only visit views the front page alone; a missed day views nothing. Three checks the simulation first found failing are now kept as tests, each with the measurements before and after its fix: a week away no longer lowers a loved feed's affinity (it lowered it by about a third while every unseen page counted as ignored), a slow feed read every time becomes loved (the prior outweighed its whole record), and a link blog's own articles come first on most days that also have link posts.
 
 **Continuous integration.** Every push and pull request runs `.github/workflows/tests.yml`: the unit tests, the ranking simulation among them, with the simulation's reports kept as a workflow artifact.
 
@@ -1190,7 +1270,7 @@ Signing is configured in `app/build.gradle.kts` only when `KEYSTORE_FILE`, `KEYS
 These are described in [`todo.md`](../todo.md) with the detail needed to build them.
 
 - **Planned:** nothing from the three milestones is left unbuilt. The smaller gaps against the original spec are in `todo.md`.
-- **Built, not proven:** ranking posts within a feed (the W factor) has not been validated on real reading history or run on a device. The open items are in `todo.md`.
+- **Built, not proven:** ranking posts within a feed (the W factor) has not been validated on real reading history or run on a device. Nor has model interest (the N factor): it has never run on a phone with Gemini Nano. The open items are in `todo.md`.
 - **Engine built, screen missing:** the Extra edition has no button, the comeback label is not shown as a badge, and the While you were away page has no "12 posts from 7 feeds" summary line.
 - **Built, not seen:** the image store, the full-screen picture and the greyscale option have not been run on a device. Nor has the upgrade from the server client: it is tested against the client's schema and records, not on a phone that ran 0.5. Nor has discovery. Its ranking is tested on simulated readers only, and the app has not yet run with the real catalogue.
 - **Out of scope for now:** notifications, compression of stored content, and PDF export.
