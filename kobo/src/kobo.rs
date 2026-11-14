@@ -748,7 +748,8 @@ impl device::Power for KoboPower {
 // --- Wi-Fi on and off from the reader ---
 
 /// Runs `wifi-on.sh` or `wifi-off.sh` as a child process, so the screen stays responsive
-/// while the chip powers up, joins a network and waits for an address (up to about 40 s).
+/// while the chip powers up, joins a network and waits for an address (up to about 80 s:
+/// 15 s to find a saved network, 30 s to join it, 30 s for a lease).
 /// The script's output goes to the reader's stderr, which is `launch.log`.
 ///
 /// Each job runs in its own process group: stopping a job turning Wi-Fi on also stops the

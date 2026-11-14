@@ -213,7 +213,10 @@ Known gaps:
   some models (Libra 2, Libra H2O, Nia, Clara 2E), so those profiles sleep briefly instead.
 - **Wi-Fi on from the reader:** `wifi-on.sh` reverses `wifi-off.sh` after KOReader's
   `enable-wifi.sh` and `obtain-ip.sh`: chip power, driver, `wpa_supplicant` on Nickel's
-  `/etc/wpa_supplicant/wpa_supplicant.conf`, then `dhcpcd`. Run on the Libra 2, whose
+  `/etc/wpa_supplicant/wpa_supplicant.conf`, then `dhcpcd`. Nickel leaves every saved
+  network but the last used `disabled=1`, so the script selects the strongest saved network
+  in the scan itself (as KOReader does), and always starts a fresh `dhcpcd` (`wifi-off.sh`
+  kills any left over). Run on the Libra 2, whose
   board (`mx6sll-ntx`) has a Realtek `8723ds` powered through `sdio_wifi_pwr`, as Nickel
   starts it (`wpa_supplicant -D nl80211`, `dhcpcd`). The NXP `moal` path (with the
   `nxp/wifi_mod_para*.conf` it finds in `/lib/firmware`) and the MediaTek path are unverified.

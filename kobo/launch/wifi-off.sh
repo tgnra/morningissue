@@ -24,11 +24,12 @@ pause() {
 }
 
 if grep -q "^ *$IFACE:" "$R/proc/net/dev" 2>/dev/null; then
+    # Release the lease, then make sure no DHCP client survives: dhcpcd -k can leave the
+    # master process running, and the next wifi-on.sh must start a fresh one.
     if pidof dhcpcd >/dev/null 2>&1; then
         dhcpcd -d -k "$IFACE"
-    else
-        killall -q udhcpc
     fi
+    killall -q dhcpcd udhcpc
     wpa_cli -i "$IFACE" terminate >/dev/null 2>&1
     pause
     killall -q wpa_supplicant
