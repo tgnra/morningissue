@@ -27,6 +27,7 @@ import net.tgnra.morningissue.edition.EditionPress
 import net.tgnra.morningissue.edition.FakeSettings
 import net.tgnra.morningissue.edition.MutableClock
 import net.tgnra.morningissue.edition.PrintJob
+import net.tgnra.morningissue.edition.PrintRating
 import net.tgnra.morningissue.edition.PrintTimings
 import net.tgnra.morningissue.edition.RoomEditionPublisher
 import net.tgnra.morningissue.embedding.EmbeddingFixtures
@@ -119,9 +120,17 @@ class SimulationResult(
  *   [SimulatedInternet]. Feeds are fetched one at a time, in order, on one thread (production
  *   fetches six at once) so that article IDs, and with them everything after (the text
  *   taste splits its posts in two by ID), are the same on every run.
- * - **Release.** At 05:00 UTC the production `EarlyBuild` runs its final sync and builds the
- *   edition released at the 06:30 reset, exactly as `EarlyBuildWorker` does; full text and
- *   images are not fetched.
+ * - **Background sync** at 05:00 and 17:00, as the periodic `SyncWorker` would, so posts are
+ *   first seen through the day. (The app syncs every two hours. How finely first-seen times
+ *   are spread does not change which edition a post is in, since every post first seen between
+ *   two prints is new in the second; and freshness is measured from the publish time. Syncing
+ *   is most of the simulation's cost.)
+ * - **Print.** The production `EditionPress`, the stages the stand runs when it comes to the
+ *   foreground (sync if the last one is over two hours old, rate, build); full text and
+ *   images are not fetched. Without [withModel] it runs at 06:30, the release, as for a reader
+ *   who glances at the stand then every day (so every day has an edition, read or not, which
+ *   the lapsed reader's While you were away needs); the 05:00 sync is recent, so it builds
+ *   from the posts first seen by then.
  * - **Reading.** Some time between 07:00 and 09:00 the persona opens the latest released
  *   edition through `RoomEditionRepository` (which records the visit), goes through its
  *   pages in order and opens, reads, Likes and saves stories through `RoomArticleRepository`,
@@ -130,19 +139,14 @@ class SimulationResult(
  *   ([Persona.pageMillis]), as the paper screen records it: a front-page-only visit shows
  *   the front page alone, a missed day shows nothing, and a page turned past in a second or
  *   two is not seen, so its stories do not count as ignored.
- * - **A second sync** at 17:00, so posts are first seen through the day. (The app syncs every
- *   two hours. How finely first-seen times are spread does not change which edition a post is
- *   in, since every post first seen between two builds is new in the second; and freshness is
- *   measured from the publish time. Syncing is most of the simulation's cost.)
  *
- * **The on-device model** ([withModel]). A simulated Gemini Nano ([SimulatedNano]) rates the next
- * edition's shortlist through the production `InterestRater` when the persona opens the app
- * (the only time AICore would serve it), and the builds use the stored ratings as in the app.
- * The persona's morning visit comes after that morning's build, and this simulation syncs only
- * at 17:00 and 05:00, so the morning pass finds almost nothing new: with the model the reader
- * also glances at the stand at 21:00, which rates what the 17:00 sync brought. Posts first seen
- * at 05:00 go into the edition unrated, as they would in the app for a reader who has not opened
- * it since. Without [withModel] nothing is rated and N is 1 throughout.
+ * **The on-device model** ([withModel]). As the app now does it: the edition is printed when the
+ * persona opens the app (07:00 to 09:00), and only on the days it does. The print syncs (the
+ * 05:00 sync is over two hours old), a simulated Gemini Nano ([SimulatedNano]) rates the
+ * shortlist of the edition about to be built through the production `InterestRater`, and the
+ * build uses those ratings, an unrated post the reader's mean rating. A day the persona misses
+ * has no edition; its posts are in the next one. Without [withModel] nothing is rated and N is
+ * 1 throughout.
  *
  * W is not stored by the app. After each build the model is learned once more, from the same
  * evidence the build used (`AffinityLearner.evidence` with the new edition still pending, as
@@ -199,6 +203,9 @@ class Simulation(
                 editions = editions,
                 settings = settings,
                 clock = clock,
+                // The app's rating stage: the simulated model rates the shortlist of the edition
+                // about to be printed. Without the model nothing is rated.
+                rating = if (withModel) PrintRating { ids, budget, onProgress -> rater.rate(ids, budget, onProgress).rated } else PrintRating.None,
                 lastSyncAt = { db.feedDao().lastSyncAt() },
                 // No time limits: they are measured on the wall clock, and a run must not depend on it.
                 timings = UNLIMITED,
@@ -226,30 +233,43 @@ class Simulation(
             // are the same draws whatever the page times are.
             val glances = Random(seed * 104_729 + persona.name.hashCode())
             val records = ArrayList<DayRecord>(days)
-            // Wall time of the early build (sync and build), the W snapshot, the reading and the later syncs.
+            // Wall time of the 05:00 sync and the print, the W snapshot, the reading and the later syncs.
             val phases = LongArray(4)
             var seenUpTo = START.minus(Duration.ofDays(3))
             for (day in 0 until days) {
                 val midnight = START.plus(Duration.ofDays(day.toLong()))
 
+                // Whether and when the reader opens the app today (drawn first; nothing else
+                // draws from [reader] before the reading).
+                val visit = persona.visit(day, reader)
+                val visitMinutes = reader.nextInt(120).toLong()
+                val visitAt = midnight.plus(Duration.ofHours(7)).plus(Duration.ofMinutes(visitMinutes))
+
                 // 05:00, the periodic background sync.
                 clock.now = midnight.plus(Duration.ofHours(5))
                 var mark = System.nanoTime()
                 syncer.syncAll()
-                // 06:30, the release: the stand is opened and prints the edition. The sync at
-                // 05:00 is recent enough, so the print does not sync again.
-                clock.now = midnight.plus(Duration.ofHours(6)).plus(Duration.ofMinutes(30))
-                val buildAt = clock.now
-                val outcome = press.run(PrintJob.Due(forceSync = false))
+                // The print. Without the model, at 06:30, the release, as if the stand were opened
+                // then: every day has its edition, read or not, and the 05:00 sync is recent
+                // enough that the print does not sync again. With the model, as the app does it:
+                // when the reader opens the app, and only on a day they do. The 05:00 sync is then
+                // over two hours old, so the print syncs, the model rates the shortlist, and the
+                // edition is built.
+                val buildAt = if (withModel) visitAt.takeIf { visit != Visit.NONE } else midnight.plus(Duration.ofMinutes(6 * 60 + 30))
+                val outcome = buildAt?.let { at ->
+                    clock.now = at
+                    nano.day = day
+                    press.run(PrintJob.Due(forceSync = false))
+                }
                 phases[0] += System.nanoTime() - mark
                 mark = System.nanoTime()
-                outcome.error?.let { throw AssertionError("Day $day: the print failed", it) }
-                val newPosts = db.articleDao().firstSeenBetween(seenUpTo, buildAt).size
-                val editionId = outcome.editionId
+                outcome?.error?.let { throw AssertionError("Day $day: the print failed", it) }
+                val newPosts = buildAt?.let { db.articleDao().firstSeenBetween(seenUpTo, it).size } ?: 0
+                val editionId = outcome?.editionId
                 val items = ArrayList<ItemRecord>()
                 var slope: Double? = null
                 var trust: Double? = null
-                if (editionId != null) {
+                if (editionId != null && buildAt != null) {
                     seenUpTo = buildAt
                     val edition = db.editionDao().getById(editionId)!!
                     val evidence = learner.evidence(buildAt, setOf(editionId))
@@ -282,15 +302,8 @@ class Simulation(
                 mark = System.nanoTime()
 
                 // The morning read.
-                val visit = persona.visit(day, reader)
-                val visitMinutes = reader.nextInt(120).toLong()
                 if (visit != Visit.NONE) {
-                    clock.now = midnight.plus(Duration.ofHours(7)).plus(Duration.ofMinutes(visitMinutes))
-                    // The newsstand comes to the foreground: the model rates the next edition's shortlist.
-                    if (withModel) {
-                        nano.day = day
-                        rater.rate()
-                    }
+                    clock.now = visitAt
                     val current = db.editionDao().getLatestReleased(clock.now)
                     if (current != null) {
                         editions.markEditionOpened(current.id)
@@ -348,13 +361,6 @@ class Simulation(
                 for (hour in longArrayOf(17)) {
                     clock.now = midnight.plus(Duration.ofHours(hour))
                     syncer.syncAll()
-                }
-                // With the model, the reader also glances at the stand in the evening (the app in
-                // the foreground for a moment), and the model rates what the 17:00 sync brought.
-                if (withModel) {
-                    clock.now = midnight.plus(Duration.ofHours(21))
-                    nano.day = day
-                    rater.rate()
                 }
 
                 phases[3] += System.nanoTime() - mark
