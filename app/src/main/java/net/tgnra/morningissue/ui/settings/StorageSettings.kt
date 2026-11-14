@@ -261,7 +261,7 @@ fun StorageSettingsSections(budgetMb: Int) {
 }
 
 /** Zip files are not always typed as such by file providers, so the picker allows any file. */
-private val ARCHIVE_IMPORT_TYPES = arrayOf(ArchiveFormat.MIME_TYPE, "application/octet-stream", "*/*")
+internal val ARCHIVE_IMPORT_TYPES = arrayOf(ArchiveFormat.MIME_TYPE, "application/octet-stream", "*/*")
 
 /** "Less", the budget, "More": the budget moved one step at a time, as the feed slider's stepper does. */
 @Composable

@@ -76,4 +76,7 @@ interface SettingsRepository {
      * are left alone. For an archive import into a fresh library (`settings.json`).
      */
     suspend fun restoreSchedule(restored: AppSettings) = Unit
+
+    /** Shows or clears onboarding's notice about restoring a library from a server (`AppSettings.restoreNotice`). */
+    suspend fun setRestoreNotice(show: Boolean) = Unit
 }

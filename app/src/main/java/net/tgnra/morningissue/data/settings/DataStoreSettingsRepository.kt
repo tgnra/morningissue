@@ -127,6 +127,10 @@ class DataStoreSettingsRepository(
         }
     }
 
+    override suspend fun setRestoreNotice(show: Boolean) {
+        dataStore.edit { if (show) it[RESTORE_NOTICE] = true else it.remove(RESTORE_NOTICE) }
+    }
+
     override suspend fun restoreSchedule(restored: AppSettings) {
         dataStore.edit {
             it[RESET_MINUTE_OF_DAY] = restored.resetTime.hour * 60 + restored.resetTime.minute
@@ -161,6 +165,7 @@ class DataStoreSettingsRepository(
             nothingNewFor = releaseTimes(prefs[NOTHING_NEW_FOR]),
             resetChange = decode(prefs[RESET_CHANGE]),
             eveningChange = decode(prefs[EVENING_CHANGE]),
+            restoreNotice = prefs[RESTORE_NOTICE] ?: defaults.restoreNotice,
         )
     }
 
@@ -184,5 +189,6 @@ class DataStoreSettingsRepository(
         val NOTHING_NEW_FOR = stringPreferencesKey("nothing_new_for")
         val RESET_CHANGE = stringPreferencesKey("reset_change")
         val EVENING_CHANGE = stringPreferencesKey("evening_change")
+        val RESTORE_NOTICE = booleanPreferencesKey("server_restore_notice")
     }
 }

@@ -30,6 +30,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val container = appContainer
+        // Only blocks on the one start after updating from the server client, when it clears its cache.
+        container.finishUpgrade()
 
         setContent {
             // Null until the stored settings have been read, so the first frame is not themed

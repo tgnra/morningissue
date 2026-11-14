@@ -46,6 +46,12 @@ data class AppSettings(
     val resetChange: ReleaseChange? = null,
     /** How the last change of [eveningEditionTime], or switching the Evening edition on, takes effect. */
     val eveningChange: ReleaseChange? = null,
+    /**
+     * Onboarding says how to bring back a library from a Morning Issue server: set when the
+     * upgrade from the 0.5 server client cleared its cache (`data.upgrade.ServerClientUpgrade`),
+     * cleared when onboarding ends.
+     */
+    val restoreNotice: Boolean = false,
 ) {
     companion object {
         val DEFAULT_RESET_TIME: LocalTime = LocalTime.of(6, 30)

@@ -78,6 +78,8 @@ internal class FakeSettings(initial: AppSettings = AppSettings()) : SettingsRepo
         )
     }
 
+    override suspend fun setRestoreNotice(show: Boolean) = state.update { it.copy(restoreNotice = show) }
+
     val current: AppSettings get() = state.value
 }
 

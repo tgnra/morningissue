@@ -137,11 +137,7 @@ object Migrations {
      * Version 5 adds `sync_peer`, the Kobos paired for local-network sync (a feature since
      * removed, with the Kobo reader; version 8 drops the table).
      *
-     * - It starts empty. Version 4 had no sync, so there is nothing to fill it from: a Kobo
-     *   pairs from the Sync screen after the upgrade.
-     * - The install's `dbId`, which a Kobo checks so that it never sends events to another
-     *   database, lives in the settings store, not here, so this step has nothing to do for
-     *   it. It is created the first time the Sync screen opens.
+     * It starts empty: version 4 had no sync, so there was nothing to fill it from.
      */
     val MIGRATION_4_5: Migration = object : Migration(4, 5) {
         override suspend fun migrate(connection: SQLiteConnection) {

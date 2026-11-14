@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import net.tgnra.morningissue.data.archive.ArchiveController
 import net.tgnra.morningissue.data.archive.RoomArchiveTransfer
 import net.tgnra.morningissue.data.db.MorningIssueDatabase
@@ -36,6 +37,7 @@ import net.tgnra.morningissue.data.signals.SignalsUpkeep
 import net.tgnra.morningissue.data.signals.TraitsBackfill
 import net.tgnra.morningissue.data.storage.RoomStorageRepository
 import net.tgnra.morningissue.data.storage.StorageRepository
+import net.tgnra.morningissue.data.upgrade.ServerClientUpgrade
 import net.tgnra.morningissue.edition.EarlyBuild
 import net.tgnra.morningissue.edition.EditionModule
 import net.tgnra.morningissue.edition.EditionPrinter
@@ -139,7 +141,26 @@ class DefaultAppContainer(context: Context) : AppContainer {
     override val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     override val clock: Clock = Clock.systemDefaultZone()
 
-    private val database: MorningIssueDatabase by lazy { MorningIssueDatabase.create(appContext) }
+    /**
+     * Opened with the upgrade from the 0.5 server client already done, when there was one to
+     * do ([ServerClientUpgrade]), so that nothing reads its cache first.
+     */
+    private val database: MorningIssueDatabase by lazy {
+        MorningIssueDatabase.create(appContext).also { db ->
+            if (ServerClientUpgrade.isPending(appContext)) {
+                runBlocking(Dispatchers.IO) { ServerClientUpgrade.runFor(appContext, db, settings) }
+            }
+        }
+    }
+
+    /**
+     * Finishes the upgrade from the server client before the first screen reads the settings
+     * (it changes onboarding). Returns at once when there is none: only that rare first start
+     * opens the database here.
+     */
+    fun finishUpgrade() {
+        if (ServerClientUpgrade.isPending(appContext)) database
+    }
 
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()

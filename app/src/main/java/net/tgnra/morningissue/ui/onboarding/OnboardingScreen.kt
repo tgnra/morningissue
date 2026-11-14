@@ -1,5 +1,8 @@
 package net.tgnra.morningissue.ui.onboarding
 
+import android.content.ActivityNotFoundException
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +29,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -34,7 +38,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.map
 import net.tgnra.morningissue.R
+import net.tgnra.morningissue.data.archive.ArchiveStatus
 import net.tgnra.morningissue.model.Feed
 import net.tgnra.morningissue.sync.SyncStatus
 import net.tgnra.morningissue.ui.LocalAppContainer
@@ -47,6 +53,8 @@ import net.tgnra.morningissue.ui.components.SectionLabel
 import net.tgnra.morningissue.ui.components.TextLink
 import net.tgnra.morningissue.ui.components.ThinProgressBar
 import net.tgnra.morningissue.ui.layout.LocalPaperLayoutSpec
+import net.tgnra.morningissue.ui.settings.ARCHIVE_IMPORT_TYPES
+import net.tgnra.morningissue.ui.settings.archiveMessage
 import net.tgnra.morningissue.ui.sources.AddFeedForm
 import net.tgnra.morningissue.ui.sources.rememberAddFeedFlow
 import net.tgnra.morningissue.ui.sources.rememberOpmlActions
@@ -69,6 +77,10 @@ private enum class Step {
  * First launch: add feeds by address or OPML, fetch them all once ("Fetching 42 feeds…"),
  * build the first edition and move on to the newsstand. This is the only time the app waits on
  * the network. If nothing can be fetched or built, the stand's empty state takes over.
+ *
+ * After updating from the 0.5 server client, whose cache was cleared, it starts with a notice
+ * ([RestoreFromServer]): import the archive exported from the server, and go straight to the
+ * stand once it is in.
  */
 @Composable
 fun OnboardingScreen(
@@ -79,6 +91,8 @@ fun OnboardingScreen(
     val colors = MorningIssueTheme.colors
     val feeds by remember(container) { container.feeds.observeFeeds() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val syncStatus by container.feedSyncer.status.collectAsStateWithLifecycle()
+    val restoreNotice by remember(container) { container.settings.settings.map { it.restoreNotice } }
+        .collectAsStateWithLifecycle(initialValue = false)
     var step by rememberSaveable { mutableStateOf(Step.AddSources) }
     var syncDone by remember { mutableStateOf(false) }
     val finished = rememberUpdatedState(onFinished)
@@ -93,12 +107,19 @@ fun OnboardingScreen(
             container.editions.ensureCurrentEdition()
         }
         container.settings.setOnboardingDone(true)
+        container.settings.setRestoreNotice(false)
         finished.value()
     }
 
     Box(Modifier.fillMaxSize().background(colors.paper).windowInsetsPadding(WindowInsets.safeDrawing).imePadding()) {
         when (step) {
-            Step.AddSources -> AddSources(feeds, onPrint = { step = Step.FirstEdition }, onSkip = { step = Step.Skip }, onFindSources = onFindSources)
+            Step.AddSources -> AddSources(
+                feeds,
+                restoreNotice = restoreNotice,
+                onPrint = { step = Step.FirstEdition },
+                onSkip = { step = Step.Skip },
+                onFindSources = onFindSources,
+            )
             Step.FirstEdition -> FirstEditionProgress(feedCount = feeds.size, status = syncStatus, syncing = !syncDone)
             Step.Skip -> Unit
         }
@@ -120,7 +141,13 @@ private fun Nameplate() {
 }
 
 @Composable
-private fun AddSources(feeds: List<Feed>, onPrint: () -> Unit, onSkip: () -> Unit, onFindSources: () -> Unit) {
+private fun AddSources(
+    feeds: List<Feed>,
+    restoreNotice: Boolean,
+    onPrint: () -> Unit,
+    onSkip: () -> Unit,
+    onFindSources: () -> Unit,
+) {
     val colors = MorningIssueTheme.colors
     val type = MorningIssueTheme.typography
     val margin = LocalPaperLayoutSpec.current.pageMargin
@@ -134,6 +161,7 @@ private fun AddSources(feeds: List<Feed>, onPrint: () -> Unit, onSkip: () -> Uni
 
     PagedColumn(contentPadding = PaddingValues(start = margin, end = margin, top = 28.dp, bottom = 32.dp), maxWidth = 520.dp) {
         Nameplate()
+        if (restoreNotice) RestoreFromServer(onRestored = onSkip)
         Spacer(Modifier.height(24.dp))
         Text(stringResource(R.string.onboarding_tagline), style = type.leadHeadline, color = colors.ink)
         Spacer(Modifier.height(10.dp))
@@ -189,6 +217,55 @@ private fun AddSources(feeds: List<Feed>, onPrint: () -> Unit, onSkip: () -> Uni
             TextLink(stringResource(R.string.onboarding_skip), onSkip)
         }
     }
+}
+
+/**
+ * The notice after updating from the server client: what happened, how to export the library
+ * from the server, and the import. A finished import goes on to the stand ([onRestored]); the
+ * import itself runs in the app's scope (`ArchiveController`), so it survives rotation.
+ */
+@Composable
+private fun RestoreFromServer(onRestored: () -> Unit) {
+    val container = LocalAppContainer.current
+    val colors = MorningIssueTheme.colors
+    val type = MorningIssueTheme.typography
+    val resources = LocalResources.current
+    val status by container.archive.status.collectAsStateWithLifecycle()
+    var pickerMissing by remember { mutableStateOf(false) }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) container.archive.import(uri)
+    }
+    val restored = rememberUpdatedState(onRestored)
+    LaunchedEffect(status) {
+        if (status is ArchiveStatus.Imported) {
+            container.archive.clear()
+            restored.value()
+        }
+    }
+
+    Spacer(Modifier.height(24.dp))
+    SectionLabel(stringResource(R.string.restore_server_title), color = colors.ink, heading = true)
+    Spacer(Modifier.height(8.dp))
+    Text(stringResource(R.string.restore_server_body), style = type.body, color = colors.ink)
+    Spacer(Modifier.height(8.dp))
+    Text(stringResource(R.string.restore_server_how), style = type.body, color = colors.inkSecondary)
+    Spacer(Modifier.height(10.dp))
+    PaperButton(
+        text = stringResource(R.string.archive_import_action),
+        onClick = {
+            pickerMissing = false
+            try {
+                importLauncher.launch(ARCHIVE_IMPORT_TYPES)
+            } catch (_: ActivityNotFoundException) {
+                pickerMissing = true
+            }
+        },
+        enabled = status !is ArchiveStatus.Running,
+    )
+    val message = if (pickerMissing) stringResource(R.string.restore_server_no_picker) else archiveMessage(status, resources)
+    message?.let { NoticeLine(it, Modifier.padding(top = 12.dp), isError = pickerMissing || status is ArchiveStatus.Failed) }
+    Spacer(Modifier.height(12.dp))
+    HairlineRule()
 }
 
 @Composable

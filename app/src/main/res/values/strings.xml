@@ -541,6 +541,10 @@
     <string name="not_subscribed_short">From %1$s, which you don’t subscribe to.</string>
     <string name="subscribe_to">Subscribe to %1$s</string>
     <string name="subscribed_to">Subscribed to %1$s.</string>
+    <string name="restore_server_title">Your library lives on this phone again</string>
+    <string name="restore_server_body">This version of Morning Issue no longer uses a server. What the phone held for the server has been cleared, so that your whole library can come back from the server in one file.</string>
+    <string name="restore_server_how">On the server, run “morningissue-server export &lt;user&gt; library.zip” (or download /api/v1/export while signed in), copy the file to this phone and import it here. You can also import it later from Settings › Archive.</string>
+    <string name="restore_server_no_picker">No app on this phone can pick a file.</string>
     <string name="onboarding_discover_detail">Not sure where to start? Browse suggested blogs and small sites.</string>
 
 </resources>
