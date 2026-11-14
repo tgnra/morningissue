@@ -276,6 +276,18 @@ data class RankingConfig(
     val lengthBriefMaxWords: Int = 150,
     val lengthShortMaxWords: Int = 500,
     val lengthMediumMaxWords: Int = 1500,
+
+    // N: model interest (engine/Interest.kt), a 1-to-5 rating from the on-device model
+    // (Gemini Nano). It nudges the order and nothing else: the score thresholds (held-over,
+    // In brief, While you were away) are held against the score without it.
+    /** A post rated 1 ("not for this reader") scores times this. */
+    val interestMinWeight: Double = 0.8,
+    /** A post rated 5 ("front page material for this reader") scores times this. */
+    val interestMaxWeight: Double = 1.25,
+    /** "Why is this here?" mentions the model when N is at least this far from 1. */
+    val interestReasonMinShift: Double = 0.1,
+    /** How many of a build's best candidates, by the score without N, the model is asked about. */
+    val interestShortlist: Int = 40,
 ) {
     companion object {
         val Default = RankingConfig()

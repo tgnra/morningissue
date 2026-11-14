@@ -40,19 +40,30 @@ data class Score(
     val quietDays: Long? = null,
     /** The within-feed weight with the signal behind it; neutral unless a [WithinFeedSource] is set. */
     val within: WithinFeedWeight = WithinFeedWeight.Neutral,
+    /** N, the model-interest weight: 1 unless an [InterestSource] is set and the post was rated. */
+    val n: Double = 1.0,
 ) {
     /** W, the within-feed multiplier: 1 unless the reader's record tells this feed's posts apart. */
     val w: Double get() = within.multiplier
 
-    val value: Double = a * f * s * p * c * within.multiplier
+    /**
+     * The score without N: `A × F × S × P × C × W`. The edition's score thresholds
+     * (`heldOverMinScore`, `briefMinScore`, `awayMinScore`) are held against this, so the model
+     * can reorder posts but never lets one in or keeps one out.
+     */
+    val base: Double = a * f * s * p * c * within.multiplier
+
+    /** `A × F × S × P × C × W × N`; exactly [base] when N is 1. */
+    val value: Double = if (n == 1.0) base else base * n
 
     val isComeback: Boolean get() = quietDays != null
 }
 
 /**
- * `score = A × F × S × P × C × W`, as described under "Scoring" in `docs/how-it-works.md`: age
- * is measured at the edition's release time, P counts editions a post ran in unopened, C is
- * the comeback boost and W the within-feed weight ([WithinFeed]). Every constant comes from
+ * `score = A × F × S × P × C × W × N`, as described under "Scoring" in `docs/how-it-works.md`:
+ * age is measured at the edition's release time, P counts editions a post ran in unopened, C
+ * is the comeback boost, W the within-feed weight ([WithinFeed]) and N the model interest
+ * ([Interest]). Every constant comes from
  * [config]; with `halfLifeFloorHours = 4` this reproduces the original live-feed design's
  * worked examples.
  *
@@ -60,6 +71,9 @@ data class Score(
  * as before within-feed ranking. It applies whatever the slider says: it orders a feed's own
  * posts, and at most ×2 (×1.4 from a key alone) on a turned-down feed's small A does not
  * bring that feed back.
+ *
+ * N is 1 unless an [interestSource] is given, and is held to `interestMinWeight..interestMaxWeight`
+ * (0.8 to 1.25) whatever the source returns. A scorer without one scores exactly as before.
  *
  * S is earned ([scarcity] with an affinity): the full bonus of a feed's cadence from neutral
  * affinity up, shrinking below it and a drag below half of neutral, so that a slow feed the
@@ -69,6 +83,7 @@ class Scorer(
     private val config: RankingConfig = RankingConfig.Default,
     private val affinitySource: AffinitySource = AffinitySource.Stored,
     private val withinFeedSource: WithinFeedSource = WithinFeedSource.Neutral,
+    private val interestSource: InterestSource = InterestSource.Neutral,
 ) {
     private val affinityRules = Affinity(config)
 
@@ -92,7 +107,15 @@ class Scorer(
             c = if (quietDays != null && feed.sliderStep >= SliderStep.AUTO) config.comebackBoost else 1.0,
             quietDays = quietDays,
             within = withinFeed(feed, candidate),
+            n = interest(candidate),
         )
+    }
+
+    /** N from the source, held to its bounds; 1 for anything that is not a number. */
+    private fun interest(candidate: Candidate): Double {
+        val weight = interestSource.weight(candidate.articleId)
+        if (weight.isNaN()) return 1.0
+        return weight.coerceIn(config.interestMinWeight, config.interestMaxWeight)
     }
 
     /** W from the source, held to the caps whatever the source returns. */
@@ -174,7 +197,21 @@ class Scorer(
      *
      * @param kind where the post was placed, when known
      */
-    fun reason(feed: FeedProfile, candidate: Candidate, score: Score, kind: ItemKind? = null): String {
+    fun reason(feed: FeedProfile, candidate: Candidate, score: Score, kind: ItemKind? = null): String =
+        baseReason(feed, candidate, score, kind) + interestNote(score)
+
+    /**
+     * The model's part of the reason line, when N moved the post by at least
+     * `interestReasonMinShift`: a tail after the main reason, like "also in 2 other feeds".
+     * Empty otherwise, so with no model the line is exactly what it was.
+     */
+    fun interestNote(score: Score): String = when {
+        score.n - 1.0 >= config.interestReasonMinShift - EPSILON -> "; $INTEREST_UP"
+        1.0 - score.n >= config.interestReasonMinShift - EPSILON -> "; $INTEREST_DOWN"
+        else -> ""
+    }
+
+    private fun baseReason(feed: FeedProfile, candidate: Candidate, score: Score, kind: ItemKind?): String {
         if (kind == ItemKind.ARCHIVE) {
             return "From the archive: you have not read this one from ${feed.title} yet"
         }
@@ -278,6 +315,13 @@ class Scorer(
         private const val RARE_PULL = 0.35
 
         private const val COMEBACK_PREFIX = "Back after"
+
+        /** Floating-point slack for the reason threshold: a rating of 2 gives N = 0.9, give or take a rounding. */
+        private const val EPSILON = 1e-9
+
+        /** The tails of the reason line when the on-device model moved a post up or down. */
+        const val INTEREST_UP = "the on-device model rated it a likely read for you"
+        const val INTEREST_DOWN = "the on-device model rated it an unlikely read for you"
 
         /**
          * The comeback label carried by a stored reason line ("Back after 2 years"), or null

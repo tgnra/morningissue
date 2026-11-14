@@ -67,6 +67,13 @@ data class EditionLimits(
  *   kept. W says how a post compares with its own feed's other posts, which says nothing
  *   about which feed the reader would rather read the story in. (Between feeds of equal
  *   affinity the better score decides, and W is part of that.)
+ *
+ * **Model interest.** N ([Interest], the on-device model's rating) is in every score too, so it
+ * reorders posts wherever they compete, but every threshold is held against the score without
+ * it (`Score.base`): the model never lets a post onto a page or keeps one off. The freshness
+ * floor, the one-story-per-feed front page, the same-feed penalty, the lead-at-most-twice rule,
+ * mutes and sliders are all applied as before. With every N at 1 the edition is exactly the
+ * one built without the model.
  */
 class EditionBuilder(
     private val config: RankingConfig = RankingConfig.Default,
@@ -216,7 +223,7 @@ class EditionBuilder(
             val candidate = item.candidate
             when {
                 !candidate.isHeldOver -> if (candidate.editionsRunUnopened > 0) retired += item else regular += item
-                candidate.leadCount >= config.maxLeadRuns || item.score.value < config.heldOverMinScore -> archiveOnly += item
+                candidate.leadCount >= config.maxLeadRuns || item.score.base < config.heldOverMinScore -> archiveOnly += item
                 else -> regular += item
             }
         }
@@ -556,9 +563,9 @@ class EditionBuilder(
      * is held against the story's own score, not the penalised one.
      */
     private fun fillInBrief(ranked: List<Ranked>, limits: EditionLimits, layout: Layout): List<Ranked> {
-        // Ranked by score, so nothing after the first post under the threshold can qualify.
+        // Held against the score without N, which the ranking's order does not follow.
         val eligible = ranked.asSequence()
-            .takeWhile { it.score.value >= config.briefMinScore }
+            .filter { it.score.base >= config.briefMinScore }
             .filter { it.feed.tier == CadenceTier.FIREHOSE || it.feed.tier == CadenceTier.DAILY }
             .toList()
         if (eligible.isEmpty()) return ranked
@@ -629,7 +636,7 @@ class EditionBuilder(
             if (feed.tier == CadenceTier.FIREHOSE && feed.id !in away.engagedFeedIds) continue
             missed += candidate.copy(editionsRunUnopened = 0, isHeldOver = false, previousPostAt = null) to feed
         }
-        val ranked = scoreAndRank(missed, away.lastVisitAt).filter { it.score.value >= config.awayMinScore }
+        val ranked = scoreAndRank(missed, away.lastVisitAt).filter { it.score.base >= config.awayMinScore }
         // Keep these apart from the edition's own ranks, which `without` goes by.
         ranked.forEach { it.rank = -1 - it.rank }
         val picks = dedupe(ranked, shadows = emptyList()).kept.take(limits.awayStories)
