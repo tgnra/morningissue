@@ -22,7 +22,7 @@ kotlin {
 }
 
 // `-PserverVersion=x.y.z` from a release tag; shown by /api/v1/health.
-version = providers.gradleProperty("serverVersion").getOrElse("0.5.1")
+version = providers.gradleProperty("serverVersion").getOrElse("0.5.3")
 
 tasks.jar {
     manifest {
