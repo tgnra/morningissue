@@ -15,20 +15,6 @@ val hasReleaseSigning = listOf(
     releaseKeystoreFile, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword
 ).none { it.isNullOrBlank() }
 
-// The relay the Kobo sync goes through, and its registration token. The app has no setting for
-// either: they are fixed when it is built, from a Gradle property (-P, or
-// ~/.gradle/gradle.properties) or the environment (CI variables and secrets). The address
-// defaults to the project's relay when neither is set, or is empty. The token is never kept in
-// the repository: it only keeps bots from creating groups on the relay, and a public
-// repository would hand it to them. Empty means none.
-fun buildSetting(property: String, variable: String): String =
-    providers.gradleProperty(property).orElse(providers.environmentVariable(variable)).getOrElse("").trim()
-val defaultRelayAddress = "https://mirelay.tgnra.net"
-val givenRelayAddress = buildSetting("morningissue.relayAddress", "MORNINGISSUE_RELAY_ADDRESS")
-val builtInRelayAddress = givenRelayAddress.ifEmpty { defaultRelayAddress }
-val builtInRelayToken = buildSetting("morningissue.relayToken", "MORNINGISSUE_RELAY_TOKEN")
-fun kotlinString(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$") + "\""
-
 android {
     namespace = "net.tgnra.morningissue"
     // Current AndroidX, Compose, Coil and OkHttp releases require compiling against API 37.
@@ -47,9 +33,6 @@ android {
         versionName = providers.gradleProperty("appVersionName").orNull ?: "0.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        buildConfigField("String", "RELAY_ADDRESS", kotlinString(builtInRelayAddress))
-        buildConfigField("String", "RELAY_TOKEN", kotlinString(builtInRelayToken))
     }
 
     signingConfigs {
@@ -101,7 +84,6 @@ android {
     }
     buildFeatures {
         compose = true
-        buildConfig = true
     }
     androidResources {
         // The embedding table (assets/embedding/*.bin) is memory-mapped out of the APK, which only
@@ -119,8 +101,6 @@ android {
                 // `-PsimulationReport` (or `-PsimulationReport=<dir>`) makes the ranking simulation
                 // write a report per persona, by default to build/reports/simulation/.
                 project.findProperty("simulationReport")?.let { dir -> it.systemProperty("morningissue.simulation.report", dir) }
-                // Whether this build was given a relay address, so a test can check the default otherwise.
-                it.systemProperty("morningissue.relayAddressGiven", givenRelayAddress.isNotEmpty().toString())
             }
         }
     }
@@ -134,7 +114,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
-    implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 
     implementation(platform(libs.androidx.compose.bom))
@@ -164,11 +143,6 @@ dependencies {
     implementation(libs.readability4j)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
-    // Scanning a Kobo's relay pairing code, without Google Play services.
-    implementation(libs.androidx.camera.camera2)
-    implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.view)
-    implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

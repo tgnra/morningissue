@@ -134,8 +134,8 @@ object Migrations {
     }
 
     /**
-     * Version 5 adds `sync_peer`, the Kobos paired for local-network sync
-     * (`docs/kobo-sync.md`).
+     * Version 5 adds `sync_peer`, the Kobos paired for local-network sync (a feature since
+     * removed, with the Kobo reader; version 8 drops the table).
      *
      * - It starts empty. Version 4 had no sync, so there is nothing to fill it from: a Kobo
      *   pairs from the Sync screen after the upgrade.
@@ -154,7 +154,7 @@ object Migrations {
     }
 
     /**
-     * Version 6 lets a Kobo pair for relay sync (`docs/relay-sync.md`) in the same `sync_peer`
+     * Version 6 lets a Kobo pair for relay sync (since removed) in the same `sync_peer`
      * row as its local-network pairing, since both send the one event log and share its
      * `ackedSeq`.
      *
@@ -180,6 +180,34 @@ object Migrations {
         }
     }
 
+    /**
+     * Version 8 is the local app again, without the Kobo: `sync_peer`, the paired Kobos, is
+     * dropped with everything else of the Kobo sync. Nothing else changes, so every other row
+     * stays as it was.
+     */
+    val MIGRATION_6_8: Migration = object : Migration(6, 8) {
+        override suspend fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("DROP TABLE IF EXISTS `sync_peer`")
+        }
+    }
+
+    /**
+     * Version 7 was the database of the 0.5 releases, the client of a self-hosted server
+     * (since removed): version 6 without `sync_peer`, and with `outbox_event`, the events
+     * waiting to be sent to the server. Every other table is the same as version 6's, so this
+     * step only drops `outbox_event`; what the rows hold is then judged at the first start by
+     * `ServerClientUpgrade`, which can tell from the client's own records whether this is still
+     * the reader's library or the server's cache (which it clears, for an archive restore).
+     */
+    val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+        override suspend fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("DROP TABLE IF EXISTS `outbox_event`")
+            connection.execSQL("DROP TABLE IF EXISTS `sync_peer`")
+        }
+    }
+
     /** Every step, for `RoomDatabase.Builder.addMigrations`. */
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+    val ALL: Array<Migration> = arrayOf(
+        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_8, MIGRATION_7_8,
+    )
 }

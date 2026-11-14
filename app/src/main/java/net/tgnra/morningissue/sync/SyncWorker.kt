@@ -15,7 +15,7 @@ import net.tgnra.morningissue.MorningIssueApp
 /**
  * Background sync: runs [FeedSyncer.syncAll]. A run that overlaps another sync (pull to
  * refresh, the early edition build, the other periodic request) joins it instead of fetching
- * twice. Relay sync never runs in the background: it is a session on the Sync with Kobo screen.
+ * twice.
  */
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {

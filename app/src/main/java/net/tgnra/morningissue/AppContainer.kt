@@ -1,11 +1,9 @@
 package net.tgnra.morningissue
 
 import android.content.Context
-import android.content.pm.ApplicationInfo
 import android.net.ConnectivityManager
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
-import java.io.File
 import java.time.Clock
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -45,13 +43,6 @@ import net.tgnra.morningissue.edition.EditionPublisher
 import net.tgnra.morningissue.edition.EditionScheduler
 import net.tgnra.morningissue.edition.ReleaseTimes
 import net.tgnra.morningissue.embedding.EmbedderAsset
-import net.tgnra.morningissue.kobo.InstallId
-import net.tgnra.morningissue.kobo.KoboImages
-import net.tgnra.morningissue.relay.AndroidKeystoreWrapper
-import net.tgnra.morningissue.relay.ImagePreparer
-import net.tgnra.morningissue.relay.RelayCleanupWorker
-import net.tgnra.morningissue.relay.RelaySettings
-import net.tgnra.morningissue.relay.RelaySync
 import net.tgnra.morningissue.sync.CandidateFetcher
 import net.tgnra.morningissue.sync.FeedDiscovery
 import net.tgnra.morningissue.sync.FeedFetcher
@@ -111,9 +102,6 @@ interface AppContainer {
 
     /** Print now: the foreground build of an edition that was not printed in the background. */
     val editionPrinter: EditionPrinter
-
-    /** Sync with a Kobo, through the relay server built into the app; see `docs/relay-sync.md`. */
-    val relaySync: RelaySync
 
     val imageLoader: ImageLoader
     val clock: Clock
@@ -239,33 +227,4 @@ class DefaultAppContainer(context: Context) : AppContainer {
     }
 
     override val editions: EditionRepository by lazy { RoomEditionRepository(database, editionPublisher, clock) }
-
-    /** The image preparation of the Kobo sync; each package makes one, over one cache. */
-    private fun newKoboImages() = KoboImages(
-        storeFile = imageFiles::fileFor,
-        client = { okHttpClient },
-        cacheDirectory = File(appContext.cacheDir, "kobo-images"),
-        originals = CoilDiskOriginals { imageLoader.diskCache },
-    )
-
-    private val relaySyncLazy = lazy {
-        RelaySync(
-            database = database,
-            settings = RelaySettings(appContext.settingsDataStore),
-            keys = AndroidKeystoreWrapper(),
-            installId = InstallId(appContext.settingsDataStore),
-            client = { okHttpClient },
-            newImages = { newKoboImages().let { images -> ImagePreparer(images::prepare) } },
-            fullText = fullTextFetcher,
-            cacheDirectory = appContext.cacheDir,
-            clock = clock,
-            allowLocalHttp = (appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0,
-            scope = appScope,
-            onLeft = { RelayCleanupWorker.enqueue(appContext) },
-        )
-    }
-    override val relaySync: RelaySync by relaySyncLazy
-
-    /** Relay sync if anything has used it yet; a session can only be open if so. */
-    val relaySyncIfMade: RelaySync? get() = if (relaySyncLazy.isInitialized()) relaySync else null
 }

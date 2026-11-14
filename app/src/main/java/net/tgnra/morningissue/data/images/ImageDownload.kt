@@ -12,9 +12,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * How a picture is downloaded, with the store's limits: the image store's own fetches and the
- * Kobo sync's (`kobo/KoboImages`) both come through here, so a Kobo is never sent something
- * the reader would not have loaded.
+ * How a picture is downloaded, with the store's limits: every fetch of the image store comes
+ * through here.
  */
 object ImageDownload {
     /** [shared] with the store's whole-download timeout. */

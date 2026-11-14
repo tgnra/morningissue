@@ -125,7 +125,7 @@ class DefaultFullTextFetcher(
         /**
          * A feed body that ends by sending the reader to the site ("Read in full on …", "Continue
          * reading", "Read more"). Such a post is fetched when the feed is refreshed, not only
-         * when it is opened, so its text is there to read anywhere (the Kobo has no browser).
+         * when it is opened, so its text is there to read offline.
          */
         private val SENDS_TO_PAGE = Regex(
             """(read (it |this |the (full|whole|rest of the) (story|article|post|piece) )?(in full|more|on)\b.*|continue reading\b.*|keep reading\b.*|read the rest\b.*|full (story|article|post)\b.*|…|\.\.\.|\[…]|\[\.\.\.])$""",
