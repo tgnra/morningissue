@@ -502,13 +502,58 @@ class MigrationTest {
         assertEquals(listOf(41L), db.feedDao().getUrls().map { it.id })
     }
 
+    /** What version 9 must hold: version 8's library, and an empty `article_interest`. */
+    private fun assertVersion9(db: SQLiteConnection) {
+        assertVersion8(db)
+        assertEquals(0L, db.long("SELECT COUNT(*) FROM article_interest"))
+    }
+
+    @Test
+    fun version8To9AddsAnEmptyInterestTableAndKeepsTheLibrary() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(8, Migrations.ALL.toList().filter { it.endVersion <= 8 }).use(::assertVersion8)
+        // Validated against 9.json.
+        helper.runMigrationsAndValidate(9, listOf(Migrations.MIGRATION_8_9)).use(::assertVersion9)
+    }
+
+    @Test
+    fun version1To9RunsEveryStep() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(9, Migrations.ALL.toList()).use(::assertVersion9)
+    }
+
+    @Test
+    fun version7To9TakesTheServerClientsDatabaseAllTheWay() = runBlocking<Unit> {
+        helper.createDatabase(7).use { db ->
+            db.execSQL("INSERT INTO feed (id, url, title, sliderStep, addedAt, status) VALUES (41, 'https://example.org/feed', 'Example', 'AUTO', 1000, 'SUBSCRIBED')")
+        }
+        helper.runMigrationsAndValidate(9, listOf(Migrations.MIGRATION_7_8, Migrations.MIGRATION_8_9)).use { db ->
+            assertEquals(1L, db.long("SELECT COUNT(*) FROM feed"))
+            assertEquals(0L, db.long("SELECT COUNT(*) FROM article_interest"))
+        }
+    }
+
+    @Test
+    fun aRatingGoesWithItsPost() = runBlocking<Unit> {
+        helper.createDatabase(1).use(::seedVersion1)
+        helper.runMigrationsAndValidate(9, Migrations.ALL.toList()).use { db ->
+            db.execSQL("PRAGMA foreign_keys = ON")
+            db.execSQL("INSERT INTO article_interest (articleId, rating, ratedAt, profileHash) VALUES (2, 5, 9000, 'abc')")
+            db.execSQL("INSERT INTO article_interest (articleId, rating, ratedAt, profileHash) VALUES (3, 2, 9000, 'abc')")
+            db.execSQL("DELETE FROM article WHERE id = 2")
+            assertEquals(1L, db.long("SELECT COUNT(*) FROM article_interest"))
+            assertEquals(2L, db.long("SELECT rating FROM article_interest WHERE articleId = 3"))
+        }
+    }
+
     @Test
     fun aFreshInstallIsCreatedAtTheCurrentVersion() = runBlocking<Unit> {
-        // Version 8 built directly must be what the migrations arrive at; validation compares both with 8.json.
-        helper.createDatabase(8).use { db ->
+        // Version 9 built directly must be what the migrations arrive at; validation compares both with 9.json.
+        helper.createDatabase(9).use { db ->
             assertEquals(0L, db.long("SELECT COUNT(*) FROM edition_page_view"))
+            assertEquals(0L, db.long("SELECT COUNT(*) FROM article_interest"))
             assertEquals(0L, db.long("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('sync_peer', 'outbox_event')"))
         }
-        helper.runMigrationsAndValidate(8, emptyList()).close()
+        helper.runMigrationsAndValidate(9, emptyList()).close()
     }
 }

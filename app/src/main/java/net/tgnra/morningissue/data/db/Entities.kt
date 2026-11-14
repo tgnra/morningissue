@@ -332,6 +332,29 @@ class ArticleEmbeddingEntity(
 )
 
 /**
+ * The on-device model's view of one post (`ai/InterestRater`): a [rating] from 1 to 5 for
+ * "would this reader want it near the front page", given when the app was last in the
+ * foreground. The build turns it into N (`engine/Interest`). One row per post, replaced when
+ * the post is rated again; it goes with the post.
+ *
+ * [profileHash] identifies the taste profile the model was shown (`ai/TasteProfile.hash`).
+ * The build uses a rating whatever profile it was given under; the rater re-rates a post whose
+ * hash is no longer the current one when it has time to spare.
+ */
+@Entity(
+    tableName = "article_interest",
+    foreignKeys = [
+        ForeignKey(entity = ArticleEntity::class, parentColumns = ["id"], childColumns = ["articleId"], onDelete = ForeignKey.CASCADE),
+    ],
+)
+data class ArticleInterestEntity(
+    @PrimaryKey val articleId: Long,
+    val rating: Int,
+    val ratedAt: Instant,
+    val profileHash: String,
+)
+
+/**
  * One image kept in the image store (`data/images/`): the file `fileName` in the store's
  * directory holds the picture at [url], usually re-encoded smaller. The row is the store's
  * bookkeeping; display looks for the file alone.

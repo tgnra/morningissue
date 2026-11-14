@@ -1,0 +1,41 @@
+package net.tgnra.morningissue.data.db
+
+import androidx.room3.Dao
+import androidx.room3.Query
+import androidx.room3.Upsert
+
+/**
+ * The on-device model's ratings (`article_interest`) and the little the model is told about the
+ * reader. Written by `ai/InterestRater` while the app is in the foreground; read by the
+ * edition build, which never asks the model itself.
+ */
+@Dao
+abstract class InterestDao {
+    @Upsert
+    abstract suspend fun upsert(ratings: List<ArticleInterestEntity>)
+
+    @Query("SELECT * FROM article_interest WHERE articleId IN (:articleIds)")
+    protected abstract suspend fun ratingsChunk(articleIds: List<Long>): List<ArticleInterestEntity>
+
+    /** The stored ratings of [articleIds], by article ID; a post never rated is missing. */
+    suspend fun ratingsOf(articleIds: Collection<Long>): Map<Long, ArticleInterestEntity> =
+        articleIds.distinct().chunked(ArticleSignalDao.MAX_IDS).flatMap { ratingsChunk(it) }.associateBy { it.articleId }
+
+    @Query("SELECT COUNT(*) FROM article_interest")
+    abstract suspend fun count(): Int
+
+    @Query("DELETE FROM article_interest")
+    abstract suspend fun deleteAll()
+
+    /**
+     * The titles of the posts the reader most recently Liked or saved, newest first, for the
+     * taste profile. A post counts by the later of the two. Subscribed feeds only, like
+     * everything learned about the reader: a post saved from discovery is the reading list's.
+     */
+    @Query(
+        "SELECT a.title FROM engagement e JOIN article a ON a.id = e.articleId JOIN feed f ON f.id = a.feedId " +
+            "WHERE f.status = 'SUBSCRIBED' AND (e.likedAt IS NOT NULL OR e.savedAt IS NOT NULL) " +
+            "ORDER BY MAX(COALESCE(e.likedAt, 0), COALESCE(e.savedAt, 0)) DESC, a.id DESC LIMIT :limit",
+    )
+    abstract suspend fun recentLikedOrSavedTitles(limit: Int): List<String>
+}

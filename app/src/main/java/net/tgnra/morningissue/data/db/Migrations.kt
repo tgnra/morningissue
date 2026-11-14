@@ -202,8 +202,24 @@ object Migrations {
         }
     }
 
+    /**
+     * Version 9 adds `article_interest`, the on-device model's 1-to-5 rating of a post, with
+     * when it was given and a hash of the taste profile the model was shown. It starts empty:
+     * nothing was rated before, and every post is scored as if unrated (N = 1) until the model
+     * has rated it, so the first edition after the upgrade is built as before.
+     */
+    val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+        override suspend fun migrate(connection: SQLiteConnection) {
+            connection.execSQL(
+                "CREATE TABLE IF NOT EXISTS `article_interest` (`articleId` INTEGER NOT NULL, `rating` INTEGER NOT NULL, " +
+                    "`ratedAt` INTEGER NOT NULL, `profileHash` TEXT NOT NULL, PRIMARY KEY(`articleId`), " +
+                    "FOREIGN KEY(`articleId`) REFERENCES `article`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+            )
+        }
+    }
+
     /** Every step, for `RoomDatabase.Builder.addMigrations`. */
     val ALL: Array<Migration> = arrayOf(
-        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_8, MIGRATION_7_8,
+        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_8, MIGRATION_7_8, MIGRATION_8_9,
     )
 }
